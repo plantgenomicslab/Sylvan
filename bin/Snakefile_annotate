@@ -241,14 +241,15 @@ onerror:
 	print("PIPELINE ERROR - Check logs for details:")
 	print("="*80)
 	print(f"Log directory: {RESULTS_DIR}logs/")
-	print(f"Log pattern:   {{rule}}_{{wildcards}}.err")
+	print("")
+	if log:
+		print("Failed job logs:")
+		for logfile in log:
+			print(f"  cat {logfile}")
 	print("")
 	print("Quick debug commands:")
-	print(f"  cat {RESULTS_DIR}logs/RULENAME_*.err   # View specific rule log")
 	print(f"  ls -lt {RESULTS_DIR}logs/*.err | head  # Most recent error logs")
 	print(f"  grep -l 'Error' {RESULTS_DIR}logs/*.err  # Find logs with errors")
-	print("")
-	print("Common rules: pasaPrep, pasa, helixer, liftoff, STAR_paired, geneRegion2Genewise")
 	print("="*80 + "\n")
 
 onsuccess:
