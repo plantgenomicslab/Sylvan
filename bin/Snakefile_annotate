@@ -1905,6 +1905,9 @@ rule pickBetterModels:
 		{input.a} > {output.d}
 
 		perl -p -i -e 's/Integrity=[^;]+;?//g' {output.d}
+
+		# Clean up AGAT log files
+		mv -f geneModels.*.agat.log {params.results_dir}GETA/CombineGeneModels/ 2>/dev/null || true
 		"""
 rule fillingEndsOfGeneModels_ef:
 	input: d = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.d.gff3"
@@ -2764,6 +2767,9 @@ rule agat_clean_final:
 	shell: """
 		export pasa=$(ls -t {params.pasa_dir}/pasa.sqlite.gene_structures_post_PASA_updates.*.gff3 | head -n 1)
 		agat_convert_sp_gxf2gxf.pl -gff ${{pasa}} -o {params.results_dir}complete_draft.gff3
+
+		# Clean up AGAT log files
+		mv -f *.agat.log {params.results_dir} 2>/dev/null || true
 		"""
 #TODO: Can I add the filter snakemake in a modular fashion?
 # https://snakemake.readthedocs.io/en/stable/snakefiles/modularization.html#modules
