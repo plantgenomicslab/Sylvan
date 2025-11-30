@@ -1,0 +1,586 @@
+BootStrap: docker
+From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
+
+%setup
+	# Create an .ssh directory within the root directory of the Singularity container's filesystem
+	# The environment variable $SINGULARITY_ROOTFS points to the root of the container's filesystem
+	mkdir $SINGULARITY_ROOTFS/root/.ssh
+
+%runscript
+	echo "Container is managed externally by snakemake...use bin/Annotate.sh or bin/Filter.sh to run."
+
+%post
+	# Set the frontend of Debian-based systems like Ubuntu to be non-interactive to avoid manual inputs during package installation
+	export DEBIAN_FRONTEND=noninteractive
+
+
+	# Update the package index to get the latest versions and dependencies
+	# sudo chmod 1777 /temp
+	apt update -qq
+
+	# Install multiple software packages and their specific versions, including compilers, development libraries, and utilities
+	apt install -y \
+		make=4.2.1-1.2 \
+		g++=4:9.3.0-1ubuntu2 \
+		libbz2-dev \
+		liblzma-dev \
+		libparallel-forkmanager-perl \
+		genometools=1.6.1+ds-2 \
+		wget \
+		vim \
+		unzip \
+		zlib1g \
+		zlib1g-dev \
+		curl \
+		python3-dev=3.8.2-0ubuntu2 \
+		python3-pip \
+		git \
+		libhdf5-dev=1.10.4+repack-11ubuntu1 \
+		python3-pip \
+		build-essential
+
+
+	# From Helixer Dockerfile: Install Python 3 development package, Python 3 pip, Git, HDF5 development library, and build essentials \
+
+	# Remove unnecessary packages and dependencies that were automatically installed but are no longer needed
+	apt-get autoremove
+
+
+# Other software installation
+		# ---- install and configure mamba --- #
+#		wget https://repo.anaconda.com/miniconda/Miniconda3-py310_23.3.1-0-Linux-x86_64.sh -O Miniconda3-py310_23.3.1-0-Linux-x86_64.sh
+#		wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O Miniconda3-latest-Linux-x86_64.sh
+#		chmod +x Miniconda3-py310_23.3.1-0-Linux-x86_64.sh
+#		./Miniconda3-py310_23.3.1-0-Linux-x86_64.sh -b -p /opt/miniconda3
+#		ln -s /opt/miniconda3/bin/conda /usr/bin/conda
+#		conda install -y -c conda-forge mamba
+#		conda config --add channels bioconda
+#		conda config --add channels conda-forge
+
+
+		# ---- Install and Configure Mamba --- #
+
+		# Download the Mambaforge installer script from the conda-forge GitHub repository
+		#curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-$(uname)-$(uname -m).sh"
+		curl -L -O "https://github.com/conda-forge/miniforge/releases/download/23.3.1-1/Mambaforge-23.3.1-1-Linux-x86_64.sh"
+
+		# Run the downloaded Mambaforge installer script with automated options and specify the installation path to /opt/miniconda3
+		#bash Mambaforge-$(uname)-$(uname -m).sh \
+		bash Mambaforge-23.3.1-1-Linux-x86_64.sh \
+				-b \
+				-p /opt/miniconda3
+
+		# Create a symbolic link to the conda executable in /usr/bin to make it globally accessible
+		ln -s /opt/miniconda3/bin/conda /usr/bin/conda
+
+		# Update the PATH environment variable to include the Miniconda3 and Mamba executables
+		PATH=/opt/miniconda3/bin:/opt/miniconda3/condabin:$PATH
+
+		# Source the .bashrc file to apply changes to the current session
+		#. ~/.bashrc
+		#exec bash -l
+
+		# The following contents are typically added to ~/.bashrc for persistence across sessions.
+		# Since you can't source ~/.bashrc within the current shell, you will have to run these commands manually.
+		__conda_setup="$('/opt/miniconda3/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+		if [ $? -eq 0 ]; then
+				eval "$__conda_setup"
+		else
+				if [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
+						. "/opt/miniconda3/etc/profile.d/conda.sh"
+				else
+						export PATH="/opt/miniconda3/bin:$PATH"
+				fi
+		fi
+		unset __conda_setup
+
+		if [ -f "/opt/miniconda3/etc/profile.d/mamba.sh" ]; then
+				. "/opt/miniconda3/etc/profile.d/mamba.sh"
+		fi
+
+		# Initialize Mamba for the shell
+		mamba init
+
+		# Activate the Mamba environment
+		mamba activate
+
+		# Add bioconda and conda-forge to conda channels for package installation
+		#conda config --add channels bioconda
+		#conda config --add channels conda-forge
+
+		# Set the number of threads for collecting repository data to 4
+		conda config --set repodata_threads 4
+
+		# Set channel priority to 'strict' to prioritize packages from higher-priority channels
+		conda config --set channel_priority flexible
+
+		# Use Mamba to install a list of bioinformatics software with specified versions.
+		# The -y flag auto-accepts all prompts, and --json outputs the transaction information in JSON format.
+		# Multiple channels are specified for package sourcing: conda-forge and bioconda.
+		mamba install -y --json -c conda-forge -c bioconda \
+				augustus=3.4.0 \
+				bedtools=2.30.0 \
+				blast=2.10.1 \
+				bzip2=1.0.8 \
+				busco=5.4.3 \
+				edta=2.2.0 \
+				tensorflow=2.10 \
+				h5py=3.7 \
+				diamond=2.1.8 \
+				exonerate=2.4.0 \
+				fastp=0.23.4 \
+				gffread=0.12.7 \
+				gmap=2021.08.25 \
+				hisat2=2.2.1 \
+				liftoff=1.6.3 \
+				minimap2=2.22 \
+				miniprot=0.11 \
+				mmseqs2=13.45111 \
+				paraFly=r2013_01_21 \
+				perl-carp=1.38 \
+				perl-db_file \
+				perl-dbd-sqlite \
+				perl-parallel-forkmanager=2.02 \
+				pfam_scan=1.6 \
+				pblat=2.5.1 \
+				rsem=1.2.28 \
+				samtools=1.12 \
+				sambamba=0.6.6 \
+				seqkit=2.3.1 \
+				spades=3.13.1 \
+				star=2.7.10b \
+				stringtie=2.2.1 \
+				sqlite \
+				pasa=2.5.2 \
+				ucsc-blat \
+				wise2=2.4.1 \
+				zlib \
+				tqdm \
+				mosdepth \
+				python-duckdb \
+				matplotlib \
+				python=3.9 \
+				agat
+
+#	   mamba install -y --json -c conda-forge -c bioconda \
+#		bzip2=1.0.8 trimmomatic=0.39 edta=2.2.0 python=3.9 tensorflow=1.14 h5py=2.10.0 \
+#		samtools=1.12 hisat2=2.2.1 wise2=2.4.1 augustus=3.1 parafly=r2013_01_21 \
+#		perl-text-soundex=3.05 \
+#		seqkit=2.3.1 spades=3.13.1 stringtie=2.2.1 \
+#		star=2.7.10b minimap2=2.22 mmseqs2=13.45111 \
+#		gmap=2021.08.25 blast=2.10.1 liftoff=1.6.3 \
+#		sambamba=0.6.6 bedtools=2.30.0 pfam_scan=1.6 \
+#		rsem=1.2.28 miniprot=0.12-r237 exonerate=2.4.0 \
+#		gffread=0.12.7 perl-dbd-sqlite perl-db_file \
+#		pblat=2.5.1 ucsc-blat zlib sqlite \
+#		pasa=2.5.2 fastp=0.23.4  perl-parallel-forkmanager=2.02 \
+#		diamond=2.1.8 libarchive=3.2.1-2
+
+
+	# ---- Install PsiCLASS ---- #
+	# Change to the directory where source code is commonly stored
+	cd /usr/local/src
+
+	# Clone the PsiCLASS repository from GitHub
+	git clone https://github.com/splicebox/PsiCLASS.git
+
+	# Navigate into the PsiCLASS directory
+	cd PsiCLASS
+
+	# Build PsiCLASS using the make command with 2 threads, which utilizes the Makefile present in the directory
+	make
+
+	# ------ Install Helixer ------ #
+	### I think we need to move this to Conda env ####
+	#NVIDIA GPUs & CUDA
+	#Commands that run, or otherwise execute containers (shell, exec) can take an --nv option, which will setup the container’s environment to use an NVIDIA GPU
+	#and the basic CUDA libraries to run a CUDA enabled application. The --nv flag will:
+	#
+	#    Ensure that the /dev/nvidiaX device entries are available inside the container, so that the GPU cards in the host are accessible.
+	#    Locate and bind the basic CUDA libraries from the host into the container, so that they are available to the container, and match the kernel GPU driver on the host.
+	#    Set the LD_LIBRARY_PATH inside the container so that the bound-in version of the CUDA libraries are used by applications run inside the container.
+	## Create conda environment - mikado also needs python 3.8
+	mamba create \
+		-y \
+		--json \
+		-n helixer \
+		-c conda-forge \
+		-c bioconda \
+		python=3.10 \
+		python-devtools \
+
+	mamba activate helixer
+
+	## Install rust
+	# Navigate to the home directory of the current user.
+	cd
+
+	# Download the Rust installation script from the official website quietly, saving it as 'rustup.sh'.
+	wget --retry-connrefused \
+		--waitretry=1 \
+		--read-timeout=20 \
+		--timeout=15 \
+		--tries=0 \
+		--continue \
+		 -q \
+		https://sh.rustup.rs \
+		-O rustup.sh
+
+	# Change the permissions of the downloaded 'rustup.sh' script to make it executable.
+	chmod 775 rustup.sh
+
+	# Execute the 'rustup.sh' script with the '-y' option to proceed without asking for confirmation.
+	./rustup.sh -y
+
+	# Remove the 'rustup.sh' script as it is no longer needed after installation.
+	rm rustup.sh
+
+	# Add the Cargo binary path to the system's PATH environment variable.
+	# This allows you to run Cargo commands without specifying the full path.
+	export PATH="/root/.cargo/bin:${PATH}"
+
+	## Install Helixer
+	# Navigate to /usr/local/src directory
+	cd /usr/local/src
+
+	# Clone the Helixer repository from GitHub into a new folder called Helixer
+	git clone https://github.com/plantgenomicslab/Helixer.git Helixer
+
+	# Install the required Python packages as per Helixer's requirements.txt file
+	pip install "tensorflow==2.13.0" \
+		"nni==2.10.1" \
+		"typing-extensions==4.5.0" \
+		"typeguard==2.13.3" \
+		"numpy==1.24.3" \
+		"tensorrt==8.6.1"
+
+	pip install --no-cache-dir \
+		-r /usr/local/src/Helixer/requirements.3.10.txt
+
+	# Navigate into the Helixer directory and install the package
+	cd Helixer && pip install --no-cache-dir .
+
+	# Upgrade tensorrt to a version less than 8 and install tensorflow
+#	pip install --upgrade "tensorrt<8" tensorrt==8.6.1
+
+	## Install Helixer_Post
+
+	# Navigate back to /usr/local/src directory
+	cd /usr/local/src
+
+	# Clone the HelixerPost repository from GitHub
+	git clone https://github.com/plantgenomicslab/HelixerPost.git
+
+	# Navigate into HelixerPost directory and checkout the specified commit
+	# MIGHT NEED TO UPDATE FOR LATER
+	cd HelixerPost && \
+		git checkout d180ad8b353fa8da69342bdb924ecfaeea9464af
+
+	# Navigate into the helixer_post_bin directory and build the release version using cargo
+	cd helixer_post_bin && cargo build --release
+
+	# Move the built binary to /usr/local/bin for global access
+	mv /usr/local/src/HelixerPost/target/release/helixer_post_bin /usr/local/bin
+
+	# Remove unnecessary build files
+	rm -rf /usr/local/src/HelixerPost/target/release/
+
+	# Install helixer models
+	mkdir /usr/local/src/Helixer/models
+	wget -O /usr/local/src/Helixer/models/land_plant.h5 \
+          https://raw.githubusercontent.com/wyim-pgl/genome_annotation_installations/main/Helixer_models/land_plant_v0.3_a_0400.h5
+	wget -O /usr/local/src/Helixer/models/fungi.h5 \
+          https://raw.githubusercontent.com/wyim-pgl/genome_annotation_installations/main/Helixer_models/fungi_v0.3_a_0400.h5
+	wget -O /usr/local/src/Helixer/models/vertebrate.h5 \
+          https://raw.githubusercontent.com/wyim-pgl/genome_annotation_installations/main/Helixer_models/vertebrate_v0.3_a_0400.h5
+
+	mamba deactivate
+
+	# ---- Install GETA --- #
+
+	# Navigate to the /usr/local/bin directory where executables are commonly stored
+	cd /usr/local/bin
+
+	# Clone the GETA repository from GitHub
+	# The commented line is an alternative using SSH, but the next line uses HTTPS for cloning
+	# git clone git@github.com:plantgenomicslab/geta.git #
+	git clone https://github.com/plantgenomicslab/geta
+
+	# ---- Install GETA Dependencies ---- #
+
+	# Note: Many dependencies are already installed by previous conda installations
+
+	# ---- Install LncDC ---- #
+	wget https://github.com/lim74/LncDC/archive/refs/tags/v1.3.5.zip \
+				-P /usr/local/src
+	unzip -qq /usr/local/src/v1.3.5.zip -d "/usr/local/src/"
+	mamba create \
+		-y \
+		--json \
+		-n lncdc \
+		-c conda-forge \
+		-c bioconda \
+		biopython \
+		imbalanced-learn=0.10.1 \
+		numpy=1.23.5 \
+		pandas=1.5 \
+		python=3.9.15 \
+		scikit-learn=1.1.3 \
+		tqdm=4.65.0 \
+		viennarna=2.5.0 \
+		xgboost=1.7.1
+	cd /usr/local/src/LncDC-1.3.5/
+#	ls /usr/local/src/LncDC-1.3.5/
+#	ls -algh setup.py
+#	chmod +x setup.py
+#	mamba run -n lncdc \
+#		"python setup.py install"
+
+	mamba activate lncdc
+	python setup.py install
+	mamba deactivate
+	cd
+	# ---- LncDC DB download ---- #
+	wget --directory-prefix /usr/local/share/lncdc_db \
+		https://raw.githubusercontent.com/wyim-pgl/lncdc_db/main/LncDC_plant_db/plant_selected_nostructure_hexamer_table.csv \
+		https://raw.githubusercontent.com/wyim-pgl/lncdc_db/main/LncDC_plant_db/plant_selected_nostructure_imputer_SIF_PF.pkl \
+		https://raw.githubusercontent.com/wyim-pgl/lncdc_db/main/LncDC_plant_db/plant_selected_nostructure_scaler_SIF_PF.pkl \
+		https://raw.githubusercontent.com/wyim-pgl/lncdc_db/main/LncDC_plant_db/plant_selected_nostructure_xgb_model_SIF_PF.pkl
+
+#	python /usr/local/src/LncDC-1.3.5/bin/lncDC.py \
+#		-x /usr/local/share/lncdc_db/plant_selected_nostructure_hexamer_table.csv \
+#		-m /usr/local/share/lncdc_db/plant_selected_nostructure_xgb_model_SIF_PF.pkl \
+#		-p /usr/local/share/lncdc_db/plant_selected_nostructure_imputer_SIF_PF.pkl \
+#		-s /usr/local/share/lncdc_db/plant_selected_nostructure_scaler_SIF_PF.pkl \
+#		-t 24 \
+#		-i ~/scratch/data/iceplant/improvement/others/NA.cdna \
+#		-o ~/scratch/data/iceplant/improvement/others/NA.csv
+
+	# Clean all unused packages and caches to free up space
+	mamba clean --all -f --yes
+
+	# ---- Install Pfam Database ---- #
+	# Download the Pfam database from the EMBL-EBI FTP site to the /usr/local/src directory
+	wget --retry-connrefused \
+		--waitretry=1 \
+		--read-timeout=20 \
+		--timeout=15 \
+		--tries=0 \
+		--continue \
+		-P /usr/local/src \
+		ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.gz
+
+	wget --retry-connrefused \
+		--waitretry=1 \
+		--read-timeout=20 \
+		--timeout=15 \
+		--tries=0 \
+		--continue \
+		-P /usr/local/src \
+		ftp://ftp.ebi.ac.uk/pub/databases/Pfam/current_release/Pfam-A.hmm.dat.gz
+
+
+#	cd /usr/local/src
+
+	# Decompress the downloaded Pfam-A.hmm.gz file
+#	gzip -dc Pfam-A.hmm.gz > Pfam-A.hmm
+	zcat /usr/local/src/Pfam-A.hmm.gz > /usr/local/src/Pfam-A.hmm
+        zcat /usr/local/src/Pfam-A.hmm.dat.gz > /usr/local/src/Pfam-A.hmm.dat
+	# Press the HMM database for use with HMMER tools
+	/opt/miniconda3/bin/hmmpress /usr/local/src/Pfam-A.hmm
+
+	# Remove the compressed Pfam database file
+	rm /usr/local/src/Pfam-A.hmm.gz
+	cd
+
+	# ---- Configure RepeatMasker (installed as an EDTA dependency) ---- #
+	# Navigate to the RepeatMasker directory
+	cd /opt/miniconda3/share/RepeatMasker
+
+	# Change permissions for Perl modules and the configure script
+	chmod 644 *.pm configure
+
+	# Run the configuration script for RepeatMasker
+	printf "/opt/miniconda3/bin/trf\n2\n/opt/miniconda3/bin\nY\n5" | perl ./configure
+
+	# ---- Configure RepeatModeler ---- #
+	# Navigate to the RepeatModeler directory
+	cd /opt/miniconda3/share/RepeatModeler/
+
+	# Change permissions for Perl modules and the configure script
+	chmod 644 *.pm configure
+
+	# Run the configuration script for RepeatModeler with additional options specified
+	printf "\n/opt/miniconda3/bin/perl\ny\n" | perl ./configure \
+		--repeatmasker_dir /opt/miniconda3/share/RepeatMasker \
+		--recon_dir /opt/miniconda3/bin \
+		--rscout_dir /opt/miniconda3/bin \
+		--trf_prgm /opt/miniconda3/bin/trf \
+		--cdhit_dir /opt/miniconda3/bin \
+		--rmblast_dir /opt/miniconda3/bin \
+		--ltr_retriever_dir /opt/miniconda3/bin \
+		--genometools_dir /opt/miniconda3/bin \
+		--mafft_dir /opt/miniconda3/bin \
+		--ninja_dir /opt/miniconda3/bin
+
+
+	# Navigate to the RepeatMasker's Libraries directory in the conda installation
+	# Create the 'Libraries' directory if it doesn't already exist
+	cd /opt/miniconda3/share/RepeatMasker/ && mkdir -p Libraries && cd Libraries
+
+	# Download the Dfam 3.6 archive from the official Dfam website
+	# wget https://www.dfam.org/releases/Dfam_3.6/families/archive/Dfam.h5.gz
+
+	# Decompress the downloaded Dfam archive file using the 'tar' command
+	# Note: Since the file extension is '.gz', 'tar zxf' is used for decompression
+	# tar zxf Dfam.h5.gz
+
+
+	# ---- Install Java ---- #
+	# Download Java Runtime Environment (JRE) 8u281 from Oracle's website
+	# MIGHT NEED TO UPDATE FOR LATER
+        wget --retry-connrefused \
+		--waitretry=1 \
+		--read-timeout=20 \
+		--timeout=15 \
+		--tries=0 \
+		--continue \
+		https://javadl.oracle.com/webapps/download/AutoDL?BundleId=244058_89d678f2be164786b292527658ca1605 \
+		-O /usr/local/bin/jre-8u281-linux-x64.tar.gz
+
+	# Extract the downloaded tar.gz file to /usr/local/bin
+	tar zxf /usr/local/bin/jre-8u281-linux-x64.tar.gz \
+		-C /usr/local/bin/
+
+	# Remove any existing Java executable in the Miniconda3 directory
+	mv /opt/miniconda3/bin/java /opt/miniconda3/bin/java_old
+
+	# Create a symbolic link to the newly installed Java executable in the Miniconda3 bin directory
+	ln -s /usr/local/bin/jre1.8.0_281/bin/java /opt/miniconda3/bin/java
+
+	# Remove the downloaded tar.gz file
+	rm /usr/local/bin/jre-8u281-linux-x64.tar.gz
+
+	# ---- Install EvidenceModeler (EVM) ---- #
+	# Download EVM version 2.1.0 from GitHub
+	wget --retry-connrefused \
+		--waitretry=1 \
+		--read-timeout=20 \
+		--timeout=15 \
+		--tries=0 \
+		--continue \
+		https://github.com/EVidenceModeler/EVidenceModeler/releases/download/EVidenceModeler-v2.1.0/EVidenceModeler-v2.1.0.tar.gz \
+		-O /usr/local/src/v2.1.0.tar.gz
+
+	# Extract the downloaded tar.gz file to /usr/local/bin
+	tar zxf /usr/local/src/v2.1.0.tar.gz -C /usr/local/bin
+
+	# Set the EVM_HOME environment variable
+	export EVM_HOME=/usr/local/bin/EVidenceModeler-v2.1.0/
+
+	# Navigate to the EVM_HOME directory and compile EVM with 2 threads
+	cd $EVM_HOME
+	make -j 2
+
+	# Navigate back to the previous directory
+	cd -
+
+	# Remove the downloaded tar.gz file
+	rm /usr/local/src/v2.1.0.tar.gz
+
+
+	# ---- Install PASA ---- #
+#	wget https://github.com/PASApipeline/PASApipeline/releases/download/pasa-v2.5.2/PASApipeline-v2.5.2.FULL.tar.gz \
+#		-O /usr/local/bin/PASApipeline-v2.5.2.FULL.tar.gz
+#	tar -xzvf /usr/local/bin/PASApipeline-v2.5.2.FULL.tar.gz -C /usr/local/bin
+#	export PASAHOME=/usr/local/bin/PASApipeline-v2.5.2/
+#	cd $PASAHOME
+#	cp /usr/include/zlib.h /usr/include/zconf.h /usr/lib/x86_64-linux-gnu/libz.a /usr/local/bin/PASApipeline-v2.5.2/pasa-plugins/cdbtools/tgi_cl
+#	make -j 2
+#	cd -
+#	rm /usr/local/bin/PASApipeline-v2.5.2.FULL.tar.gz
+
+
+	# ---- Install EviGene ---- #
+	# Download EviGene package
+	wget --retry-connrefused \
+		--waitretry=1 \
+		--read-timeout=20 \
+		--timeout=15 \
+		--tries=0 \
+		--continue \
+		http://arthropods.eugenes.org/EvidentialGene/other/evigene_old/evigene.tar \
+		-O /usr/local/bin/evigene.tar
+
+	# Create a directory to extract EviGene
+	mkdir /usr/local/bin/evigene
+
+	# Extract EviGene package into the created directory
+	tar -xf /usr/local/bin/evigene.tar \
+		-C /usr/local/bin/evigene
+
+	# This script configures the global bash environment for all users by modifying /etc/bash.bashrc.
+
+	# Source the conda configuration script:
+	# Adds a line to /etc/bash.bashrc to source the conda.sh script from the Miniconda installation.
+	# This step ensures that conda & mamba's environment setup is executed for all bash sessions, enabling conda commands globally.
+
+	echo ". /opt/miniconda3/etc/profile.d/conda.sh" >> /etc/bash.bashrc
+	echo ". /opt/miniconda3/etc/profile.d/mamba.sh" >> /etc/bash.bashrc
+
+	# Initialize mamba for all users:
+	# This ensures that mamba's shell integration is automatically configured for any shell session, without manual intervention.
+
+	echo "mamba init --quiet --all" >> /etc/bash.bashrc
+
+	# Activate the base environment by default:
+
+	echo "mamba activate base" >> /etc/bash.bashrc
+
+%startscript
+
+
+%environment
+
+	# Set the Locale to 'C' to ensure consistent behavior across different systems
+	export LC_ALL=C
+
+        # Add the path for Miniconda3 executables to the PATH environment variable
+        export PATH=/opt/miniconda3/bin:/opt/miniconda3/condabin:/opt/miniconda3/scripts:$PATH
+
+	# Add the path for GETA executables to the PATH environment variable
+	export PATH=/usr/local/bin/geta/bin:$PATH
+
+	# Add the path for PsiCLASS executables to the PATH environment variable
+	export PATH=/usr/local/src/PsiCLASS:$PATH
+
+	# Add the path for EVidenceModeler executables to the PATH environment variable
+	export PATH=/usr/local/bin/EVidenceModeler-v2.1.0/:$PATH
+
+	# Add the path for EvmUtils, which is part of EVidenceModeler, to the PATH environment variable
+	export PATH=/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/:$PATH
+
+	# Set the path for Evigene executables, enabling direct execution without specifying the full path
+	export evigene=/usr/local/bin/evigene
+
+	# Set the Wise2 configuration directory, which Genewise will reference for its configurations
+	export WISECONFIGDIR=/opt/miniconda3/share/wise2/wisecfg
+
+	# Set the path to the configuration files for the Augustus gene prediction tool within the GETA directory
+	export AUGUSTUS_CONFIG_PATH=./GETA/Augustus/config
+
+%labels
+	Author Johnny Lomas (jlomas@nevada.unr.edu)
+	Version v.0.0.1
+
+%help
+
+
+██████╗░██╗░░░░░░█████╗░███╗░░██╗████████╗  ░██████╗░███████╗███╗░░██╗░█████╗░███╗░░░███╗██╗░█████╗░░██████╗ ██╗░░░░░░█████╗░██████╗░
+██╔══██╗██║░░░░░██╔══██╗████╗░██║╚══██╔══╝  ██╔════╝░██╔════╝████╗░██║██╔══██╗████╗░████║██║██╔══██╗██╔════╝ ██║░░░░░██╔══██╗██╔══██╗
+██████╔╝██║░░░░░███████║██╔██╗██║░░░██║░░░  ██║░░██╗░█████╗░░██╔██╗██║██║░░██║██╔████╔██║██║██║░░╚═╝╚█████╗ ░██║░░░░░███████║██████╦╝
+██╔═══╝░██║░░░░░██╔══██║██║╚████║░░░██║░░░  ██║░░╚██╗██╔══╝░░██║╚████║██║░░██║██║╚██╔╝██║██║██║░░██╗░╚═══██╗ ██║░░░░░██╔══██║██╔══██╗
+██║░░░░░███████╗██║░░██║██║░╚███║░░░██║░░░  ╚██████╔╝███████╗██║░╚███║╚█████╔╝██║░╚═╝░██║██║╚█████╔╝██████╔╝ ███████╗██║░░██║██████╦╝
+╚═╝░░░░░╚══════╝╚═╝░░╚═╝╚═╝░░╚══╝░░░╚═╝░░░  ░╚═════╝░╚══════╝╚═╝░░╚══╝░╚════╝░╚═╝░░░░░╚═╝╚═╝░╚════╝░╚═════╝░ ╚══════╝╚═╝░░╚═╝╚═════╝░
+
+https://github.com/plantgenomicslab/Genome_Annotation
