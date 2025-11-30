@@ -4,7 +4,9 @@ set -x
 set -e
 
 # Set config path (can be overridden via SYLVAN_CONFIG environment variable)
-export SYLVAN_CONFIG="${SYLVAN_CONFIG:-config_annotate.yml}"
+export SYLVAN_CONFIG="${SYLVAN_CONFIG:-config/config_annotate.yml}"
+# Derive cluster config from SYLVAN_CONFIG
+CLUSTER_CONFIG="${SYLVAN_CLUSTER_CONFIG:-$(dirname "$SYLVAN_CONFIG")/cluster_annotate.yml}"
 
 # Rerun incomplete jobs with mtime trigger to detect changed files
 snakemake -p \
@@ -15,8 +17,7 @@ snakemake -p \
 	--keep-going \
 	--keep-incomplete \
 	--stats annotation_runtime_stats.json \
-	--report report.html \
-	--cluster-config "$SYLVAN_CONFIG" \
+	--cluster-config "$CLUSTER_CONFIG" \
 	--snakefile bin/Snakefile_annotate \
 	--groups Sam2Transfrag=group0 --group-components group0=100 \
 	--max-jobs-per-second 50 \
@@ -29,3 +30,6 @@ snakemake -p \
 			-t {cluster.time} -o {cluster.output} -e {cluster.error}" \
 	--singularity-args "--cleanenv --env PYTHONNOUSERSITE=1" \
 		"$@"
+
+# To generate report after run:
+# snakemake --report report.html --snakefile bin/Snakefile_annotate
