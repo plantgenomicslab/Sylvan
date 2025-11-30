@@ -92,12 +92,13 @@ sudo singularity build sylvan.sif Sylvan.def
 | Neighbor species | GFF3 + genome FASTA files | `liftoff.neighbor_gff`, `liftoff.neighbor_fasta` |
 | Repeat library | EDTA output (`.TElib.fa`) | `geta.RM_lib` |
 | Singularity image | Path to `sylvan.sif` | `singularity` |
+| RexDB (filter) | RepeatExplorer protein DB (retroelement proteins); e.g. Viridiplantae_v4.0.fasta from https://github.com/repeatexplorer/rexdb | `RexDB` |
 
 ### Filter Phase (additional)
 
 | Input | Description | Config Field |
 |-------|-------------|--------------|
-| RexDB | Plant repeat database | `RexDB` |
+| RexDB | Plant repeat database (e.g. Viridiplantae_v4.0.fasta) | `RexDB` |
 | BUSCO lineage | e.g., `eudicots_odb10` | `busco_lin` |
 
 ## Configuration

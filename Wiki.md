@@ -111,6 +111,8 @@ sbatch -A [account] -p [partition] -c 1 --mem=1g \
 - All intermediate/final results are written under the repo root `results/`.  
 - RepeatMasker/RepeatModeler run inside `results/GETA/RepeatMasker/...`, so `.RepeatMaskerCache` and `RM_*` temp folders also stay there.  
 - EVM commands and outputs live in `results/EVM/`; no `EVM -> results/EVM` symlink is needed.
+- For the filter pipeline, set `RexDB` to a RepeatExplorer protein DB (e.g., Viridiplantae_v4.0.fasta from https://github.com/repeatexplorer/rexdb). You can download directly via:  
+  `wget -O toydata/misc/Viridiplantae_v4.0.fasta https://raw.githubusercontent.com/repeatexplorer/rexdb/refs/heads/main/Viridiplantae_v4.0.fasta`
 
 ### Expected Runtime (Toy Data)
 
