@@ -243,11 +243,9 @@ onerror:
 	print(f"Log directory: {RESULTS_DIR}logs/")
 	print("")
 	if log:
-		print("Failed job logs:")
-		for logfile in log:
-			print(f"  cat {logfile}")
+		print(f"Snakemake log: cat {log}")
 	print("")
-	print("Quick debug commands:")
+	print("Debug commands:")
 	print(f"  ls -lt {RESULTS_DIR}logs/*.err | head  # Most recent error logs")
 	print(f"  grep -l 'Error' {RESULTS_DIR}logs/*.err  # Find logs with errors")
 	print("="*80 + "\n")
@@ -1425,7 +1423,7 @@ rule augustusWithHints:
 			seqLength = line[1]
 		
 		if seqLength > segSize:
-			shell(f"export AUGUSTUS_CONFIG_PATH={params.results_dir}GETA/Augustus/config && \
+			shell(f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(pwd)/{params.results_dir}GETA/Augustus/config && \
 			singularity exec {params.singularity} augustus \
 			--gff3=on \
 			--species={params.species} \
@@ -1436,7 +1434,7 @@ rule augustusWithHints:
 			--min_intron_len={mil} \
 			--softmasking=1 {input.masked} > {output}")
 		else:
-			shell(f"export AUGUSTUS_CONFIG_PATH={params.results_dir}GETA/Augustus/config && \
+			shell(f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(pwd)/{params.results_dir}GETA/Augustus/config && \
 			singularity exec {params.singularity} augustus \
 			--gff3=on \
 			--species={params.species} \
