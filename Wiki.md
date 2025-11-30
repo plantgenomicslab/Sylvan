@@ -246,7 +246,6 @@ toydata/
 | aly4 | *Arabidopsis lyrata* | Lyrate rockcress |
 | cru4 | *Capsella rubella* | Pink shepherd's purse |
 | chi4 | *Cardamine hirsuta* | Hairy bittercress |
-| ath4 | *Arabidopsis thaliana* | Thale cress |
 
 ### RNA-seq Samples
 
@@ -301,9 +300,7 @@ The toy data was tested on:
 
 ### Runtime Statistics
 
-The following chart shows the runtime distribution across all pipeline rules when running on the toy dataset. Runtimes are displayed on a logarithmic scale (seconds).
-
-![Runtime Statistics](https://github.com/plantgenomicslab/Sylvan/blob/main/docs/images/runtime_benchmark.png?raw=true)
+The following summarizes the runtime distribution across all pipeline rules when running on the toy dataset.
 
 **Key observations:**
 - **Most time-consuming steps**: `aggregate_CombineGeneModels` (~50,000s), `geneRegion2Genewise` (~1,000s), and `Sam2Transfrag` (~100-200s) are the bottlenecks
