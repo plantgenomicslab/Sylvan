@@ -307,6 +307,7 @@ rule RepeatMasker_species:
 		results_dir = RESULTS_DIR
 	singularity: image
 	shell:"""
+		cd {params.results_dir}GETA/RepeatMasker/repeatMasker/ && \
 		RepeatMasker {params.args} \
 			-pa {threads} \
 			-species {params.species} \
@@ -322,9 +323,10 @@ rule RepeatModeler:
 	params: results_dir = RESULTS_DIR
 	singularity: image
 	shell:"""
-		if [ ! -e  {params.results_dir}GETA/RepeatMasker/repeatModeler/BuildDatabase.ok ]; then
+		cd {params.results_dir}GETA/RepeatMasker/repeatModeler && \
+		if [ ! -e  BuildDatabase.ok ]; then
 		  BuildDatabase -name {params.results_dir}GETA/RepeatMasker/repeatModeler/species -engine ncbi {input.genome_fasta}
-		  touch {params.results_dir}GETA/RepeatMasker/repeatModeler/BuildDatabase.ok
+		  touch BuildDatabase.ok
 		fi
 
 		RepeatModeler \
@@ -350,6 +352,7 @@ rule RepeatMasker_custom:
 		results_dir = RESULTS_DIR
 	singularity: image
 	shell:"""
+		cd {params.results_dir}GETA/RepeatMasker/repeatModeler && \
 		RepeatMasker {params.args} \
 			-pa {threads} \
 			-lib {input.lib} \
