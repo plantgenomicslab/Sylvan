@@ -101,6 +101,26 @@ sudo singularity build sylvan.sif Sylvan.def
 
 ## Configuration
 
+Sylvan uses two separate configuration files:
+
+| File | Purpose |
+|------|---------|
+| `config_annotate.yml` | **Pipeline options**: input paths, species parameters, tool settings |
+| `cluster_annotate.yml` | **SLURM resources**: CPU, memory, partition for each rule |
+
+**`config_annotate.yml`** contains:
+- Input file paths (genome, RNA-seq, proteins, neighbor species)
+- Species-specific settings (Helixer model, Augustus species)
+- Tool parameters (max intron length, EVM weights)
+- Output prefix and directories
+
+**`cluster_annotate.yml`** contains:
+- SLURM account and partition
+- Per-rule resource allocation (CPUs, memory, time limit)
+- Log file locations
+
+This separation allows you to reuse the same pipeline config across different clusters by only changing the cluster config.
+
 Copy and edit the configuration files:
 
 ```bash
