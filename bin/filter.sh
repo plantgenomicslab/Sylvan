@@ -3,6 +3,10 @@
 set -x
 set -e
 
+mkdir -p results/TMP
+export TMPDIR="$(pwd)/results/TMP"
+export SLURM_TMPDIR="$TMPDIR"
+
 snakemake -p --rerun-incomplete --cluster-config config_filter.yml \
 		--rerun-triggers mtime \
 		--snakefile bin/Snakefile_filter \

@@ -3,6 +3,10 @@
 set -x
 set -e
 
+mkdir -p results/TMP
+export TMPDIR="$(pwd)/results/TMP"
+export SLURM_TMPDIR="$TMPDIR"
+
 # Set config path (can be overridden via SYLVAN_CONFIG environment variable)
 export SYLVAN_CONFIG="${SYLVAN_CONFIG:-config/config_annotate.yml}"
 # Derive cluster config from SYLVAN_CONFIG

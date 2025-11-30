@@ -3,6 +3,10 @@
 set -x
 set -e
 
+mkdir -p results/TMP
+export TMPDIR="$(pwd)/results/TMP"
+export SLURM_TMPDIR="$TMPDIR"
+
 # Set config path for Snakefile
 export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
 
