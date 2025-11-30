@@ -2680,6 +2680,11 @@ rule writeEVMCommands:
 	shell: """
 			export TMPDIR=./{params.results_dir}TMP
 			export SLURM_TMPDIR=./{params.results_dir}TMP
+
+			# Create symlink EVM -> results/EVM so write_EVM_commands.pl can find partition directories
+			# The partitions_list.out contains paths like EVM/Chr4_1/... which the script expects to find
+			ln -sfn {params.results_dir}EVM EVM
+
 			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/write_EVM_commands.pl \
 			--genome $(pwd)/{params.genome} \
 			--weights $(pwd)/{params.weight} \
@@ -2698,6 +2703,8 @@ rule runEVM:
 	params: results_dir = RESULTS_DIR
 	singularity: image
 	shell: """
+		# Ensure symlink exists for EVM commands (they reference EVM/ paths)
+		ln -sfn {params.results_dir}EVM EVM 2>/dev/null || true
 		if [ -s {input} ]; then
 			bash {params.results_dir}EVM/commands.{wildcards.evm_num}.list
 		fi
@@ -2717,6 +2724,9 @@ rule recombineEVM:
 			export TMPDIR=./{params.results_dir}TMP
 			export SLURM_TMPDIR=./{params.results_dir}TMP
 
+			# Ensure symlink exists for EVM scripts
+			ln -sfn {params.results_dir}EVM EVM 2>/dev/null || true
+
 			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/recombine_EVM_partial_outputs.pl \
 			--partitions {params.results_dir}EVM/partitions_list.out \
 			--output_file_name $(pwd)/{params.results_dir}EVM/evm.out
@@ -2727,6 +2737,9 @@ rule recombineEVM:
 			--genome {params.genome}
 
 			find . -regex '.*\\/evm.out.gff3' -exec cat {{}} \\; > {output}
+
+			# Clean up EVM symlink
+			rm -f EVM
 		"""
 
 #TODO: Use snakemake 'ensure' to more robustly check for proper output
