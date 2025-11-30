@@ -549,13 +549,13 @@ rule mergeSTAR:
 		echo "samtools merge -f --threads {params.threads_full} {params.results_dir}GETA/STAR/STAR.merge.bam {input}" | \
 		singularity exec {params.singularity} bash -c "read -u 0 line; set -- \$line; exec \"\$@\""
 		
+		mkdir -p {params.results_dir}GETA/STAR/sambamba_tmp/merge
 		singularity exec {params.singularity} \
-		sambamba sort -p \
-		  --memory-limit={params.sort_mem} \
-		  --tmpdir={params.results_dir}GETA/STAR/sambamba_tmp/merge \
-		  --nthreads={params.sort_threads} \
-		  {params.results_dir}GETA/STAR/STAR.merge.bam \
-		  -o {params.results_dir}GETA/STAR/STAR.sort.bam
+		samtools sort \
+		  -@ {params.sort_threads} \
+		  -T {params.results_dir}GETA/STAR/sambamba_tmp/merge/sort \
+		  -o {params.results_dir}GETA/STAR/STAR.sort.bam \
+		  {params.results_dir}GETA/STAR/STAR.merge.bam
 
 		rm {params.results_dir}GETA/STAR/STAR.merge.bam
 
