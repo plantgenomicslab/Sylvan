@@ -107,6 +107,11 @@ sbatch -A [account] -p [partition] -c 1 --mem=1g \
   --wrap="./bin/annotate_toydata.sh"
 ```
 
+**Output locations**  
+- All intermediate/final results are written under the repo root `results/`.  
+- RepeatMasker/RepeatModeler run inside `results/GETA/RepeatMasker/...`, so `.RepeatMaskerCache` and `RM_*` temp folders also stay there.  
+- EVM commands and outputs live in `results/EVM/`; no `EVM -> results/EVM` symlink is needed.
+
 ### Expected Runtime (Toy Data)
 
 | Stage | Time |

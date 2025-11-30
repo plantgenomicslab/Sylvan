@@ -17,6 +17,7 @@ The workflow includes:
 - **Ab Initio Prediction**: Helixer (deep learning) and Augustus (HMM-based)
 - **Liftover**: LiftOff for transferring annotations from neighbor species
 - **Evidence Combination**: EvidenceModeler (EVM) integration with PASA updates
+- **Consistent outputs**: All intermediate/final outputs live under `<repo>/results/` (e.g., `results/EVM`, `results/GETA/RepeatMasker/...`); no working-directory-sensitive symlinks.
 
 ## Features
 
@@ -135,6 +136,11 @@ pasa:
   ncpus: 64
   threads: 64
   memory: 216g
+
+Output locations:
+- `results/` is created under the repo root; all modules write there regardless of current working directory.
+- RepeatMasker/RepeatModeler run inside `results/GETA/RepeatMasker/...`, so temporary `.RepeatMaskerCache`/`RM_*` folders also stay under `results/`.
+- EVM commands/outputs live in `results/EVM/` (absolute paths in command lists; no `EVM -> results/EVM` symlink needed).
 ```
 
 This separation allows you to reuse the same pipeline config across different clusters by only changing the cluster config.
