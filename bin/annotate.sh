@@ -16,7 +16,6 @@ snakemake -p \
 	--keep-going \
 	--keep-incomplete \
 	--stats annotation_runtime_stats.json \
-	--report report.html \
 	--cluster-config "$CLUSTER_CONFIG" \
 	--snakefile bin/Snakefile_annotate \
 	--groups Sam2Transfrag=group0 --group-components group0=100 \
@@ -30,3 +29,9 @@ snakemake -p \
 			-t {cluster.time} -o {cluster.output} -e {cluster.error}" \
 	--singularity-args "--cleanenv --env PYTHONNOUSERSITE=1" \
 		"$@"
+
+# To generate report after run:
+# snakemake --report report.html --snakefile bin/Snakefile_annotate
+
+# To force rerun:
+# ./bin/annotate.sh --forceall
