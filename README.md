@@ -115,9 +115,27 @@ Sylvan uses two separate configuration files:
 - Output prefix and directories
 
 **`cluster_annotate.yml`** contains:
-- SLURM account and partition
+- SLURM account and partition (in `__default__` section)
 - Per-rule resource allocation (CPUs, memory, time limit)
 - Log file locations
+
+Example structure:
+```yaml
+__default__:
+  account: your-account      # SLURM billing account
+  partition: your-partition  # SLURM partition (queue)
+  memory: 4g                 # Default memory
+  ncpus: 1                   # Default CPUs
+  time: 14-00:00:00          # Max wall time
+  output: results/logs/{rule}_{wildcards}.out
+  error: results/logs/{rule}_{wildcards}.err
+
+# Override per rule:
+pasa:
+  ncpus: 64
+  threads: 64
+  memory: 216g
+```
 
 This separation allows you to reuse the same pipeline config across different clusters by only changing the cluster config.
 
