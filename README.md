@@ -108,6 +108,30 @@ cp config/config_annotate.yml my_config.yml
 cp config/cluster_annotate.yml my_cluster.yml
 ```
 
+### Using Custom Config Location
+
+Set the `SYLVAN_CONFIG` environment variable to use a config file in a different location:
+
+```bash
+# For toydata
+export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
+
+# For custom project
+export SYLVAN_CONFIG="/path/to/my_config.yml"
+
+# The cluster config is auto-derived (cluster_annotate.yml in same directory)
+# Or set explicitly:
+export SYLVAN_CLUSTER_CONFIG="/path/to/my_cluster.yml"
+```
+
+This is required for any Snakemake command (dry-run, unlock, etc.):
+
+```bash
+export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
+snakemake -n --snakefile bin/Snakefile_annotate  # dry-run
+snakemake --unlock --snakefile bin/Snakefile_annotate  # unlock
+```
+
 ### Key Parameters
 
 | Parameter | Description | Example |
