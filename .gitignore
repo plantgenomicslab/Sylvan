@@ -5,3 +5,5 @@ genome.fasta.mod
 genome.*
 slurm-*
 results/
+*.err
+*.out
