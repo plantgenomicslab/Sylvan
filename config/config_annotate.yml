@@ -135,9 +135,9 @@ STAR_single:
 mergeSTAR:
   ncpus: 12
   threads: 12
-  memory: 96g
-  sortthreads: 8
-  sortmem: 64G
+  memory: 220g
+  sortthreads: 12
+  sortmem: 16G
 STAR_split:
   ncpus: 4
   threads: 4
