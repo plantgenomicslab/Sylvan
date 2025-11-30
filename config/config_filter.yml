@@ -1,0 +1,125 @@
+###############################################################################################
+#
+# Input
+# [Required] Provide input to GeneModelFilter
+#
+###############################################################################################
+
+Singularity: placeholder
+
+Input:
+  genome: placeholder                          # [path] genome fasta file (GETA/genome.fasta)
+  rna_seq: placeholder                         # [path] Directory with paired-end RNAseq data
+  protein: placeholder                         # [path] Homolg protein file (PROTEIN/merged_rmdup_proteins.fasta)
+  anot_gff: placeholder                        # [path] Annotated gff (complete_draft.gff3)
+  augustus_gff: placeholder                    # [path] Augustus annotation (GETA/Augustus/augustus.gff3)
+  helixer_gff: placeholder                     # [path] Helixer annotation (AB_INITIO/Helixer/helixer.gff3)
+  repeat_gff: placeholder                      # [path] Repeat annotation
+  HmmDB: placeholder                           # [path] PFAM direcory for pfam scanning (/usr/local/src)
+  RexDB: placeholder                           # [path] RexDB file
+  busco_lin: placeholder                       # [string] Busco lineage to use for filter monitoring (e.g. eudicots_odb10)
+  chrom_regex: (^Chr)|(^chr)|(^LG)|(^Ch)|(^\d) # [string] Regex string capturing the prefix of all chromosomes in the genome file
+
+###############################################################################################
+#
+# Filter Configuration
+# [Optional] Configure GeneModelFilter
+#
+###############################################################################################
+
+Cutoff:
+  tpm: 3                   # Expression cutoff threshold (keep genes greater than)
+  rsem_cov: 0.5            # RSEM coverage cutoff (keep genes greater than)
+  blast_pident: 0.6        # Blast percent identity (default: 0.6) (keep genes greater than)
+  blast_qcovs: 0.6         # Blast query coverage (default: 0.6) (keep genes greater than)
+  rex_pident: 0.6          # RexDB blast percent identity (default: 0.6) (keep genes less than)
+  rex_qcovs: 0.6           # RexDB blast query coverage (default: 0.6) (keep genes less than)
+  helixer_cov: 0.8         # Helixer coverage cutoff (keep genes greater than)
+  augustus_cov: 0.8        # Augustus coverage cutoff (keep genes greater than)
+  repeat_cov: 0.5          # Repeat coverage cutoff (keep genes less than)
+
+###############################################################################################
+#
+# Cluster Configuration
+# [Required] Configure cluster
+#
+###############################################################################################
+ 
+Threads:
+  PfamScan: 48
+  sortSTAR: 16
+  blast: 16
+  STAR_generate: 12
+  fastp_PAIRED: 16
+  prepRSEM: 16
+  STAR: 12
+  mergeSTAR: 16
+  calculateRSEMExpression: 16
+  lncRNA_pred: 48
+  STAR_index: 12
+
+
+__default__:
+  account: placeholder     # Provide your slurm account
+  partition: placeholder   # provide your slurm partition
+  memory: 16g
+  name: "{rule}.{wildcards}"
+  ncpus: 4
+  nodes: 1
+  time: 7-00:00:00
+  output: results/logs/{rule}_{wildcards}.out
+  error: results/logs/{rule}_{wildcards}.err
+PfamScan:
+  ncpus: 48
+  memory: 192g
+RSEM:
+  ncpus: 32
+  memory: 128g
+sortSTAR:
+  ncpus: 16
+  memory: 64g
+blast:
+  ncpus: 16
+  memory: 64g
+coverage:
+  ncpus: 16
+  memory: 64g
+indexRef:
+  ncpus: 4
+  memory: 16g
+blastDB:
+  ncpus: 4
+  memory: 16g
+splitPep:
+  ncpus: 4
+  memory: 16g
+combineBlast:
+  ncpus: 4
+  memory: 16g
+abInitioCoverage:
+  ncpus: 1
+  memory: 4g
+STAR_generate:
+  ncpus: 12
+  memory: 48g
+fastp_PAIRED:
+  ncpus: 16
+  memory: 64g
+STAR_paired:
+  ncpus: 12
+  memory: 48g
+mergeSTAR:
+  ncpus: 16
+  memory: 64g
+calculateRSEMExpression:
+  ncpus: 16
+  memory: 64g
+prepRSEM:
+  ncpus: 16
+  memory: 64g
+lncRNA_pred:
+  ncpus: 48
+  memory: 192g
+STAR_index:
+  ncpus: 12
+  memory: 48g
