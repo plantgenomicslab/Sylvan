@@ -36,12 +36,13 @@ singularity pull --arch amd64 sylvan.sif library://wyim/sylvan/sylvan:latest
 git clone https://github.com/plantgenomicslab/Sylvan.git
 cd Sylvan
 
-# Create an environment with Snakemake version 7
-conda create -n snake -c conda-forge -c bioconda \
+# Create an environment with Snakemake version 7 and git-lfs
+conda create -n sylvan -c conda-forge -c bioconda \
   python=3.11 \
-  snakemake=7 -y
+  snakemake=7 \
+  git-lfs -y
 
-conda activate snake
+conda activate sylvan
 ```
 
 If you have root permission and you prefer to build the singularity image from source:

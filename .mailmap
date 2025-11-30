@@ -1,0 +1,6 @@
+# Map alternate author identities to your preferred name/email for GitHub contributor aggregation.
+# If you learn the exact email used for the Claude commits, add a mapping with that email too.
+# Format: Proper Name <proper@email> Commit Name <commit@email>
+
+Won Cheol Yim <ascendo@dongguk.edu> Claude
+Won Cheol Yim <ascendo@dongguk.edu> claude

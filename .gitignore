@@ -1,0 +1,7 @@
+sylvan.sif
+genome.fasta.mod.EDTA.raw
+genome.fasta
+genome.fasta.mod
+genome.*
+slurm-*
+results/
