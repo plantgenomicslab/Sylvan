@@ -2387,6 +2387,8 @@ rule pasaPrep:
 
 		cp {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta.clean
 
+		grep "^>" {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta | sed 's/^>//' | awk '{{print $1"\t"$1}}' > {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta.cln
+
 		sed -i "s|DATABASE=.*|DATABASE=$(readlink -f {params.results_dir}TRANSCRIPT/PASA)/pasa.sqlite|" config/alignAssembly.config
 		sed -i "s|DATABASE=.*|DATABASE=$(readlink -f {params.results_dir}TRANSCRIPT/PASA)/pasa.sqlite|" config/annotCompare.config
 		"""
