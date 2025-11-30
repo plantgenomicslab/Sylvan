@@ -1268,6 +1268,18 @@ rule BGM2AT:
 
 		shell("mv -f firsttest.out {params.results_dir}GETA/Augustus/firsttest.out")
 		shell("mv -f secondtest.out {params.results_dir}GETA/Augustus/secondtest.out")
+		# Clean up intermediate files created by BGM2AT in root directory
+		shell("mv -f ati.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell("mv -f genes.*.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell("mv -f gff2gbSmallDNA.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell("mv -f etraining.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell("mv -f badgenes.lst {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell("mv -f new_species.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell("mv -f optimize.out {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell("mv -f training.gb.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell("mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell("mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell("rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true")
 
 rule prepareAugusutusHints:
 	input:
@@ -2443,6 +2455,12 @@ rule pasa:
 		--CPU {threads} \
 		-t transcripts_for_pasa.fasta.clean -T \
 		-u transcripts_for_pasa.fasta
+
+		# Clean up intermediate files created by PASA in root directory
+		cd $WORKDIR
+		mv -f pipeliner.*.cmds {params.pasa_dir}/ 2>/dev/null || true
+		mv -f cleaning_* {params.pasa_dir}/ 2>/dev/null || true
+		mv -f '(null)'*.sx_file_* {params.pasa_dir}/ 2>/dev/null || true
 		"""
 
 
