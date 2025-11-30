@@ -2256,12 +2256,16 @@ rule liftoff:
 	output: f"{RESULTS_DIR}LIFTOVER/LiftOff/liftoff.gff3"
 	threads: config_dict["liftoff"]["threads"]
 	singularity: image
+	params:
+		results_dir = RESULTS_DIR
 	shell: "liftoff \
 				{input.genome_fasta} {input.combined_fasta} -g {input.combined_gff}  \
 				-p {threads} \
 				-flank 0.4 \
 				-copies \
 				-cds \
+				-dir {params.results_dir}LIFTOVER/LiftOff/intermediate_files \
+				-u {params.results_dir}LIFTOVER/LiftOff/unmapped_features.txt \
 				-o {output}"
 
 ########## Genome_Annotation_Post ####################
