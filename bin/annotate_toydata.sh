@@ -15,7 +15,7 @@ snakemake -p \
 	--keep-incomplete \
 	--stats annotation_runtime_stats.json \
 	--report report.html \
-	--cluster-config toydata/config/config_annotate.yml \
+	--cluster-config toydata/config/cluster_annotate.yml \
 	--snakefile bin/Snakefile_annotate \
 	--groups Sam2Transfrag=group0 --group-components group0=100 \
 	--max-jobs-per-second 50 \
