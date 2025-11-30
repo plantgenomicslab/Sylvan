@@ -2457,6 +2457,8 @@ rule pasa:
 
 		cd {params.pasa_dir}
 
+		mkdir -p {params.results_dir}TMP
+
 		# Clean up previous checkpoint files
 		rm -f __pasa_pasa.sqlite_SQLite_chkpts/*.ok || true
 		rm -f __all_transcripts.fasta.transdecoder_dir/*/*.ok || true
@@ -2464,8 +2466,8 @@ rule pasa:
 		rm -f __all_transcripts.fasta.transdecoder_dir.__checkpoints_longorfs/*.ok || true
 		rm -f minimap2.splice_alignments.gff3.ok spades.okay.tr.clean.mm2.bam.ok transcripts_for_pasa.fasta.clean.mm2.bam.ok || true
 
-		export TMPDIR=$WORKDIR/{params.results_dir}TMP
-		export SLURM_TMPDIR=$WORKDIR/{params.results_dir}TMP
+		export TMPDIR={params.results_dir}TMP
+		export SLURM_TMPDIR={params.results_dir}TMP
 
 		/opt/miniconda3/opt/pasa-2.5.2/Launch_PASA_pipeline.pl \
 		-c $WORKDIR/config/alignAssembly.config \
