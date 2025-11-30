@@ -1997,16 +1997,21 @@ rule filterHMMScan:
 	threads: config_dict["filterHMMScan"]["threads"]
 	shell:
 		"""
-		hmmscan \
-		--cpu {threads} \
-		-E 0.001 \
-		--domE 0.001 \
-		-o {output.out} \
-		--tblout {output.tbl} \
-		--domtblout {output.dom} \
-		--pfamtblout {output.pfam} \
-		/usr/local/src/Pfam-A.hmm \
-		{input}
+		# Check if file has valid FASTA content (at least one sequence line after header)
+		if [ -s {input} ] && grep -q '^[^>]' {input}; then
+			hmmscan \
+			--cpu {threads} \
+			-E 0.001 \
+			--domE 0.001 \
+			-o {output.out} \
+			--tblout {output.tbl} \
+			--domtblout {output.dom} \
+			--pfamtblout {output.pfam} \
+			/usr/local/src/Pfam-A.hmm \
+			{input}
+		else
+			touch {output.out} {output.tbl} {output.dom} {output.pfam}
+		fi
 		"""
 
 def match_length(region_list):
