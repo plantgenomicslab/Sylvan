@@ -1,43 +1,47 @@
 #!/usr/bin/env python
-import sys
-import math
-import random
 import os
+import random
 import re
+import sys
+from pathlib import Path
 
-def split_file(input_file, num_files):
-    with open(input_file, 'r') as infile:
-        lines = infile.readlines()
 
-    # Fix paths in commands: replace standalone EVM/ with results/EVM/
-    # This handles cases where partitions_list.out was generated with old paths
+def main():
+    if len(sys.argv) < 2:
+        sys.exit("Usage: splitEVMCommands.py <num_files>")
+
+    num_files = int(sys.argv[1])
+
+    results_dir = Path(os.environ.get("SYLVAN_RESULTS_DIR", "results"))
+    if not results_dir.is_absolute():
+        results_dir = (Path.cwd() / results_dir).resolve()
+
+    evm_dir = Path(os.environ.get("SYLVAN_EVM_DIR", results_dir / "EVM"))
+    if not evm_dir.is_absolute():
+        evm_dir = (Path.cwd() / evm_dir).resolve()
+
+    input_file = evm_dir / "commands.list"
+    lines = input_file.read_text().splitlines(keepends=True)
+
     fixed_lines = []
+    evm_path = f"{evm_dir}/"
     for line in lines:
-        # Replace --exec_dir EVM/ with --exec_dir results/EVM/
-        line = re.sub(r'--exec_dir\s+EVM/', '--exec_dir results/EVM/', line)
-        # Replace > EVM/ with > results/EVM/ (for output redirection)
-        line = re.sub(r'>\s*EVM/', '> results/EVM/', line)
-        # Replace 2> EVM/ with 2> results/EVM/ (for stderr redirection)
-        line = re.sub(r'2>\s*EVM/', '2> results/EVM/', line)
-        fixed_lines.append(line)
+        # Replace bare EVM/ with the resolved EVM directory; ignore occurrences already inside other paths
+        fixed_lines.append(re.sub(r"(?<![\\w/])EVM/", evm_path, line))
 
-    random.shuffle(fixed_lines)  # Shuffle the lines
+    random.shuffle(fixed_lines)
 
     total_lines = len(fixed_lines)
     lines_per_file = total_lines // num_files
     remainder_lines = total_lines % num_files
 
     for file_num in range(num_files):
-        output_file = f"results/EVM/commands.{file_num}.list"
-        with open(output_file, 'w') as outfile:
-            lines_to_write = lines_per_file
-            if file_num < remainder_lines:
-                lines_to_write += 1
+        output_file = evm_dir / f"commands.{file_num}.list"
+        lines_to_write = lines_per_file + (1 if file_num < remainder_lines else 0)
+        with output_file.open("w") as outfile:
             for _ in range(lines_to_write):
                 outfile.write(fixed_lines.pop())
 
-# Example usage
-input_file = "results/EVM/commands.list"  # Specify your input file here
-num_files = int(sys.argv[1])  # Specify the desired number of output files
-split_file(input_file, num_files)
 
+if __name__ == "__main__":
+    main()
