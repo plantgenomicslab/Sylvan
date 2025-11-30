@@ -1,0 +1,467 @@
+import yaml, sys, os, re
+import pandas as pd
+
+# TODO: file handling for re-runs is inadequate ... if a new gff is used many outputs need to be overwritten
+
+# Load config file
+with open('config_filter.yml', 'r') as config_file:
+	try:
+		config_dict=yaml.safe_load(config_file)
+	except yaml.YAMLError as e:
+		sys.exit("Could not load configs! Check config.yaml ...")
+
+# Check inputs
+for input in config_dict["Input"]:
+	if input == "chrom_regex":
+		continue
+	if input == "busco_lin":
+		continue
+	if input == "HmmDB":
+		if config_dict["Input"][input] == "/usr/local/src/Pfam-A.hmm":
+			continue
+		elif not os.path.exists(config_dict["Input"][input]):
+			sys.exit(f"Could not find {config_dict['Input'][input]}! Check {input} in config.yaml ...")
+	if not os.path.exists(config_dict["Input"][input]):
+		sys.exit(f"Could not find {config_dict['Input'][input]}! Check {input} in config.yaml ...")
+
+image = config_dict["Singularity"]
+
+# Get rnaseq run wildcards
+rna_seq = config_dict["Input"]["rna_seq"]
+bams = []
+rsem = []
+# Support both _1/_2 and _R1/_R2 naming conventions for paired-end reads
+pair1_re = re.compile(r"(.+)(_1|_R1)\.fastq\.gz$")
+pair2_re = re.compile(r"(.+)(_2|_R2)\.fastq\.gz$")
+# Store mapping of sample names to actual file paths
+sample_to_files = {}
+for root, dirs, files in os.walk(rna_seq):
+	for fi in files:
+		match1 = pair1_re.match(fi)
+		if match1:
+			sample_name = match1.group(1)
+			bams.append(f"FILTER/STAR/{sample_name}.STAR_pairedend.bamAligned.toTranscriptome.out.bam")
+			rsem.append(f"FILTER/rsem_outdir/{sample_name}.isoforms.results")
+			if sample_name not in sample_to_files:
+				sample_to_files[sample_name] = {}
+			sample_to_files[sample_name]['fwd'] = os.path.join(root, fi)
+
+		match2 = pair2_re.match(fi)
+		if match2:
+			sample_name = match2.group(1)
+			if sample_name not in sample_to_files:
+				sample_to_files[sample_name] = {}
+			sample_to_files[sample_name]['rev'] = os.path.join(root, fi)
+
+		# Single-end support...
+		#elif se_re.match(fi):
+		#	os.system(f"ln -sf {os.path.join(root,fi)} GETA/fastp/single/{fi}")
+		#	bams.append(f"GETA/HiSat2/single/hisat2.{basename.group(1)}.bam")
+	break
+
+def get_fastq_fwd(wildcards):
+	return sample_to_files[wildcards.run]['fwd']
+
+def get_fastq_rev(wildcards):
+	return sample_to_files[wildcards.run]['rev']
+
+pep_string = re.sub(r"\.fa.*$", "", config_dict["Input"]["anot_gff"] + ".fa")
+pep_string = re.sub(r"^.*\/", "", pep_string)
+
+os.makedirs("logs", exist_ok=True)
+os.makedirs("FILTER/rsem_outdir", exist_ok=True)
+
+def inputAll(wc):
+	input = ["FILTER/pfam.out",
+		"FILTER/BLASTP.OUT.TMP",
+		"FILTER/rsem_outdir/RSEM.isoforms.results",
+		"FILTER/STAR/merged.bam",
+		"FILTER/cov.bed",
+		"FILTER/homolog.pdb",
+		"FILTER/augustus_coverage.bed",
+		"FILTER/helixer_coverage.bed",
+		"FILTER/repeat_coverage.bed",
+		"filter.gff3",
+		f"FILTER/{pep_string}.cdna",
+		f"FILTER/{pep_string}.pep"]
+		#"FILTER/busco_eudicots_odb10/run_eudicots_odb10/full_table.tsv"]
+	for i in range(1,21):
+		input.append(f"FILTER/splitPep/{pep_string}.part_{i:03d}.pep")
+		input.append(f"FILTER/splitPep/{pep_string}.part_{i:03d}.blast.tmp")
+	
+	return(input)
+
+anot_cdna = f"FILTER/{pep_string}.cdna"
+anot_pep = f"FILTER/{pep_string}.pep"
+
+rule all:
+	input: inputAll
+
+rule makeCDSPep:
+	output: 
+		cdna = anot_cdna,
+		pep = anot_pep
+	params:
+		genome = config_dict["Input"]["genome"],
+		gff =  config_dict["Input"]["anot_gff"]
+	singularity: image
+	shell:"""
+		gff3_file_to_proteins.pl {params.gff} {params.genome} cDNA > {output.cdna}
+
+		gff3_file_to_proteins.pl {params.gff} {params.genome} prot > {output.pep}
+		"""
+
+rule PfamScan:
+	input: anot_pep
+	output: "FILTER/pfam.out"
+	threads: config_dict["Threads"]["PfamScan"]
+	params: 
+		hmm = config_dict['Input']['HmmDB'],
+		singularity = image
+	shell:"""
+		singularity exec {params.singularity} \
+		pfam_scan.pl \
+			-fasta {input} \
+			-dir {params.hmm} \
+			-cpu {threads} \
+			-outfile {output}
+		"""
+
+# Prepare RSEM files
+rule prepRSEM:
+	input: anot_cdna
+	output: f"{anot_cdna}.seq"
+	singularity: image
+	threads: config_dict["Threads"]["prepRSEM"]
+	params: cdna = anot_cdna
+	shell: """
+		rsem-prepare-reference \
+		-p {threads} \
+		{input} \
+		{params.cdna}
+		"""
+
+rule fastp_PAIRED:
+	input:
+		fwd = get_fastq_fwd,
+		rev = get_fastq_rev
+	output:
+		fwd = "GETA/fastp/paired/{run}_1.fq.gz",
+		rev = "GETA/fastp/paired/{run}_2.fq.gz"
+	singularity: image
+	threads: config_dict["Threads"]["fastp_PAIRED"]
+	shell:"""
+		fastp --detect_adapter_for_pe \
+			--overrepresentation_analysis \
+			--cut_right \
+			--thread {threads} \
+			--json GETA/fastp/paired/{wildcards.run}.fastp.json \
+			-i {input.fwd} -I  {input.rev} \
+			-o {output.fwd} -O {output.rev}
+		"""
+
+rule STAR_index:
+	output: temp("FILTER/STAR/SA")
+	threads: config_dict["Threads"]["STAR_index"]
+	singularity: image
+	params: 
+		g = config_dict["Input"]["genome"],
+		gff = config_dict["Input"]["anot_gff"]
+	shell:"""
+		STAR \
+		--runThreadN {threads} \
+		--runMode genomeGenerate \
+		--genomeDir FILTER/STAR \
+		--genomeFastaFiles {params.g} \
+		--genomeSAindexNbases 12 \
+		--sjdbGTFfile {params.gff} \
+		 --sjdbGTFtagExonParentTranscript Parent
+		"""
+
+rule STAR_paired:
+	input:
+		g  = "FILTER/STAR/SA",
+		one = "GETA/fastp/paired/{run}_1.fq.gz",
+		two = "GETA/fastp/paired/{run}_2.fq.gz",
+	output: temp("FILTER/STAR/{run}.STAR_pairedend.bamAligned.toTranscriptome.out.bam")
+	threads: config_dict["Threads"]["STAR"]
+	singularity : image
+	shell: """ 
+			STAR --runMode alignReads \
+  			--runThreadN {threads} \
+  			--outFilterMultimapNmax 10 \
+  			--alignIntronMin 25 \
+  			--alignIntronMax 25000 \
+  			--genomeDir FILTER/STAR \
+			--outSAMtype BAM SortedByCoordinate \
+			--limitBAMsortRAM 216000000000 \
+			--outBAMsortingBinsN 200 \
+			--outSAMattributes XS \
+			--outSAMstrandField intronMotif \
+			--outFileNamePrefix FILTER/STAR/{wildcards.run}.STAR_pairedend.bam \
+			--readFilesCommand gunzip -c \
+			--readFilesIn {input.one} {input.two} \
+			--quantMode TranscriptomeSAM \
+			--quantTranscriptomeBan IndelSoftclipSingleend  \
+			--alignEndsType EndToEnd
+			"""
+
+rule calculateRSEMExpression_PAIRED:
+	input: 
+		prep = f"{anot_cdna}.seq",
+		bam = "FILTER/STAR/{run}.STAR_pairedend.bamAligned.toTranscriptome.out.bam"
+	output: "FILTER/rsem_outdir/{run}.isoforms.results"
+	threads: config_dict["Threads"]["calculateRSEMExpression"]
+	singularity: image
+	params: cdna = anot_cdna
+	shell:"""
+		rsem-calculate-expression \
+		--no-bam-output -p {threads} \
+		--alignments \
+		--paired-end {input.bam} {params.cdna} FILTER/rsem_outdir/{wildcards.run}
+		"""
+
+rule mergeRSEM:
+	input: rsem
+	output: "FILTER/rsem_outdir/RSEM.isoforms.results"
+	run:
+		num_inputs = len(input)
+		summary = pd.read_csv(input.pop(0), sep="\t", usecols=["transcript_id", "TPM"])
+		
+		for result in input:
+			try:
+				current = pd.read_csv(result, sep="\t", usecols=["transcript_id", "TPM"])
+				summary["TPM"] = summary["TPM"] + current["TPM"]
+			except:
+				print(f"WARNING: Error parsing {result}")
+				num_inputs -= 1
+		
+		summary["TPM"] = summary["TPM"]/num_inputs
+		summary.to_csv(output[0], sep="\t", index=False, header=True)
+
+rule mergeSTAR:
+	input: bams
+	output: temp("FILTER/STAR/merged.bam")
+	singularity: image
+	threads: config_dict["Threads"]["mergeSTAR"]
+	shell:"""
+			samtools merge -f \
+			--threads {threads} \
+			{output} \
+			{input}
+		"""
+
+rule sortSTAR:
+	input: "FILTER/STAR/merged.bam"
+	output: temp("FILTER/STAR/sorted.bam")
+	threads: config_dict["Threads"]["sortSTAR"]
+	singularity: image
+	shell:"""
+		samtools sort \
+		-@ {threads} \
+		-o FILTER/STAR/sorted.bam \
+		{input}
+		"""
+
+rule coverage:
+	input: "FILTER/STAR/sorted.bam"
+	output: "FILTER/cov.bed"
+	singularity: image
+	shell:"""
+		samtools view -H FILTER/STAR/sorted.bam | \
+		grep '@SQ' | \
+		cut -f2,3 | \
+		sed 's/[SL]N://g' \
+		> FILTER/transcriptome_chromSizes.txt
+		
+		awk '{{print $1 \"\\t1\\t\" $2}}' FILTER/transcriptome_chromSizes.txt > FILTER/gene.bed
+		
+		bedtools coverage \
+		-sorted \
+		-g FILTER/transcriptome_chromSizes.txt \
+		-a FILTER/gene.bed \
+		-b FILTER/STAR/sorted.bam \
+		> FILTER/cov.bed
+		"""
+		
+		
+
+rule blastDB:
+	input: config_dict["Input"]["protein"]
+	output: "FILTER/homolog.pdb"
+	singularity: image
+	shell: "makeblastdb -in {input} -dbtype prot -out FILTER/homolog"
+
+rule blastRexDB:
+	input: config_dict['Input']['RexDB']
+	output: "FILTER/rexdb.pdb"
+	shell: "makeblastdb -in {input} -dbtype prot -out FILTER/rexdb"
+
+num = []
+for i in range(1,21):
+        num.append(f"{i:03d}")
+
+rule splitPep:
+	input: anot_pep
+	output: expand("FILTER/splitPep/" + pep_string + ".part_{number}.pep", number=num)
+	singularity: image
+	shell: "seqkit split -p 20 -O FILTER/splitPep {input}"
+
+rule blast:
+	input: 
+		wait = "FILTER/homolog.pdb",
+		fa = "FILTER/splitPep/" + pep_string + ".part_{part}.pep"
+	output: 
+		"FILTER/splitPep/" + pep_string + ".part_{part}.blast.tmp"
+	threads: config_dict["Threads"]["blast"]
+	singularity: image
+	shell:"""blastp \
+			-query {input.fa} \
+			-db FILTER/homolog \
+			-out {output} \
+			-evalue 1e-15 \
+			-outfmt '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovs' \
+			-num_threads {threads} \
+			-num_alignments 1
+		"""
+
+rule combineBlast:
+	input: expand("FILTER/splitPep/" + pep_string + ".part_{number}.blast.tmp", number=num)
+	output: "FILTER/BLASTP.OUT.TMP"
+	shell: "cat FILTER/splitPep/" + pep_string + ".part_*.blast.tmp > {output}" 
+		#| awk '{{if ($13 > " + str(config_dict["Cutoff"]["blast"]) + "){{print $0}}}}' > {output}"  
+
+rule blastRex:
+		input:
+				wait = "FILTER/rexdb.pdb",
+				fa = "FILTER/splitPep/" + pep_string + ".part_{part}.pep"
+		output:
+				"FILTER/splitPep/" + pep_string + ".part_{part}.blastRex.tmp"
+		threads: config_dict["Threads"]["blast"]
+		singularity: image
+		shell:"""blastp \
+				-query {input.fa} \
+				-db FILTER/rexdb \
+				-out {output} \
+				-evalue 1e-15 \
+				-outfmt '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovs' \
+				-num_threads {threads} \
+				-num_alignments 1
+			"""
+
+rule combineBlastRex:
+		input: expand("FILTER/splitPep/" + pep_string + ".part_{number}.blastRex.tmp", number=num)
+		output: "FILTER/BLASTP.OUT.Rex"
+		shell: "cat FILTER/splitPep/" + pep_string + ".part_*.blastRex.tmp > {output}" 
+		#| awk '{{if ($13 > " + str(config_dict["Cutoff"]["blastRex"])+ "){{print $0}}}}' > {output}"
+
+#TODO: Add repeat coverage calculation... add to config as well
+rule abInitioCoverage:
+	output:
+		"FILTER/augustus_coverage.bed",
+		"FILTER/helixer_coverage.bed",
+		"FILTER/repeat_coverage.bed"
+	singularity: image
+	params: 
+		augustus = config_dict["Input"]["augustus_gff"],
+		helixer = config_dict["Input"]["helixer_gff"],
+		repeat = config_dict["Input"]["repeat_gff"],
+		gff = config_dict['Input']['anot_gff']
+	shell:"""
+		grep -P '\tmRNA\t' {params.augustus} | \
+		   cut -f1,4,5,7 > FILTER/augustus.bed
+
+		grep -P '\tmRNA\t' {params.helixer} | \
+		   cut -f1,4,5,7 > FILTER/helixer.bed
+
+		cut -f1,4,5,7 {params.repeat} > FILTER/repeat.bed
+
+		grep -P '\\tmRNA\\t' {params.gff} | \
+			cut -f1,4,5,7,9 | \
+			awk -F';' '{{print $1}}'| \
+			sed 's/ID=//' | \
+			sed 's/;.*//' > FILTER/prefilter.bed
+
+		bedtools coverage -a FILTER/prefilter.bed -b FILTER/augustus.bed > FILTER/augustus_coverage.bed
+		bedtools coverage -a FILTER/prefilter.bed -b FILTER/helixer.bed > FILTER/helixer_coverage.bed
+		bedtools coverage -a FILTER/prefilter.bed -b FILTER/repeat.bed > FILTER/repeat_coverage.bed
+		"""
+
+rule lncRNA_pred:
+	input: anot_cdna
+	output: "FILTER/lncrna_predict.csv"
+	params: s = image
+	threads: config_dict["Threads"]["lncRNA_pred"]
+	shell:'''
+		singularity exec {params.s} \
+		conda run -n lncdc \
+		python /usr/local/src/LncDC-1.3.5/bin/lncDC.py \
+		-x /usr/local/share/lncdc_db/plant_selected_nostructure_hexamer_table.csv \
+		-m /usr/local/share/lncdc_db/plant_selected_nostructure_xgb_model_SIF_PF.pkl \
+		-p /usr/local/share/lncdc_db/plant_selected_nostructure_imputer_SIF_PF.pkl \
+		-s /usr/local/share/lncdc_db/plant_selected_nostructure_scaler_SIF_PF.pkl \
+		-t 24 \
+		-i {input} \
+		-o {output}
+		'''
+
+rule busco:
+	input: rules.makeCDSPep.output.pep
+	output: f"FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv"
+	params: busco_lin = config_dict["Input"]["busco_lin"]
+	singularity: image
+	shell:"""
+		busco -i {input} \
+		-l {params.busco_lin} \
+		-o FILTER/busco_{params.busco_lin} \
+		-m protein \
+		-f
+		"""
+
+rule filter:
+	input:
+		blast = "FILTER/BLASTP.OUT.TMP",
+		rex = "FILTER/BLASTP.OUT.Rex",
+		pfam = "FILTER/pfam.out",
+		rsem = "FILTER/rsem_outdir/RSEM.isoforms.results",
+		augustus = "FILTER/augustus_coverage.bed",
+		helixer = "FILTER/helixer_coverage.bed",
+		repeat = "FILTER/repeat_coverage.bed",
+		cov = "FILTER/cov.bed",
+		lncrna = "FILTER/lncrna_predict.csv",
+		busco = f"FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv"
+	output: 
+		"filter.gff3"
+	params:
+		anot_gff = config_dict["Input"]["anot_gff"],
+		tpm = config_dict["Cutoff"]["tpm"],
+		rsem_cov = config_dict["Cutoff"]["rsem_cov"],
+		helixer_cov = config_dict["Cutoff"]["helixer_cov"],
+		augustus_cov = config_dict["Cutoff"]["augustus_cov"],
+		repeat_cov = config_dict["Cutoff"]["repeat_cov"],
+		blast_pident = config_dict["Cutoff"]["blast_pident"],
+		blast_qcovs = config_dict["Cutoff"]["blast_qcovs"],
+		rex_pident = config_dict["Cutoff"]["rex_pident"],
+		rex_qcovs = config_dict["Cutoff"]["rex_qcovs"],
+		regex = config_dict["Input"]["chrom_regex"]
+	singularity: image
+	shell:"""
+		python bin/Filter.py \
+		{params.anot_gff} \
+		{input.busco} \
+		--tpm {params.tpm} \
+		--rcov {params.rsem_cov} \
+		--hcov {params.helixer_cov} \
+		--acov {params.augustus_cov} \
+		--repcov {params.repeat_cov} \
+		--blast-pident {params.blast_pident} \
+		--blast-qcovs {params.blast_qcovs} \
+		--rex-pident {params.rex_pident} \
+		--rex-qcovs {params.rex_qcovs} \
+		--seed 123 \
+		--trees 100 \
+		--predictors 5 \
+		--recycle 0.95 \
+		--max-iter 10 \
+		--chromRegex '{params.regex}'
+	"""
