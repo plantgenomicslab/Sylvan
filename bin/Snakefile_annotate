@@ -28,7 +28,8 @@ def parse_memory_to_mb(mem_str):
 config_file_path = os.environ.get('SYLVAN_CONFIG', 'config_annotate.yml')
 
 # Results directory prefix - all outputs will be placed under this directory
-RESULTS_DIR = "results/"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+RESULTS_DIR = f"{ROOT_DIR}/results/"
 RESULTS_DIR_ABS = os.path.abspath(RESULTS_DIR)
 EVM_DIR_ABS = os.path.join(RESULTS_DIR_ABS, "EVM")
 try:

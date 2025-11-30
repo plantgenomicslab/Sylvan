@@ -12,13 +12,27 @@ def main():
 
     num_files = int(sys.argv[1])
 
-    results_dir = Path(os.environ.get("SYLVAN_RESULTS_DIR", "results"))
-    if not results_dir.is_absolute():
-        results_dir = (Path.cwd() / results_dir).resolve()
+    # Default to repo-root/results/EVM; allow env overrides that can be absolute or relative to CWD
+    root_dir = Path(__file__).resolve().parent.parent
+    default_results = root_dir / "results"
 
-    evm_dir = Path(os.environ.get("SYLVAN_EVM_DIR", results_dir / "EVM"))
-    if not evm_dir.is_absolute():
-        evm_dir = (Path.cwd() / evm_dir).resolve()
+    results_env = os.environ.get("SYLVAN_RESULTS_DIR")
+    if results_env:
+        results_dir = Path(results_env)
+        if not results_dir.is_absolute():
+            results_dir = (Path.cwd() / results_env).resolve()
+    else:
+        results_dir = default_results.resolve()
+
+    evm_env = os.environ.get("SYLVAN_EVM_DIR")
+    if evm_env:
+        evm_dir = Path(evm_env)
+        if not evm_dir.is_absolute():
+            evm_dir = (Path.cwd() / evm_env).resolve()
+    else:
+        evm_dir = (results_dir / "EVM").resolve()
+
+    evm_dir.mkdir(parents=True, exist_ok=True)
 
     input_file = evm_dir / "commands.list"
     lines = input_file.read_text().splitlines(keepends=True)
