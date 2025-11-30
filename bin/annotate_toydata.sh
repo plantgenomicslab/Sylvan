@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 
 set -x
-set -e
 
 # Set config path for Snakefile
 export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
+
+# Print log location on exit (success or failure)
+trap 'echo ""; echo "=== Log files: results/logs/{rule}_{wildcards}.err ==="; echo "Debug: cat results/logs/RULENAME_*.err"; echo "Recent: ls -lt results/logs/*.err | head"' EXIT
 
 #--rerun-triggers mtime \
 snakemake -p \
