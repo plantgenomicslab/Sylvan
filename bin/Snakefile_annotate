@@ -2658,7 +2658,7 @@ rule partitionEVM:
 				--transcript_alignments {params.results_dir}EVM/transcript_alignments_checkCoords.gff3 \
 				--segmentSize 1000000 \
 				--overlapSize 20000 \
-				--partition_dir EVM \
+				--partition_dir {params.results_dir}EVM \
 				--partition_listing {params.results_dir}EVM/partitions_list.out
 			"""
 
@@ -2698,7 +2698,9 @@ rule runEVM:
 	params: results_dir = RESULTS_DIR
 	singularity: image
 	shell: """
-		bash {params.results_dir}EVM/commands.{wildcards.evm_num}.list
+		if [ -s {input} ]; then
+			bash {params.results_dir}EVM/commands.{wildcards.evm_num}.list
+		fi
 		touch {params.results_dir}EVM/ok/commands.{wildcards.evm_num}.ok
 		"""
 
