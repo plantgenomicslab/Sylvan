@@ -29,6 +29,8 @@ config_file_path = os.environ.get('SYLVAN_CONFIG', 'config_annotate.yml')
 
 # Results directory prefix - all outputs will be placed under this directory
 RESULTS_DIR = "results/"
+RESULTS_DIR_ABS = os.path.abspath(RESULTS_DIR)
+EVM_DIR_ABS = os.path.join(RESULTS_DIR_ABS, "EVM")
 try:
 	with open(config_file_path, "r") as config_file:
 		config_dict = yaml.safe_load(config_file)
@@ -2641,7 +2643,8 @@ rule partitionEVM:
 		f"{RESULTS_DIR}EVM/partitions_list.out"
 	params:
 		genome = config_dict["Input"]["genome"],
-		results_dir = RESULTS_DIR
+		results_dir = RESULTS_DIR,
+		results_dir_abs = EVM_DIR_ABS
 	singularity: image
 	shell: """
 			rm {params.results_dir}EVM/*.ok || echo 'No partition.ok files to remove...continuing'
@@ -2661,13 +2664,13 @@ rule partitionEVM:
 
 			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/partition_EVM_inputs.pl \
 				--genome "$GENOME_FILE" \
-				--gene_predictions {params.results_dir}EVM/gene_predictions_checkCoords.gff3 \
-				--protein_alignments {params.results_dir}EVM/protein_alignments_checkCoords.gff3 \
-				--transcript_alignments {params.results_dir}EVM/transcript_alignments_checkCoords.gff3 \
+				--gene_predictions {params.results_dir_abs}/gene_predictions_checkCoords.gff3 \
+				--protein_alignments {params.results_dir_abs}/protein_alignments_checkCoords.gff3 \
+				--transcript_alignments {params.results_dir_abs}/transcript_alignments_checkCoords.gff3 \
 				--segmentSize 1000000 \
 				--overlapSize 20000 \
-				--partition_dir {params.results_dir}EVM \
-				--partition_listing {params.results_dir}EVM/partitions_list.out
+				--partition_dir {params.results_dir_abs} \
+				--partition_listing {params.results_dir_abs}/partitions_list.out
 
 			# Clean up temp genome file
 			rm -f {params.results_dir}EVM/genome_temp.fasta
@@ -2685,6 +2688,7 @@ rule writeEVMCommands:
 	singularity: image
 	params:
 		results_dir = RESULTS_DIR,
+		results_dir_abs = EVM_DIR_ABS,
 		genome = config_dict["Input"]["genome"],
 		weight = config_dict["Input"]["evm_weights"],
 		split_evm = num_evm_files
@@ -2692,42 +2696,38 @@ rule writeEVMCommands:
 			export TMPDIR=./{params.results_dir}TMP
 			export SLURM_TMPDIR=./{params.results_dir}TMP
 
-			# Create symlink EVM -> results/EVM so write_EVM_commands.pl can find partition directories
-			# The partitions_list.out contains paths like EVM/Chr4_1/... which the script expects to find
-			ln -sfn {params.results_dir}EVM EVM
-
 			# EVM doesn't support gzipped files - decompress if needed
 			# This file is kept for runEVM to use
 			GENOME_FILE="{params.genome}"
 			if [[ "$GENOME_FILE" == *.gz ]]; then
-				zcat "$GENOME_FILE" > {params.results_dir}EVM/genome.fasta
-				GENOME_FILE="{params.results_dir}EVM/genome.fasta"
+				zcat "$GENOME_FILE" > {params.results_dir_abs}/genome.fasta
+				GENOME_FILE="{params.results_dir_abs}/genome.fasta"
 			fi
 
 			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/write_EVM_commands.pl \
-			--genome $(pwd)/$GENOME_FILE \
+			--genome "$GENOME_FILE" \
 			--weights $(pwd)/{params.weight} \
-			--gene_predictions $(pwd)/{params.results_dir}EVM/gene_predictions_checkCoords.gff3 \
-			--protein_alignments $(pwd)/{params.results_dir}EVM/protein_alignments_checkCoords.gff3 \
-			--transcript_alignments $(pwd)/{params.results_dir}EVM/transcript_alignments_checkCoords.gff3 \
+			--gene_predictions {params.results_dir_abs}/gene_predictions_checkCoords.gff3 \
+			--protein_alignments {params.results_dir_abs}/protein_alignments_checkCoords.gff3 \
+			--transcript_alignments {params.results_dir_abs}/transcript_alignments_checkCoords.gff3 \
 			--output_file_name evm.out \
-			--partitions $(pwd)/{params.results_dir}EVM/partitions_list.out > {params.results_dir}EVM/commands.list
+			--partitions {params.results_dir_abs}/partitions_list.out > {params.results_dir_abs}/commands.list
 
-			./bin/splitEVMCommands.py {params.split_evm}
+			SYLVAN_RESULTS_DIR="{RESULTS_DIR_ABS}" SYLVAN_EVM_DIR="{EVM_DIR_ABS}" ./bin/splitEVMCommands.py {params.split_evm}
 			"""
 
 rule runEVM:
 	input: f"{RESULTS_DIR}EVM/commands.{{evm_num}}.list"
 	output: f"{RESULTS_DIR}EVM/ok/commands.{{evm_num}}.ok"
-	params: results_dir = RESULTS_DIR
+	params:
+		results_dir = RESULTS_DIR,
+		results_dir_abs = EVM_DIR_ABS
 	singularity: image
 	shell: """
-		# Ensure symlink exists for EVM commands (they reference EVM/ paths)
-		ln -sfn {params.results_dir}EVM EVM 2>/dev/null || true
-		if [ -s {input} ]; then
-			bash {params.results_dir}EVM/commands.{wildcards.evm_num}.list
+		if [ -s {params.results_dir_abs}/commands.{wildcards.evm_num}.list ]; then
+			bash {params.results_dir_abs}/commands.{wildcards.evm_num}.list
 		fi
-		touch {params.results_dir}EVM/ok/commands.{wildcards.evm_num}.ok
+		touch {params.results_dir_abs}/ok/commands.{wildcards.evm_num}.ok
 		"""
 
 runEVM_Output = [f"{RESULTS_DIR}EVM/ok/commands.{evm_num}.ok" for evm_num in range(num_evm_files)]
@@ -2738,37 +2738,34 @@ rule recombineEVM:
 	singularity: image
 	params:
 		genome = config_dict["Input"]["genome"],
-		results_dir = RESULTS_DIR
+		results_dir = RESULTS_DIR,
+		results_dir_abs = EVM_DIR_ABS
 	shell: """
 			export TMPDIR=./{params.results_dir}TMP
 			export SLURM_TMPDIR=./{params.results_dir}TMP
 
-			# Ensure symlink exists for EVM scripts
-			ln -sfn {params.results_dir}EVM EVM 2>/dev/null || true
-
 			# Use decompressed genome if available, otherwise decompress
 			GENOME_FILE="{params.genome}"
-			if [[ -f "{params.results_dir}EVM/genome.fasta" ]]; then
-				GENOME_FILE="{params.results_dir}EVM/genome.fasta"
+			if [[ -f "{params.results_dir_abs}/genome.fasta" ]]; then
+				GENOME_FILE="{params.results_dir_abs}/genome.fasta"
 			elif [[ "$GENOME_FILE" == *.gz ]]; then
-				zcat "$GENOME_FILE" > {params.results_dir}EVM/genome.fasta
-				GENOME_FILE="{params.results_dir}EVM/genome.fasta"
+				zcat "$GENOME_FILE" > {params.results_dir_abs}/genome.fasta
+				GENOME_FILE="{params.results_dir_abs}/genome.fasta"
 			fi
 
 			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/recombine_EVM_partial_outputs.pl \
-			--partitions {params.results_dir}EVM/partitions_list.out \
-			--output_file_name $(pwd)/{params.results_dir}EVM/evm.out
+			--partitions {params.results_dir_abs}/partitions_list.out \
+			--output_file_name {params.results_dir_abs}/evm.out
 
 			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/convert_EVM_outputs_to_GFF3.pl \
-			--partitions {params.results_dir}EVM/partitions_list.out \
-			--output $(pwd)/{params.results_dir}EVM/evm.out \
+			--partitions {params.results_dir_abs}/partitions_list.out \
+			--output {params.results_dir_abs}/evm.out \
 			--genome $GENOME_FILE
 
 			find . -regex '.*\\/evm.out.gff3' -exec cat {{}} \\; > {output}
 
-			# Clean up EVM symlink and temp genome
-			rm -f EVM
-			rm -f {params.results_dir}EVM/genome.fasta
+			# Clean up temp genome
+			rm -f {params.results_dir_abs}/genome.fasta
 		"""
 
 #TODO: Use snakemake 'ensure' to more robustly check for proper output
