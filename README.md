@@ -181,9 +181,16 @@ snakemake --unlock --snakefile bin/Snakefile_annotate  # unlock
 
 ### SLURM Configuration
 
-Find your SLURM account:
+Find your SLURM account and partition:
 ```bash
+# Show your accounts and partitions
 sacctmgr show user "$USER" withassoc format=Account,Partition -nP
+
+# List all available partitions
+sinfo -s
+
+# Show partition details (time limits, nodes, etc.)
+sinfo -o "%P %l %D %c %m"
 ```
 
 Set in `cluster_annotate.yml`:
