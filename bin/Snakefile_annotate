@@ -240,12 +240,15 @@ onerror:
 	print("\n" + "="*80)
 	print("PIPELINE ERROR - Check logs for details:")
 	print("="*80)
-	print(f"Workflow process has been logged in: {RESULTS_DIR}logs/")
-	print(f"  Example: {RESULTS_DIR}logs/stringtie_STAR_.err")
+	print(f"Log directory: {RESULTS_DIR}logs/")
+	print(f"Log pattern:   {{rule}}_{{wildcards}}.err")
 	print("")
 	print("Quick debug commands:")
-	print("  ls -lt results/logs/*.err | head -10  # Most recent error logs")
-	print("  grep -l 'Error\\|error\\|Traceback' results/logs/*.err  # Logs with errors")
+	print(f"  cat {RESULTS_DIR}logs/RULENAME_*.err   # View specific rule log")
+	print(f"  ls -lt {RESULTS_DIR}logs/*.err | head  # Most recent error logs")
+	print(f"  grep -l 'Error' {RESULTS_DIR}logs/*.err  # Find logs with errors")
+	print("")
+	print("Common rules: pasaPrep, pasa, helixer, liftoff, STAR_paired, geneRegion2Genewise")
 	print("="*80 + "\n")
 
 onsuccess:
@@ -257,8 +260,6 @@ onsuccess:
 	print(f"  Example: {RESULTS_DIR}logs/stringtie_STAR_.err")
 	print("="*80 + "\n")
 
-# Print log location at the start of each shell command
-shell.prefix("echo '>>> Log file: results/logs/{{rule}}_{{wildcards}}.err' && ")
 
 #TODO: add the ability to provide external pre-run output files for many of the EVM inputs
 
