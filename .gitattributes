@@ -1,9 +1,13 @@
-toydata/* filter=lfs diff=lfs merge=lfs -text
-toydata/RNASeq/*.fastq.gz filter=lfs diff=lfs merge=lfs -text
+# LFS tracking for large binary/data files
 *.fastq filter=lfs diff=lfs merge=lfs -text
 *.fastq.gz filter=lfs diff=lfs merge=lfs -text
-toydata/** filter=lfs diff=lfs merge=lfs -text
 *.fasta filter=lfs diff=lfs merge=lfs -text
 *.fa filter=lfs diff=lfs merge=lfs -text
 *.gff3 filter=lfs diff=lfs merge=lfs -text
 *.cds filter=lfs diff=lfs merge=lfs -text
+*.aa filter=lfs diff=lfs merge=lfs -text
+
+# Exclude config files from LFS (small text files)
+*.yml !filter !diff !merge text
+*.yaml !filter !diff !merge text
+*.txt !filter !diff !merge text
