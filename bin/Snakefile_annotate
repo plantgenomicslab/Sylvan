@@ -535,6 +535,9 @@ rule mergeSTAR:
 	resources:
 		mem_mb = parse_memory_to_mb(config_dict["mergeSTAR"]["memory"])
 	shell:'''
+		export TMPDIR={params.results_dir}TMP
+		export SLURM_TMPDIR={params.results_dir}TMP
+
 		# These commands get long and singularity has an OS defined command length limit
 		echo "samtools merge -f --threads {params.threads_full} {params.results_dir}GETA/STAR/STAR.merge.bam {input}" | \
 		singularity exec {params.singularity} bash -c "read -u 0 line; set -- \$line; exec \"\$@\""
