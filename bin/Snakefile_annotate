@@ -237,17 +237,31 @@ onstart:
 	print("="*80 + "\n")
 
 onerror:
+	import subprocess
 	print("\n" + "="*80)
 	print("PIPELINE ERROR - Check logs for details:")
 	print("="*80)
 	print(f"Log directory: {RESULTS_DIR}logs/")
 	print("")
+	# Try to find the most recent failed rule from log filenames
+	try:
+		result = subprocess.run(
+			f"ls -t {RESULTS_DIR}logs/*.err 2>/dev/null | head -1 | xargs -r basename | cut -d'_' -f1",
+			shell=True, capture_output=True, text=True
+		)
+		failed_rule = result.stdout.strip()
+		if failed_rule:
+			print(f"Most recent failed rule: {failed_rule}")
+			print(f"  cat {RESULTS_DIR}logs/{failed_rule}_*.err")
+			print("")
+	except:
+		pass
 	if log:
 		print(f"Snakemake log: cat {log}")
 	print("")
 	print("Debug commands:")
-	print(f"  ls -lt {RESULTS_DIR}logs/*.err | head  # Most recent error logs")
-	print(f"  grep -l 'Error' {RESULTS_DIR}logs/*.err  # Find logs with errors")
+	print(f"  ls -lt {RESULTS_DIR}logs/*.err | head -5  # Most recent error logs")
+	print(f"  cat $(ls -t {RESULTS_DIR}logs/*.err | head -1)  # View most recent error")
 	print("="*80 + "\n")
 
 onsuccess:
