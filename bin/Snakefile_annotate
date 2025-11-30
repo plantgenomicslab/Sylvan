@@ -611,13 +611,13 @@ rule mergeTransfrag:
 		results_dir = RESULTS_DIR
 	run:
 		shell("if test -f {params.results_dir}GETA/transcript/transfrag.list; then rm {params.results_dir}GETA/transcript/transfrag.list;fi")
-		shell("if test -f {params.results_dir}GETA/transcript/intron.txt; then rm {params.results_dir}GETA/transcript/intron.txt;fi")
-		shell("if test -f {params.results_dir}GETA/transcript/base_depth.txt; then rm {params.results_dir}GETA/transcript/base_depth.txt;fi")
+		shell("rm -f {params.results_dir}GETA/transcript/intron.txt; touch {params.results_dir}GETA/transcript/intron.txt")
+		shell("rm -f {params.results_dir}GETA/transcript/base_depth.txt; touch {params.results_dir}GETA/transcript/base_depth.txt")
 		for item in input.gtf_files:
 			item = re.sub(r"\.[a-zA-Z]+$", "", item)
 			shell(f"cat {item}.gtf >> {params.results_dir}GETA/transcript/transfrag.gtf")
-			shell(f"cat {item}.intron >> {params.results_dir}GETA/transcript/intron.txt")
-			shell(f"cat {item}.base_depth >> {params.results_dir}GETA/transcript/base_depth.txt")
+			shell(f"if [ -f {item}.intron ]; then cat {item}.intron >> {params.results_dir}GETA/transcript/intron.txt; fi")
+			shell(f"if [ -f {item}.base_depth ]; then cat {item}.base_depth >> {params.results_dir}GETA/transcript/base_depth.txt; fi")
 
 		shell("singularity exec {params.singularity} \
 			transfragDump \
