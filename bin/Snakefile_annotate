@@ -2681,13 +2681,13 @@ rule writeEVMCommands:
 			export TMPDIR=./{params.results_dir}TMP
 			export SLURM_TMPDIR=./{params.results_dir}TMP
 			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/write_EVM_commands.pl \
-			--genome {params.genome} \
-			--weights {params.weight} \
-			--gene_predictions {params.results_dir}EVM/gene_predictions_checkCoords.gff3 \
-			--protein_alignments {params.results_dir}EVM/protein_alignments_checkCoords.gff3 \
-			--transcript_alignments {params.results_dir}EVM/transcript_alignments_checkCoords.gff3 \
+			--genome $(pwd)/{params.genome} \
+			--weights $(pwd)/{params.weight} \
+			--gene_predictions $(pwd)/{params.results_dir}EVM/gene_predictions_checkCoords.gff3 \
+			--protein_alignments $(pwd)/{params.results_dir}EVM/protein_alignments_checkCoords.gff3 \
+			--transcript_alignments $(pwd)/{params.results_dir}EVM/transcript_alignments_checkCoords.gff3 \
 			--output_file_name evm.out \
-			--partitions {params.results_dir}EVM/partitions_list.out > {params.results_dir}EVM/commands.list
+			--partitions $(pwd)/{params.results_dir}EVM/partitions_list.out > {params.results_dir}EVM/commands.list
 
 			./bin/splitEVMCommands.py {params.split_evm}
 			"""
