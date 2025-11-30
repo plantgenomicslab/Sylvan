@@ -7,3 +7,141 @@ slurm-*
 results/
 *.err
 *.out
+# -----------------------------------------------------------------------------
+# 1. 바이오인포 raw 데이터 (절대 Git 본체에 올리지 않기)
+# -----------------------------------------------------------------------------
+# 대형 시퀀싱 raw / 정렬 파일
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.bam
+*.bam.bai
+*.cram
+*.cram.crai
+*.sam
+
+# 변이 / coverage 관련 대형 파일
+*.vcf
+*.vcf.gz
+*.vcf.gz.tbi
+*.bcf
+*.bcf.csi
+*.g.vcf
+*.g.vcf.gz
+*.g.vcf.gz.tbi
+*.bedGraph
+*.bigWig
+*.bw
+*.bigBed
+*.bb
+
+# 대형 reference / index (원본 fasta는 LFS 또는 외부 스토리지)
+# 여기서는 raw reference는 ignore하고, 아주 작은 toy fasta만 따로 관리하는 전략 추천
+raw/
+reference/
+indexes/
+star_index/
+bwa_index/
+salmon_index/
+kallisto_index/
+hisat2_index/
+
+# -----------------------------------------------------------------------------
+# 2. 중간 결과, 로그, 임시 파일
+# -----------------------------------------------------------------------------
+results/
+scratch/
+tmp/
+temp/
+.snakemake/
+.nextflow/
+work/
+.nf-work/
+
+logs/
+log/
+*.log
+*.err
+*.out
+
+# 대형 매트릭스 / 모델 / HDF5 등
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.pt
+*.ckpt
+*.pickle
+*.pkl
+*.rds
+*.rda
+
+# -----------------------------------------------------------------------------
+# 3. Sylvan 전용 toydata 정책 예시
+#    - 작은 예제 데이터는 허용
+#    - 실제 서브샘플 fastq 등은 LFS나 ignore
+# -----------------------------------------------------------------------------
+# RNA-Seq toy raw는 LFS 또는 ignore (크기 큼)
+toydata/RNASeq/
+
+# 나머지 toydata는 작은 파일만 사용한다고 가정 (gff, 작은 fasta 등)
+# 필요하다면 여기서 개별 확장자를 허용/제외 조정
+
+# -----------------------------------------------------------------------------
+# 4. 환경 / 빌드 산출물
+# -----------------------------------------------------------------------------
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Conda / venv
+env/
+.venv/
+venv/
+.conda/
+*.egg-info/
+build/
+dist/
+
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+renv/library/
+
+# C/C++ / Rust / Go 빌드 산출물
+*.o
+*.so
+*.a
+*.dylib
+target/
+
+# -----------------------------------------------------------------------------
+# 5. 편집기 / IDE / OS 파일
+# -----------------------------------------------------------------------------
+# VS Code
+.vscode/
+
+# PyCharm / IntelliJ
+.idea/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+thumbs.db
+Thumbs.db
+desktop.ini
+
+# 기타
+*~
+*.swp
+*.swo
+
