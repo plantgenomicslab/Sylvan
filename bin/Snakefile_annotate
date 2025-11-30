@@ -29,7 +29,14 @@ config_file_path = os.environ.get('SYLVAN_CONFIG', 'config_annotate.yml')
 
 # Results directory prefix - all outputs will be placed under this directory
 ROOT_DIR = Path(__file__).resolve().parent.parent
-RESULTS_DIR = f"{ROOT_DIR}/results/"
+# Allow override; default to current working directory results/
+ENV_RESULTS = os.environ.get("SYLVAN_RESULTS_DIR")
+if ENV_RESULTS:
+	RESULTS_DIR = str(Path(ENV_RESULTS).resolve())
+else:
+	RESULTS_DIR = str(Path.cwd() / "results")
+if not RESULTS_DIR.endswith("/"):
+	RESULTS_DIR += "/"
 RESULTS_DIR_ABS = os.path.abspath(RESULTS_DIR)
 EVM_DIR_ABS = os.path.join(RESULTS_DIR_ABS, "EVM")
 try:
