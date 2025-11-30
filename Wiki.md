@@ -293,9 +293,11 @@ The toy data was tested on:
 
 | Specification | Value |
 |---------------|-------|
+| Nodes | 4 |
+| Total CPUs | 256 |
 | CPU | Intel Xeon E5-2683 v4 @ 2.10GHz |
-| Cores | 64 (2 sockets × 16 cores × 2 threads) |
-| Memory | 256 GB |
+| Cores per node | 64 (2 sockets × 16 cores × 2 threads) |
+| Memory per node | 256 GB |
 | Storage | GPFS |
 
 ### Runtime Statistics
