@@ -2384,7 +2384,7 @@ rule pasaPrep:
 
 		cat {params.results_dir}AB_INITIO/Helixer/helixer.cdna.fasta {input.spades} > {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta
 
-		cd {params.results_dir}TRANSCRIPT/PASA && /opt/miniconda3/opt/pasa-2.5.2/bin/seqclean transcripts_for_pasa.fasta
+		cp {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta.clean
 
 		sed -i "s|DATABASE=.*|DATABASE=$(readlink -f {params.results_dir}TRANSCRIPT/PASA)/pasa.sqlite|" config/alignAssembly.config
 		sed -i "s|DATABASE=.*|DATABASE=$(readlink -f {params.results_dir}TRANSCRIPT/PASA)/pasa.sqlite|" config/annotCompare.config
