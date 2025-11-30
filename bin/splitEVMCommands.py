@@ -14,7 +14,7 @@ def split_file(input_file, num_files):
     remainder_lines = total_lines % num_files
 
     for file_num in range(num_files):
-        output_file = f"EVM/commands.{file_num}.list"
+        output_file = f"results/EVM/commands.{file_num}.list"
         with open(output_file, 'w') as outfile:
             lines_to_write = lines_per_file
             if file_num < remainder_lines:
@@ -23,7 +23,7 @@ def split_file(input_file, num_files):
                 outfile.write(lines.pop())
 
 # Example usage
-input_file = "EVM/commands.list"  # Specify your input file here
+input_file = "results/EVM/commands.list"  # Specify your input file here
 num_files = int(sys.argv[1])  # Specify the desired number of output files
 split_file(input_file, num_files)
 
