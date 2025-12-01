@@ -107,7 +107,7 @@ writeEVMCommands:
   memory: 16g
 runEVM:
   ncpus: 1
-  memory: 4g
+  memory: "{resources.mem_mb}M"
 recombineEVM:
   ncpus: 4
   memory: 16g
