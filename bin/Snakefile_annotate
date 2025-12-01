@@ -2234,15 +2234,7 @@ rule GETA_output:
 
 		GFF3_extract_bestGeneModels \
 		  {output.gm} \
-		  > {output.bgm}.tmp
-
-		# Filter out corrupted gene models from fillingEndsOfGeneModels bug
-		# (genes starting at pos 1-3 spanning >100kb are artifacts)
-		# First pass: collect IDs of bad genes, second pass: remove all their features
-		awk 'NR==FNR && $3=="gene" && $4<=3 && ($5-$4)>100000 {{split($9,a,";"); split(a[1],b,"="); bad[b[2]]=1; next}} \
-		     NR!=FNR {{dominated=0; for(id in bad){{if(index($9,id)>0){{dominated=1; break}}}} if(!dominated)print}}' \
-		     {output.bgm}.tmp {output.bgm}.tmp > {output.bgm}
-		rm -f {output.bgm}.tmp
+		  > {output.bgm}
 
 		GFF3Clear \
 		  --GFF3_source GETA \
