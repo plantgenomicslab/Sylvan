@@ -1263,41 +1263,45 @@ rule BGM2AT:
 						flanking_length.append(distance)
 					end = max(end, bb)
 
-		gene_length.sort()
-		flanking_length.sort()
-		mid_flanking_length = flanking_length[len(flanking_length) // 2]
-		flanking_length = int(mid_flanking_length / 8)
-		mid_gene_length = gene_length[len(gene_length) // 2]
-		if flanking_length >= mid_gene_length:
-			flanking_length = mid_gene_length
-		
-		shell(f"mkdir -p {params.results_dir}GETA/Augustus")
-		shell(f"singularity exec {params.singularity} cp -rf /opt/miniconda3/config {params.results_dir}GETA/Augustus/")
-		shell(f"mkdir -p {params.results_dir}GETA/Augustus/config/species")
+			gene_length.sort()
+			flanking_length.sort()
+			mid_flanking_length = flanking_length[len(flanking_length) // 2] if flanking_length else 0
+			flanking_length = int(mid_flanking_length / 8) if flanking_length else 0
+			mid_gene_length = gene_length[len(gene_length) // 2] if gene_length else 0
+			if flanking_length >= mid_gene_length and mid_gene_length > 0:
+				flanking_length = mid_gene_length
+			if flanking_length == 0:
+				flanking_length = 200
+			
+			shell(f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training")
+			shell(f"cd {params.results_dir}GETA/Augustus && singularity exec {params.singularity} cp -rf /opt/miniconda3/config ./config")
 
-		#--augustus_species_start_from {params.a_start} \
-		shell(f"singularity exec --env AUGUSTUS_CONFIG_PATH={params.results_dir}GETA/Augustus/config {params.singularity} BGM2AT \
-		{params.args} \
-		--flanking_length {flanking_length} \
-		--CPU {threads} \
-		--onlytrain_GFF3 {input.one} {input.two} \
-		{input.genome_fasta} \
-		{params.a_species}")
+			shell(
+				f\"cd {params.results_dir}GETA/Augustus && "
+				f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
+				f"singularity exec {params.singularity} BGM2AT "
+				f"{params.args} "
+				f"--flanking_length {flanking_length} "
+				f"--CPU {threads} "
+				f"--onlytrain_GFF3 {input.one} {input.two} "
+				f"{input.genome_fasta} "
+				f"{params.a_species}"
+			)
 
-		shell("mv -f firsttest.out {params.results_dir}GETA/Augustus/firsttest.out")
-		shell("mv -f secondtest.out {params.results_dir}GETA/Augustus/secondtest.out")
-		# Clean up intermediate files created by BGM2AT in root directory
-		shell("mv -f ati.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell("mv -f genes.*.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell("mv -f gff2gbSmallDNA.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell("mv -f etraining.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell("mv -f badgenes.lst {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell("mv -f new_species.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell("mv -f optimize.out {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell("mv -f training.gb.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell("mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell("mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell("rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f firsttest.out {params.results_dir}GETA/Augustus/firsttest.out")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f secondtest.out {params.results_dir}GETA/Augustus/secondtest.out")
+			# Clean up intermediate files created by BGM2AT in this directory
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f ati.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f genes.*.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f gff2gbSmallDNA.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f etraining.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f badgenes.lst {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f new_species.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f optimize.out {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f training.gb.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"cd {params.results_dir}GETA/Augustus && rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true")
 
 rule prepareAugusutusHints:
 	input:
@@ -2396,11 +2400,13 @@ rule evigene:
 	singularity: image
 	shell:
 		"""
-		$evigene/evigene/scripts/rnaseq/trformat.pl -prefix=spades -output {params.results_dir}TRANSCRIPT/evigene/spades.tr -log -input {input}
-		$evigene/evigene/scripts/prot/tr2aacds.pl -tidy -NCPU {threads} -MAXMEM 50000 -log -cdna {params.results_dir}TRANSCRIPT/evigene/spades.tr
+		mkdir -p {params.results_dir}TRANSCRIPT/evigene
+		cd {params.results_dir}TRANSCRIPT/evigene
+
+		$evigene/evigene/scripts/rnaseq/trformat.pl -prefix=spades -output spades.tr -log -input {input}
+		$evigene/evigene/scripts/prot/tr2aacds.pl -tidy -NCPU {threads} -MAXMEM 50000 -log -cdna spades.tr
 
 		# Move all evigene output directories to results (for potential rerun)
-		mkdir -p {params.results_dir}TRANSCRIPT/evigene
 		mv okayset {params.results_dir}TRANSCRIPT/evigene/ || true
 		mv dropset {params.results_dir}TRANSCRIPT/evigene/ || true
 		mv inputset {params.results_dir}TRANSCRIPT/evigene/ || true
