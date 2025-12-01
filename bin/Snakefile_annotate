@@ -1273,9 +1273,10 @@ rule BGM2AT:
 		
 		shell(f"mkdir -p {params.results_dir}GETA/Augustus")
 		shell(f"singularity exec {params.singularity} cp -rf /opt/miniconda3/config {params.results_dir}GETA/Augustus/")
+		shell(f"mkdir -p {params.results_dir}GETA/Augustus/config/species")
 
 		#--augustus_species_start_from {params.a_start} \
-		shell(f"singularity exec --env AUGUSTUS_CONFIG_PATH=./{params.results_dir}GETA/Augustus/config {params.singularity} BGM2AT \
+		shell(f"singularity exec --env AUGUSTUS_CONFIG_PATH={params.results_dir}GETA/Augustus/config {params.singularity} BGM2AT \
 		{params.args} \
 		--flanking_length {flanking_length} \
 		--CPU {threads} \
