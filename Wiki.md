@@ -90,6 +90,165 @@ sbatch -c 16 --mem=68g --wrap="singularity exec --cleanenv --env PYTHONNOUSERSIT
 
 ## Step 4: Run Annotation Pipeline
 
+### Environment Variables
+
+The pipeline uses several environment variables for configuration:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `SYLVAN_CONFIG` | Path to pipeline config file | `toydata/config/config_annotate.yml` |
+| `SYLVAN_CLUSTER_CONFIG` | Path to SLURM cluster config (optional, auto-derived from `SYLVAN_CONFIG`) | `toydata/config/cluster_annotate.yml` |
+| `TMPDIR` | Temporary directory for intermediate files | `$(pwd)/results/TMP` |
+| `SLURM_TMPDIR` | SLURM job temporary directory (should match `TMPDIR`) | `$TMPDIR` |
+
+**Why set `TMPDIR`?**
+
+Setting `TMPDIR` explicitly is **critical** on many HPC systems:
+
+1. **Memory-backed `/tmp` (tmpfs)**: Some HPC nodes have no local disk storage. The default `/tmp` is mounted as `tmpfs`, which stores files **in RAM**. Large temporary files from tools like STAR, RepeatMasker, or Augustus can quickly exhaust memory and crash your jobs with cryptic "out of memory", "no space left on device", or even **segmentation fault** errors—since the OS may kill processes or corrupt memory when tmpfs fills up.
+
+2. **Quota limits**: Shared `/tmp` partitions often have strict per-user quotas (e.g., 1-10 GB). Genome annotation tools easily exceed this.
+
+3. **Job isolation**: When `TMPDIR` points to your project directory, temp files persist after job completion for debugging. Cleanup is also straightforward with `rm -rf results/TMP/*`.
+
+4. **Singularity compatibility**: Containers inherit `TMPDIR` from the host. Setting it to a bound path ensures temp files are written to accessible storage.
+
+> **Tip**: Check if your cluster uses tmpfs with `df -h /tmp`. If it shows `tmpfs` as the filesystem type, you **must** set `TMPDIR` to avoid memory issues.
+
+### Complete Environment Setup
+
+Copy this block before running the pipeline:
+
+```bash
+# Required: Pipeline configuration
+export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
+
+# Required: Temp directory (create if not exists)
+mkdir -p results/TMP
+export TMPDIR="$(pwd)/results/TMP"
+export SLURM_TMPDIR="$TMPDIR"
+
+# Optional: Bind additional paths for Singularity
+# export SINGULARITY_BIND="/scratch,/data"
+
+# Optional: Increase open file limit (some tools need this)
+ulimit -n 65535 2>/dev/null || true
+```
+
+### Additional Singularity Variables
+
+| Variable | Description | When to Use |
+|----------|-------------|-------------|
+| `SINGULARITY_BIND` | Bind additional host paths into container | When input files are outside working directory |
+| `SINGULARITY_CACHEDIR` | Location for Singularity cache | When home directory has quota limits |
+| `SINGULARITY_TMPDIR` | Singularity's internal temp directory | Should match `TMPDIR` |
+
+**When do you need `SINGULARITY_BIND`?**
+
+Singularity automatically binds your current working directory, `$HOME`, and `/tmp`. However, you need explicit binding when:
+
+- Input files (genome, RNA-seq, proteins) are on a **separate filesystem** (e.g., `/scratch`, `/project`, `/data`)
+- Your **home directory has quota limits** and you store data elsewhere
+- Using **shared lab storage** mounted at non-standard paths
+- Config file references **absolute paths** outside the working directory
+
+```bash
+# Common scenarios:
+
+# 1. Data on scratch space
+export SINGULARITY_BIND="/scratch/$USER"
+
+# 2. Multiple paths (comma-separated)
+export SINGULARITY_BIND="/scratch,/project/shared_data,/data/genomes"
+
+# 3. Bind with different container path (host:container)
+export SINGULARITY_BIND="/long/path/on/host:/data"
+
+# 4. Read-only binding (for shared reference data)
+export SINGULARITY_BIND="/shared/databases:/databases:ro"
+```
+
+**Diagnosing bind issues:**
+```bash
+# Error: "file not found" inside container but exists on host
+# → The path isn't bound. Add it to SINGULARITY_BIND
+
+# Test if path is accessible inside container:
+singularity exec sylvan.sif ls /your/data/path
+
+# See what's currently bound:
+singularity exec sylvan.sif cat /proc/mounts | grep -E "scratch|project|data"
+```
+
+### Verifying Your Environment
+
+Before submitting jobs, verify your setup:
+
+```bash
+# Check TMPDIR is on real disk (not tmpfs)
+df -h $TMPDIR
+
+# Verify Singularity can access paths
+singularity exec sylvan.sif ls $TMPDIR
+
+# Test config file is readable
+cat $SYLVAN_CONFIG | head -5
+```
+
+### Debugging Environment Issues
+
+When jobs fail unexpectedly, environment variables are often the culprit. Use these techniques to diagnose:
+
+**1. Print all relevant variables:**
+```bash
+# Add to your script or run interactively
+echo "=== Environment Check ==="
+echo "SYLVAN_CONFIG: $SYLVAN_CONFIG"
+echo "TMPDIR: $TMPDIR"
+echo "SLURM_TMPDIR: $SLURM_TMPDIR"
+echo "SINGULARITY_BIND: $SINGULARITY_BIND"
+echo "PWD: $PWD"
+df -h $TMPDIR
+```
+
+**2. Check what SLURM jobs actually see:**
+```bash
+# Submit a diagnostic job
+sbatch --wrap='env | grep -E "TMPDIR|SINGULARITY|SYLVAN" && df -h /tmp $TMPDIR'
+```
+
+**3. Common environment-related errors:**
+
+| Error Message | Likely Cause | Solution |
+|---------------|--------------|----------|
+| `No space left on device` | TMPDIR on tmpfs or quota exceeded | Set `TMPDIR` to project storage |
+| `Segmentation fault` | Memory exhausted (tmpfs full) | Set `TMPDIR` to disk-backed storage |
+| `file not found` (in container) | Path not bound in Singularity | Add path to `SINGULARITY_BIND` |
+| `Permission denied` | Singularity can't write to TMPDIR | Check directory permissions, ensure path is bound |
+| `cannot create temp file` | TMPDIR doesn't exist or not writable | Run `mkdir -p $TMPDIR && touch $TMPDIR/test` |
+
+**4. Interactive debugging inside container:**
+```bash
+# Start interactive shell in container with same bindings
+singularity shell --cleanenv sylvan.sif
+
+# Inside container, verify paths exist
+ls -la $TMPDIR
+ls -la /path/to/your/data
+```
+
+**5. Check if variables survive into SLURM jobs:**
+
+SLURM doesn't always pass environment variables. Ensure your submit script exports them:
+```bash
+# In your sbatch script or wrapper
+#SBATCH --export=ALL    # Pass all environment variables
+
+# Or explicitly export in the script:
+export TMPDIR="$(pwd)/results/TMP"
+export SLURM_TMPDIR="$TMPDIR"
+```
+
 ### Dry Run (Recommended)
 
 Always do a dry run first to verify configuration:
