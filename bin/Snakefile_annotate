@@ -1947,7 +1947,7 @@ rule fillingEndsOfGeneModels_ef:
 	singularity: image
 	shell:
 		"""
-		fillingEndsOfGeneModels \
+		perl $(pwd)/bin/fillingEndsOfGeneModels.pl \
 		{params.args} \
 		--filling_need_transcriptID {params.results_dir}GETA/CombineGeneModels/filling_need_transcriptID.txt \
 		--nonCompletedGeneModels {output.f} \
@@ -2202,7 +2202,7 @@ rule fillingEndsOfGeneModels_final:
 		g = genome,
 		results_dir = RESULTS_DIR
 	shell:"""
-		fillingEndsOfGeneModels \
+		perl $(pwd)/bin/fillingEndsOfGeneModels.pl \
 		{params.args} \
 		{params.g} \
 		{input} > {output} \
