@@ -2751,8 +2751,9 @@ rule writeEVMCommands:
 rule runEVM:
 	input: f"{RESULTS_DIR}EVM/commands.{{evm_num}}.list"
 	output: f"{RESULTS_DIR}EVM/ok/commands.{{evm_num}}.ok"
+	retries: 2
 	resources:
-		mem_mb = parse_memory_to_mb(config_dict["runEVM"]["memory"])
+		mem_mb = lambda wildcards, attempt: parse_memory_to_mb(config_dict["runEVM"]["memory"]) + (attempt - 1) * 40960
 	params:
 		results_dir_abs = EVM_DIR_ABS
 	singularity: image
