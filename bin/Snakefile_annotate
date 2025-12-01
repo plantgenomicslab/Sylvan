@@ -2753,10 +2753,13 @@ rule runEVM:
 		results_dir_abs = EVM_DIR_ABS
 	singularity: image
 	shell: """
-		if [ -s {params.results_dir_abs}/commands.{wildcards.evm_num}.list ]; then
-			bash {params.results_dir_abs}/commands.{wildcards.evm_num}.list
+		cd {params.results_dir_abs}
+		export TMPDIR={RESULTS_DIR_ABS}/TMP
+		export SLURM_TMPDIR={RESULTS_DIR_ABS}/TMP
+		if [ -s commands.{wildcards.evm_num}.list ]; then
+			bash commands.{wildcards.evm_num}.list
 		fi
-		touch {params.results_dir_abs}/ok/commands.{wildcards.evm_num}.ok
+		touch ok/commands.{wildcards.evm_num}.ok
 		"""
 
 runEVM_Output = [f"{RESULTS_DIR}EVM/ok/commands.{evm_num}.ok" for evm_num in range(num_evm_files)]
