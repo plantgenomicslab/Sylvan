@@ -38,14 +38,28 @@ def main():
     lines = input_file.read_text().splitlines(keepends=True)
 
     fixed_lines = []
-    evm_path = f"{evm_dir}/"
-    genome_path = evm_dir / "genome.fasta"
     for line in lines:
-        # Replace bare EVM/ with the resolved EVM directory; ignore occurrences already inside other paths
-        fixed_line = re.sub(r"(?<![\\w/])EVM/", evm_path, line)
-        # Ensure genome path is absolute so evm runs inside exec_dir can find it
-        fixed_line = re.sub(r"-G\\s+genome\\.fasta", f"-G {genome_path}", fixed_line)
-        fixed_lines.append(fixed_line)
+        # The evidence_modeler.pl script changes its working directory to the value of --exec_dir.
+        # This means that any relative paths for input files will be broken.
+        # This loop finds common input file arguments and converts their paths to be absolute.
+        # It looks for a flag (e.g., -G), whitespace, and then a path that does *not* start with '/'.
+        # It assumes file paths do not contain spaces.
+        updated_line = line
+        for flag in ["-G", "-g", "-e", "-p"]:
+            # Pattern: flag, one or more spaces, a path that is not absolute (doesn't start with /),
+            # and is followed by a space. We'll capture the flag and path.
+            pattern = re.compile(f"({flag}\\s+)([^/\\s][^\\s]*)")
+
+            # Use a function for replacement to handle multiple matches in a line if they were to occur
+            def repl(match):
+                file_path = match.group(2)
+                # Prepend the absolute path to the EVM directory
+                abs_path = evm_dir / file_path
+                return f"{match.group(1)}{abs_path}"
+
+            updated_line = pattern.sub(repl, updated_line)
+
+        fixed_lines.append(updated_line)
 
     random.shuffle(fixed_lines)
 
@@ -58,7 +72,8 @@ def main():
         lines_to_write = lines_per_file + (1 if file_num < remainder_lines else 0)
         with output_file.open("w") as outfile:
             for _ in range(lines_to_write):
-                outfile.write(fixed_lines.pop())
+                if fixed_lines:
+                    outfile.write(fixed_lines.pop())
 
 
 if __name__ == "__main__":
