@@ -1277,7 +1277,7 @@ rule BGM2AT:
 			shell(f"cd {params.results_dir}GETA/Augustus && singularity exec {params.singularity} cp -rf /opt/miniconda3/config ./config")
 
 			shell(
-				f\"cd {params.results_dir}GETA/Augustus && "
+				f"cd {params.results_dir}GETA/Augustus && "
 				f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
 				f"singularity exec {params.singularity} BGM2AT "
 				f"{params.args} "
