@@ -2679,8 +2679,8 @@ rule partitionEVM:
 			rm {params.results_dir}EVM/*/*/*.ok || echo 'No chunk.ok files to remove...continuing'
 			rm {params.results_dir}EVM/*/*checkCoords.gff3 || echo 'No old evidence files to remove ...continuing'
 
-			export TMPDIR=./{params.results_dir}TMP
-			export SLURM_TMPDIR=./{params.results_dir}TMP
+			export TMPDIR={RESULTS_DIR_ABS}/TMP
+			export SLURM_TMPDIR={RESULTS_DIR_ABS}/TMP
 
 			# EVM partition_EVM_inputs.pl doesn't support gzipped files
 			# Decompress genome if it's gzipped
@@ -2741,7 +2741,8 @@ rule writeEVMCommands:
 			--output_file_name evm.out \
 			--partitions {params.results_dir_abs}/partitions_list.out > {params.results_dir_abs}/commands.list
 
-			SYLVAN_RESULTS_DIR="{RESULTS_DIR_ABS}" SYLVAN_EVM_DIR="{EVM_DIR_ABS}" ./bin/splitEVMCommands.py {params.split_evm}
+			SYLVAN_RESULTS_DIR="{RESULTS_DIR_ABS}" SYLVAN_EVM_DIR="{EVM_DIR_ABS}" \
+				python bin/splitEVMCommands.py {params.split_evm}
 			"""
 
 rule runEVM:
