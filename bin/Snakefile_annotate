@@ -2729,8 +2729,11 @@ rule writeEVMCommands:
 			GENOME_FILE="{params.genome}"
 			if [[ "$GENOME_FILE" == *.gz ]]; then
 				zcat "$GENOME_FILE" > {params.results_dir_abs}/genome.fasta
-				GENOME_FILE="{params.results_dir_abs}/genome.fasta"
+			else
+				# Create symlink for non-gzipped genome so genome.fasta exists in EVM dir
+				ln -sf "$(readlink -f "$GENOME_FILE")" {params.results_dir_abs}/genome.fasta
 			fi
+			GENOME_FILE="{params.results_dir_abs}/genome.fasta"
 
 			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/write_EVM_commands.pl \
 			--genome "$GENOME_FILE" \
