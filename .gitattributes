@@ -11,3 +11,7 @@
 *.yml !filter !diff !merge text
 *.yaml !filter !diff !merge text
 *.txt !filter !diff !merge text
+
+# Explicitly keep EVM weight files out of LFS
+toydata/config/evm_weights.txt !filter !diff !merge text
+config/evm_weights.txt !filter !diff !merge text
