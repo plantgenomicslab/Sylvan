@@ -2752,7 +2752,7 @@ rule runEVM:
 	input: f"{RESULTS_DIR}EVM/commands.{{evm_num}}.list"
 	output: f"{RESULTS_DIR}EVM/ok/commands.{{evm_num}}.ok"
 	resources:
-		mem_mb = 6000  # EVM needs ~4-5GB for large partitions
+		mem_mb = parse_memory_to_mb(config_dict["runEVM"]["memory"])
 	params:
 		results_dir_abs = EVM_DIR_ABS
 	singularity: image
