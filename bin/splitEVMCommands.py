@@ -39,9 +39,13 @@ def main():
 
     fixed_lines = []
     evm_path = f"{evm_dir}/"
+    genome_path = evm_dir / "genome.fasta"
     for line in lines:
         # Replace bare EVM/ with the resolved EVM directory; ignore occurrences already inside other paths
-        fixed_lines.append(re.sub(r"(?<![\\w/])EVM/", evm_path, line))
+        fixed_line = re.sub(r"(?<![\\w/])EVM/", evm_path, line)
+        # Ensure genome path is absolute so evm runs inside exec_dir can find it
+        fixed_line = re.sub(r"-G\\s+genome\\.fasta", f"-G {genome_path}", fixed_line)
+        fixed_lines.append(fixed_line)
 
     random.shuffle(fixed_lines)
 
