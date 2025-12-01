@@ -1,3 +1,13 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:dea3fa6f17343dbb2270f89b04aa29ba0c34d1407cae4d4cf9dd6a7dc3cf90ca
-size 288
+ABINITIO_PREDICTION	AUGUSTUS	7
+ABINITIO_PREDICTION	Helixer	3
+OTHER_PREDICTION	Liftoff	2
+OTHER_PREDICTION	GETA	5
+OTHER_PREDICTION	Genewise	2
+
+TRANSCRIPT	gmap.exon_match	2
+TRANSCRIPT	assembler-pasa.sqlite	10
+TRANSCRIPT	StringTie	1
+TRANSCRIPT	PsiClass	1
+
+PROTEIN	GeneWise	2
+PROTEIN	miniprot	2
