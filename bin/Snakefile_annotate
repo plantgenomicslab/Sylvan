@@ -1467,7 +1467,9 @@ rule augustusWithHints:
 			seqLength = line[1]
 		
 		if seqLength > segSize:
-			shell(f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(pwd)/{params.results_dir}GETA/Augustus/config && \
+			shell(f"mkdir -p {params.results_dir}GETA/Augustus/config/species && \
+			CONFIG_PATH=$(readlink -f {params.results_dir}GETA/Augustus/config) && \
+			export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$CONFIG_PATH && \
 			singularity exec {params.singularity} augustus \
 			--gff3=on \
 			--species={params.species} \
@@ -1478,7 +1480,9 @@ rule augustusWithHints:
 			--min_intron_len={mil} \
 			--softmasking=1 {input.masked} > {output}")
 		else:
-			shell(f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(pwd)/{params.results_dir}GETA/Augustus/config && \
+			shell(f"mkdir -p {params.results_dir}GETA/Augustus/config/species && \
+			CONFIG_PATH=$(readlink -f {params.results_dir}GETA/Augustus/config) && \
+			export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$CONFIG_PATH && \
 			singularity exec {params.singularity} augustus \
 			--gff3=on \
 			--species={params.species} \
