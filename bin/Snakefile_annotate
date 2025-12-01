@@ -2749,17 +2749,19 @@ rule runEVM:
 	input: f"{RESULTS_DIR}EVM/commands.{{evm_num}}.list"
 	output: f"{RESULTS_DIR}EVM/ok/commands.{{evm_num}}.ok"
 	params:
-		results_dir = RESULTS_DIR,
 		results_dir_abs = EVM_DIR_ABS
 	singularity: image
 	shell: """
 		cd {params.results_dir_abs}
-		export TMPDIR={RESULTS_DIR_ABS}/TMP
-		export SLURM_TMPDIR={RESULTS_DIR_ABS}/TMP
-		if [ -s commands.{wildcards.evm_num}.list ]; then
-			bash commands.{wildcards.evm_num}.list
+		
+		CMD_FILE="commands.{wildcards.evm_num}.list"
+
+		if [ -s "$CMD_FILE" ]; then
+			# Execute the script, and if it fails, print an error and exit with a non-zero status
+			/bin/bash "$CMD_FILE" || (echo "Error executing $CMD_FILE from within singularity." && exit 1)
 		fi
-		touch ok/commands.{wildcards.evm_num}.ok
+		
+		touch "{output}"
 		"""
 
 runEVM_Output = [f"{RESULTS_DIR}EVM/ok/commands.{evm_num}.ok" for evm_num in range(num_evm_files)]
