@@ -156,7 +156,7 @@ writeEVMCommands:
   memory: 16g
 runEVM:
   ncpus: 1
-  memory: 4g
+  memory: 8g
 recombineEVM:
   ncpus: 4
   memory: 16g
