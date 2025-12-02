@@ -164,34 +164,30 @@ def filter_gff(gff_data, keep):
 	return gff_keep, gff_discard
 
 def getGeneId(attr):
-	# Handle various ID formats, not just FILTER prefix
-	m = re.search(r"ID=([A-Za-z_]+\d+)(\.t[0-9]+)?(\.[a-zA-Z\d\_\.]+)?;", attr)
+	# Extract ID from attribute string - handles IDs with path prefixes like "results/FILTER00000010.t1"
+	m = re.search(r"ID=([^;\s]+)", attr)
 	if not m:
 		return None
-	match = m.group(1)
-	try:
-		return(match + m.group(2)) if m.group(2) else match
-	except:
-		return match
+	return m.group(1)
 
 def getParent(attr):
-	m = re.search("Parent=[a-zA-Z\d\._-]*;", attr)
+	# Extract Parent from attribute string - handles IDs with path prefixes
+	m = re.search(r"Parent=([^;\s]+)", attr)
 	if m:
-		m = m.group(0).replace("Parent=", "").replace(";", "")
-	else:
-		m = None
-	return(m)
+		return m.group(1)
+	return None
 
 def checkKeep(id, names):
 	val = sum(names.str.match(id)) >= 1
 	return(val)
 
 def formatKeepIDs(id):
-	# Handle various ID formats - extract base gene ID before any suffix
+	# Extract base gene ID (without transcript suffix like .t1)
 	if pd.isna(id):
 		return id
-	# Try to match pattern like "PREFIX123" or "PREFIX123.1"
-	match = re.search(r"^([A-Za-z_]+\d+)", str(id))
+	id_str = str(id)
+	# Remove transcript suffix if present (e.g., ".t1", ".t2")
+	match = re.search(r"^(.+?)(?:\.t\d+)?$", id_str)
 	if match:
 		return match.group(1)
 	return id
