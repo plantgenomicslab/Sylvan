@@ -48,7 +48,7 @@ Cutoff:
 ###############################################################################################
  
 Threads:
-  PfamScan: 24
+  PfamScan: 48
   sortSTAR: 16
   blast: 16
   STAR_generate: 12
@@ -72,8 +72,8 @@ __default__:
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
 PfamScan:
-  ncpus: 24
-  memory: 96g
+  ncpus: 48
+  memory: 192g
 RSEM:
   ncpus: 32
   memory: 128g
