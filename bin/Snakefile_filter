@@ -3,8 +3,9 @@ import pandas as pd
 
 # TODO: file handling for re-runs is inadequate ... if a new gff is used many outputs need to be overwritten
 
-# Load config file
-with open('config_filter.yml', 'r') as config_file:
+# Load config file (can be overridden via SYLVAN_FILTER_CONFIG environment variable)
+config_file_path = os.environ.get('SYLVAN_FILTER_CONFIG', 'config_filter.yml')
+with open(config_file_path, 'r') as config_file:
 	try:
 		config_dict=yaml.safe_load(config_file)
 	except yaml.YAMLError as e:
