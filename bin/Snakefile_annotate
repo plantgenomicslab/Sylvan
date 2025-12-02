@@ -1302,6 +1302,11 @@ rule BGM2AT:
 			shell(f"cd {params.results_dir}GETA/Augustus && mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
 			shell(f"cd {params.results_dir}GETA/Augustus && mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
 			shell(f"cd {params.results_dir}GETA/Augustus && rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true")
+			# Also clean up files that may have been created in the project root directory
+			shell(f"mv -f genes.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			shell(f"mv -f cleaning_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
 
 rule prepareAugusutusHints:
 	input:
@@ -1987,7 +1992,7 @@ rule extractTranscriptsForFilter:
 		{input.b} \
 		{input.f} \
 		{input.e} > \
-		{output.prots_all} 2> gff3_to_protein.log
+		{output.prots_all} 2> {params.results_dir}GETA/CombineGeneModels/gff3_to_protein.log
 		
 		perl -p -i -e \'s/\\*\\$//\' {output.prots_all}
 		
@@ -2257,6 +2262,13 @@ rule GETA_output:
 		  {params.results_dir}GETA/{params.prefix}.bestGeneModels.gtf \
 		  {params.g} \
 		  {params.prefix} &> {params.results_dir}GETA/{params.prefix}.geneModels.stats
+
+		# Clean up files created in root directory by eukaryotic_gene_model_statistics.pl
+		mv -f {params.prefix}.cDNA.fasta {params.results_dir}GETA/ 2>/dev/null || true
+		mv -f {params.prefix}.CDS.fasta {params.results_dir}GETA/ 2>/dev/null || true
+		mv -f {params.prefix}.gene.fasta {params.results_dir}GETA/ 2>/dev/null || true
+		mv -f {params.prefix}.protein.fasta {params.results_dir}GETA/ 2>/dev/null || true
+		mv -f {params.prefix}.geneModels.statistics {params.results_dir}GETA/ 2>/dev/null || true
 		"""
 ############# End GETA Snakemake ###############
 
@@ -2407,10 +2419,19 @@ rule evigene:
 		$evigene/evigene/scripts/prot/tr2aacds.pl -tidy -NCPU {threads} -MAXMEM 50000 -log -cdna spades.tr
 
 		# Move all evigene output directories to results (for potential rerun)
-		mv okayset {params.results_dir}TRANSCRIPT/evigene/ || true
-		mv dropset {params.results_dir}TRANSCRIPT/evigene/ || true
-		mv inputset {params.results_dir}TRANSCRIPT/evigene/ || true
-		mv intermediate_files {params.results_dir}TRANSCRIPT/evigene/ || true
+		# First try from current directory (inside results)
+		mv okayset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
+		mv dropset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
+		mv inputset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
+		mv intermediate_files {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
+		mv tmpfiles {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
+
+		# Also clean up from project root (in case Singularity created files there)
+		cd ${{WORKDIR:-$(pwd)}}
+		mv okayset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
+		mv dropset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
+		mv inputset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
+		mv tmpfiles {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
 
 		# Copy okayset to spades folder for downstream use
 		mkdir -p {params.results_dir}TRANSCRIPT/spades/okayset
