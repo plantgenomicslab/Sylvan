@@ -39,17 +39,17 @@ def read_gff_file(file_path):
 def read_abInitio_cov(file_path):
 	return pd.read_csv(file_path, header=None, sep="\t", usecols=[4,8])
 
-def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, rex_qcovs):
+def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, rex_qcovs, output_dir="FILTER"):
 	# Collect evidence and perform cutoffs
 	## RSEM results
-	rsem_file = os.path.join("FILTER/rsem_outdir", "RSEM.isoforms.results")
+	rsem_file = os.path.join(output_dir, "rsem_outdir", "RSEM.isoforms.results")
 	rsem_data = read_rsem_file(rsem_file)
 	filter = rsem_data.loc[:, ("transcript_id", "TPM")]
 	data = rsem_data.loc[:, ("transcript_id", "TPM")]
 	filter.loc[:,"TPM"] = rsem_data["TPM"] > float(tpm_cutoff)
 
 	## BlastP results
-	blast_file = "FILTER/BLASTP.OUT.TMP"
+	blast_file = os.path.join(output_dir, "BLASTP.OUT.TMP")
 	blast_data = read_blast_file(blast_file)
 	blast_data.drop_duplicates(subset=["transcript_id"], keep='first', inplace=True, ignore_index=True)
 	blast_data["blast_pident"] = blast_data["pident"]
@@ -62,7 +62,7 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	data.fillna(0, inplace=True)
 
 	## Coverage results
-	cov_file = "FILTER/cov.bed"
+	cov_file = os.path.join(output_dir, "cov.bed")
 	cov_data = read_cov_file(cov_file)
 	cov_data.columns = ["transcript_id", "COVERAGE"]
 	data = data.merge(cov_data, on="transcript_id", how="left")
@@ -71,7 +71,7 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	filter = filter.merge(cov_data, on="transcript_id", how="left")
 	
 	## Pfam results
-	pfam_file = "FILTER/pfam.out"
+	pfam_file = os.path.join(output_dir, "pfam.out")
 	pfam_data = read_pfam_file(pfam_file)
 	pfam_data = pfam_data[0].unique()
 	pfam_data = pd.DataFrame(pfam_data, columns=["transcript_id"])
@@ -83,8 +83,8 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	data.fillna(False, inplace=True)
 
 	## Ab Initio coverage results
-	augustus_cov = read_abInitio_cov("FILTER/augustus_coverage.bed")
-	helixer_cov = read_abInitio_cov("FILTER/helixer_coverage.bed")
+	augustus_cov = read_abInitio_cov(os.path.join(output_dir, "augustus_coverage.bed"))
+	helixer_cov = read_abInitio_cov(os.path.join(output_dir, "helixer_coverage.bed"))
 	augustus_cov.columns = ["transcript_id", "AUGUSTUS"]
 	helixer_cov.columns = ["transcript_id", "HELIXER"]
 	
@@ -99,7 +99,7 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	data.fillna(0, inplace=True)
 
 	## Repeat coverage results
-	repeat_cov = read_abInitio_cov("FILTER/repeat_coverage.bed")
+	repeat_cov = read_abInitio_cov(os.path.join(output_dir, "repeat_coverage.bed"))
 	repeat_cov.columns = ["transcript_id", "REPEAT"]
 	data = data.merge(repeat_cov, on="transcript_id", how="left")
 	
@@ -117,7 +117,7 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	data.fillna(False, inplace=True)
 
 	## RexDB Blastp
-	rexdb = "FILTER/BLASTP.OUT.Rex"
+	rexdb = os.path.join(output_dir, "BLASTP.OUT.Rex")
 	rexdb = read_blast_file(rexdb)
 	rexdb.drop_duplicates(subset=["transcript_id"], keep='first', inplace=True, ignore_index=True)
 	rexdb["rex_pident"] = rexdb["pident"]
@@ -130,7 +130,7 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	data.fillna(0, inplace=True)
 	
 	## LncRNA prediction
-	lncrna = pd.read_csv("FILTER/lncrna_predict.csv", comment='#', usecols=[0,25], names=["transcript_id","LncRNA_predict"])
+	lncrna = pd.read_csv(os.path.join(output_dir, "lncrna_predict.csv"), comment='#', usecols=[0,25], names=["transcript_id","LncRNA_predict"])
 	lncrna["transcript_id"] = lncrna["transcript_id"].str.split(" ").str.get(0)
 	lncrna["LncRNA_predict"] = lncrna["LncRNA_predict"] == "lncrna"
 	data = data.merge(lncrna, on="transcript_id", how="left")
@@ -316,7 +316,7 @@ if __name__ == "__main__":
 	output_file = args.output
 
 	# Apply initial round of labeling
-	data = filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, rex_qcovs)
+	data = filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, rex_qcovs, output_dir)
 	data.to_csv(f"{output_dir}/data.tsv", sep = "\t", index=False)
 	# Apply semi-supervised learning to classify gene models
 	keep, report = semiSupRandomForest(data, args.predictors, busco, args.trees, seed=args.seed, recycle_prob=args.recycle, maxiter=args.max_iter)
