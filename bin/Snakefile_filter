@@ -1,7 +1,11 @@
 import yaml, sys, os, re
 import pandas as pd
+from pathlib import Path
 
 # TODO: file handling for re-runs is inadequate ... if a new gff is used many outputs need to be overwritten
+
+# Results directory prefix - all outputs will be placed under this directory
+RESULTS_DIR = "results/"
 
 # Load config file (can be overridden via SYLVAN_FILTER_CONFIG environment variable)
 config_file_path = os.environ.get('SYLVAN_FILTER_CONFIG', 'config_filter.yml')
@@ -41,8 +45,8 @@ for root, dirs, files in os.walk(rna_seq):
 		match1 = pair1_re.match(fi)
 		if match1:
 			sample_name = match1.group(1)
-			bams.append(f"FILTER/STAR/{sample_name}.STAR_pairedend.bamAligned.toTranscriptome.out.bam")
-			rsem.append(f"FILTER/rsem_outdir/{sample_name}.isoforms.results")
+			bams.append(f"{RESULTS_DIR}FILTER/STAR/{sample_name}.STAR_pairedend.bamAligned.toTranscriptome.out.bam")
+			rsem.append(f"{RESULTS_DIR}FILTER/rsem_outdir/{sample_name}.isoforms.results")
 			if sample_name not in sample_to_files:
 				sample_to_files[sample_name] = {}
 			sample_to_files[sample_name]['fwd'] = os.path.join(root, fi)
@@ -69,31 +73,31 @@ def get_fastq_rev(wildcards):
 pep_string = re.sub(r"\.fa.*$", "", config_dict["Input"]["anot_gff"] + ".fa")
 pep_string = re.sub(r"^.*\/", "", pep_string)
 
-os.makedirs("logs", exist_ok=True)
-os.makedirs("FILTER/rsem_outdir", exist_ok=True)
+os.makedirs(f"{RESULTS_DIR}logs", exist_ok=True)
+os.makedirs(f"{RESULTS_DIR}FILTER/rsem_outdir", exist_ok=True)
 
 def inputAll(wc):
-	input = ["FILTER/pfam.out",
-		"FILTER/BLASTP.OUT.TMP",
-		"FILTER/rsem_outdir/RSEM.isoforms.results",
-		"FILTER/STAR/merged.bam",
-		"FILTER/cov.bed",
-		"FILTER/homolog.pdb",
-		"FILTER/augustus_coverage.bed",
-		"FILTER/helixer_coverage.bed",
-		"FILTER/repeat_coverage.bed",
-		"filter.gff3",
-		f"FILTER/{pep_string}.cdna",
-		f"FILTER/{pep_string}.pep"]
-		#"FILTER/busco_eudicots_odb10/run_eudicots_odb10/full_table.tsv"]
+	input = [f"{RESULTS_DIR}FILTER/pfam.out",
+		f"{RESULTS_DIR}FILTER/BLASTP.OUT.TMP",
+		f"{RESULTS_DIR}FILTER/rsem_outdir/RSEM.isoforms.results",
+		f"{RESULTS_DIR}FILTER/STAR/merged.bam",
+		f"{RESULTS_DIR}FILTER/cov.bed",
+		f"{RESULTS_DIR}FILTER/homolog.pdb",
+		f"{RESULTS_DIR}FILTER/augustus_coverage.bed",
+		f"{RESULTS_DIR}FILTER/helixer_coverage.bed",
+		f"{RESULTS_DIR}FILTER/repeat_coverage.bed",
+		f"{RESULTS_DIR}FILTER/filter.gff3",
+		f"{RESULTS_DIR}FILTER/{pep_string}.cdna",
+		f"{RESULTS_DIR}FILTER/{pep_string}.pep"]
+		#f"{RESULTS_DIR}FILTER/busco_eudicots_odb10/run_eudicots_odb10/full_table.tsv"]
 	for i in range(1,21):
-		input.append(f"FILTER/splitPep/{pep_string}.part_{i:03d}.pep")
-		input.append(f"FILTER/splitPep/{pep_string}.part_{i:03d}.blast.tmp")
-	
+		input.append(f"{RESULTS_DIR}FILTER/splitPep/{pep_string}.part_{i:03d}.pep")
+		input.append(f"{RESULTS_DIR}FILTER/splitPep/{pep_string}.part_{i:03d}.blast.tmp")
+
 	return(input)
 
-anot_cdna = f"FILTER/{pep_string}.cdna"
-anot_pep = f"FILTER/{pep_string}.pep"
+anot_cdna = f"{RESULTS_DIR}FILTER/{pep_string}.cdna"
+anot_pep = f"{RESULTS_DIR}FILTER/{pep_string}.pep"
 
 rule all:
 	input: inputAll
@@ -114,9 +118,9 @@ rule makeCDSPep:
 
 rule PfamScan:
 	input: anot_pep
-	output: "FILTER/pfam.out"
+	output: f"{RESULTS_DIR}FILTER/pfam.out"
 	threads: config_dict["Threads"]["PfamScan"]
-	params: 
+	params:
 		hmm = config_dict['Input']['HmmDB'],
 		singularity = image
 	shell:"""
@@ -147,84 +151,94 @@ rule fastp_PAIRED:
 		fwd = get_fastq_fwd,
 		rev = get_fastq_rev
 	output:
-		fwd = "GETA/fastp/paired/{run}_1.fq.gz",
-		rev = "GETA/fastp/paired/{run}_2.fq.gz"
+		fwd = f"{RESULTS_DIR}GETA/fastp/paired/{{run}}_1.fq.gz",
+		rev = f"{RESULTS_DIR}GETA/fastp/paired/{{run}}_2.fq.gz"
 	singularity: image
 	threads: config_dict["Threads"]["fastp_PAIRED"]
+	params:
+		results_dir = RESULTS_DIR
 	shell:"""
 		fastp --detect_adapter_for_pe \
 			--overrepresentation_analysis \
 			--cut_right \
 			--thread {threads} \
-			--json GETA/fastp/paired/{wildcards.run}.fastp.json \
+			--json {params.results_dir}GETA/fastp/paired/{wildcards.run}.fastp.json \
+			--html {params.results_dir}GETA/fastp/paired/{wildcards.run}.fastp.html \
 			-i {input.fwd} -I  {input.rev} \
 			-o {output.fwd} -O {output.rev}
 		"""
 
 rule STAR_index:
-	output: temp("FILTER/STAR/SA")
+	output: temp(f"{RESULTS_DIR}FILTER/STAR/SA")
 	threads: config_dict["Threads"]["STAR_index"]
 	singularity: image
-	params: 
+	params:
 		g = config_dict["Input"]["genome"],
-		gff = config_dict["Input"]["anot_gff"]
+		gff = config_dict["Input"]["anot_gff"],
+		results_dir = RESULTS_DIR
 	shell:"""
 		STAR \
 		--runThreadN {threads} \
 		--runMode genomeGenerate \
-		--genomeDir FILTER/STAR \
+		--genomeDir {params.results_dir}FILTER/STAR \
 		--genomeFastaFiles {params.g} \
 		--genomeSAindexNbases 12 \
 		--sjdbGTFfile {params.gff} \
-		 --sjdbGTFtagExonParentTranscript Parent
+		--sjdbGTFtagExonParentTranscript Parent \
+		--outTmpDir {params.results_dir}FILTER/STAR/_STARtmp_index
 		"""
 
 rule STAR_paired:
 	input:
-		g  = "FILTER/STAR/SA",
-		one = "GETA/fastp/paired/{run}_1.fq.gz",
-		two = "GETA/fastp/paired/{run}_2.fq.gz",
-	output: temp("FILTER/STAR/{run}.STAR_pairedend.bamAligned.toTranscriptome.out.bam")
+		g  = f"{RESULTS_DIR}FILTER/STAR/SA",
+		one = f"{RESULTS_DIR}GETA/fastp/paired/{{run}}_1.fq.gz",
+		two = f"{RESULTS_DIR}GETA/fastp/paired/{{run}}_2.fq.gz",
+	output: temp(f"{RESULTS_DIR}FILTER/STAR/{{run}}.STAR_pairedend.bamAligned.toTranscriptome.out.bam")
 	threads: config_dict["Threads"]["STAR"]
-	singularity : image
-	shell: """ 
+	singularity: image
+	params:
+		results_dir = RESULTS_DIR
+	shell: """
 			STAR --runMode alignReads \
-  			--runThreadN {threads} \
-  			--outFilterMultimapNmax 10 \
-  			--alignIntronMin 25 \
-  			--alignIntronMax 25000 \
-  			--genomeDir FILTER/STAR \
+			--runThreadN {threads} \
+			--outFilterMultimapNmax 10 \
+			--alignIntronMin 25 \
+			--alignIntronMax 25000 \
+			--genomeDir {params.results_dir}FILTER/STAR \
 			--outSAMtype BAM SortedByCoordinate \
 			--limitBAMsortRAM 216000000000 \
 			--outBAMsortingBinsN 200 \
 			--outSAMattributes XS \
 			--outSAMstrandField intronMotif \
-			--outFileNamePrefix FILTER/STAR/{wildcards.run}.STAR_pairedend.bam \
+			--outFileNamePrefix {params.results_dir}FILTER/STAR/{wildcards.run}.STAR_pairedend.bam \
+			--outTmpDir {params.results_dir}FILTER/STAR/{wildcards.run}_STARtmp \
 			--readFilesCommand gunzip -c \
 			--readFilesIn {input.one} {input.two} \
 			--quantMode TranscriptomeSAM \
-			--quantTranscriptomeBan IndelSoftclipSingleend  \
+			--quantTranscriptomeBan IndelSoftclipSingleend \
 			--alignEndsType EndToEnd
 			"""
 
 rule calculateRSEMExpression_PAIRED:
-	input: 
+	input:
 		prep = f"{anot_cdna}.seq",
-		bam = "FILTER/STAR/{run}.STAR_pairedend.bamAligned.toTranscriptome.out.bam"
-	output: "FILTER/rsem_outdir/{run}.isoforms.results"
+		bam = f"{RESULTS_DIR}FILTER/STAR/{{run}}.STAR_pairedend.bamAligned.toTranscriptome.out.bam"
+	output: f"{RESULTS_DIR}FILTER/rsem_outdir/{{run}}.isoforms.results"
 	threads: config_dict["Threads"]["calculateRSEMExpression"]
 	singularity: image
-	params: cdna = anot_cdna
+	params:
+		cdna = anot_cdna,
+		results_dir = RESULTS_DIR
 	shell:"""
 		rsem-calculate-expression \
 		--no-bam-output -p {threads} \
 		--alignments \
-		--paired-end {input.bam} {params.cdna} FILTER/rsem_outdir/{wildcards.run}
+		--paired-end {input.bam} {params.cdna} {params.results_dir}FILTER/rsem_outdir/{wildcards.run}
 		"""
 
 rule mergeRSEM:
 	input: rsem
-	output: "FILTER/rsem_outdir/RSEM.isoforms.results"
+	output: f"{RESULTS_DIR}FILTER/rsem_outdir/RSEM.isoforms.results"
 	run:
 		num_inputs = len(input)
 		summary = pd.read_csv(input.pop(0), sep="\t", usecols=["transcript_id", "TPM"])
@@ -242,7 +256,7 @@ rule mergeRSEM:
 
 rule mergeSTAR:
 	input: bams
-	output: temp("FILTER/STAR/merged.bam")
+	output: temp(f"{RESULTS_DIR}FILTER/STAR/merged.bam")
 	singularity: image
 	threads: config_dict["Threads"]["mergeSTAR"]
 	shell:"""
@@ -253,50 +267,58 @@ rule mergeSTAR:
 		"""
 
 rule sortSTAR:
-	input: "FILTER/STAR/merged.bam"
-	output: temp("FILTER/STAR/sorted.bam")
+	input: f"{RESULTS_DIR}FILTER/STAR/merged.bam"
+	output: temp(f"{RESULTS_DIR}FILTER/STAR/sorted.bam")
 	threads: config_dict["Threads"]["sortSTAR"]
 	singularity: image
+	params:
+		results_dir = RESULTS_DIR
 	shell:"""
 		samtools sort \
 		-@ {threads} \
-		-o FILTER/STAR/sorted.bam \
+		-o {params.results_dir}FILTER/STAR/sorted.bam \
 		{input}
 		"""
 
 rule coverage:
-	input: "FILTER/STAR/sorted.bam"
-	output: "FILTER/cov.bed"
+	input: f"{RESULTS_DIR}FILTER/STAR/sorted.bam"
+	output: f"{RESULTS_DIR}FILTER/cov.bed"
 	singularity: image
+	params:
+		results_dir = RESULTS_DIR
 	shell:"""
-		samtools view -H FILTER/STAR/sorted.bam | \
+		samtools view -H {input} | \
 		grep '@SQ' | \
 		cut -f2,3 | \
 		sed 's/[SL]N://g' \
-		> FILTER/transcriptome_chromSizes.txt
-		
-		awk '{{print $1 \"\\t1\\t\" $2}}' FILTER/transcriptome_chromSizes.txt > FILTER/gene.bed
-		
+		> {params.results_dir}FILTER/transcriptome_chromSizes.txt
+
+		awk '{{print $1 \"\\t1\\t\" $2}}' {params.results_dir}FILTER/transcriptome_chromSizes.txt > {params.results_dir}FILTER/gene.bed
+
 		bedtools coverage \
 		-sorted \
-		-g FILTER/transcriptome_chromSizes.txt \
-		-a FILTER/gene.bed \
-		-b FILTER/STAR/sorted.bam \
-		> FILTER/cov.bed
+		-g {params.results_dir}FILTER/transcriptome_chromSizes.txt \
+		-a {params.results_dir}FILTER/gene.bed \
+		-b {input} \
+		> {output}
 		"""
 		
 		
 
 rule blastDB:
 	input: config_dict["Input"]["protein"]
-	output: "FILTER/homolog.pdb"
+	output: f"{RESULTS_DIR}FILTER/homolog.pdb"
 	singularity: image
-	shell: "makeblastdb -in {input} -dbtype prot -out FILTER/homolog"
+	params:
+		results_dir = RESULTS_DIR
+	shell: "makeblastdb -in {input} -dbtype prot -out {params.results_dir}FILTER/homolog"
 
 rule blastRexDB:
 	input: config_dict['Input']['RexDB']
-	output: "FILTER/rexdb.pdb"
-	shell: "makeblastdb -in {input} -dbtype prot -out FILTER/rexdb"
+	output: f"{RESULTS_DIR}FILTER/rexdb.pdb"
+	params:
+		results_dir = RESULTS_DIR
+	shell: "makeblastdb -in {input} -dbtype prot -out {params.results_dir}FILTER/rexdb"
 
 num = []
 for i in range(1,21):
@@ -304,21 +326,25 @@ for i in range(1,21):
 
 rule splitPep:
 	input: anot_pep
-	output: expand("FILTER/splitPep/" + pep_string + ".part_{number}.pep", number=num)
+	output: expand(f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{number}.pep", number=num)
 	singularity: image
-	shell: "seqkit split -p 20 -O FILTER/splitPep {input}"
+	params:
+		results_dir = RESULTS_DIR
+	shell: "seqkit split -p 20 -O {params.results_dir}FILTER/splitPep {input}"
 
 rule blast:
-	input: 
-		wait = "FILTER/homolog.pdb",
-		fa = "FILTER/splitPep/" + pep_string + ".part_{part}.pep"
-	output: 
-		"FILTER/splitPep/" + pep_string + ".part_{part}.blast.tmp"
+	input:
+		wait = f"{RESULTS_DIR}FILTER/homolog.pdb",
+		fa = f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{part}.pep"
+	output:
+		f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{part}.blast.tmp"
 	threads: config_dict["Threads"]["blast"]
 	singularity: image
+	params:
+		results_dir = RESULTS_DIR
 	shell:"""blastp \
 			-query {input.fa} \
-			-db FILTER/homolog \
+			-db {params.results_dir}FILTER/homolog \
 			-out {output} \
 			-evalue 1e-15 \
 			-outfmt '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovs' \
@@ -327,70 +353,77 @@ rule blast:
 		"""
 
 rule combineBlast:
-	input: expand("FILTER/splitPep/" + pep_string + ".part_{number}.blast.tmp", number=num)
-	output: "FILTER/BLASTP.OUT.TMP"
-	shell: "cat FILTER/splitPep/" + pep_string + ".part_*.blast.tmp > {output}" 
-		#| awk '{{if ($13 > " + str(config_dict["Cutoff"]["blast"]) + "){{print $0}}}}' > {output}"  
+	input: expand(f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{number}.blast.tmp", number=num)
+	output: f"{RESULTS_DIR}FILTER/BLASTP.OUT.TMP"
+	params:
+		results_dir = RESULTS_DIR
+	shell: "cat {params.results_dir}FILTER/splitPep/" + pep_string + ".part_*.blast.tmp > {output}"
+		#| awk '{{if ($13 > " + str(config_dict["Cutoff"]["blast"]) + "){{print $0}}}}' > {output}"
 
 rule blastRex:
-		input:
-				wait = "FILTER/rexdb.pdb",
-				fa = "FILTER/splitPep/" + pep_string + ".part_{part}.pep"
-		output:
-				"FILTER/splitPep/" + pep_string + ".part_{part}.blastRex.tmp"
-		threads: config_dict["Threads"]["blast"]
-		singularity: image
-		shell:"""blastp \
-				-query {input.fa} \
-				-db FILTER/rexdb \
-				-out {output} \
-				-evalue 1e-15 \
-				-outfmt '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovs' \
-				-num_threads {threads} \
-				-num_alignments 1
-			"""
+	input:
+		wait = f"{RESULTS_DIR}FILTER/rexdb.pdb",
+		fa = f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{part}.pep"
+	output:
+		f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{part}.blastRex.tmp"
+	threads: config_dict["Threads"]["blast"]
+	singularity: image
+	params:
+		results_dir = RESULTS_DIR
+	shell:"""blastp \
+			-query {input.fa} \
+			-db {params.results_dir}FILTER/rexdb \
+			-out {output} \
+			-evalue 1e-15 \
+			-outfmt '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovs' \
+			-num_threads {threads} \
+			-num_alignments 1
+		"""
 
 rule combineBlastRex:
-		input: expand("FILTER/splitPep/" + pep_string + ".part_{number}.blastRex.tmp", number=num)
-		output: "FILTER/BLASTP.OUT.Rex"
-		shell: "cat FILTER/splitPep/" + pep_string + ".part_*.blastRex.tmp > {output}" 
+	input: expand(f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{number}.blastRex.tmp", number=num)
+	output: f"{RESULTS_DIR}FILTER/BLASTP.OUT.Rex"
+	params:
+		results_dir = RESULTS_DIR
+	shell: "cat {params.results_dir}FILTER/splitPep/" + pep_string + ".part_*.blastRex.tmp > {output}" 
 		#| awk '{{if ($13 > " + str(config_dict["Cutoff"]["blastRex"])+ "){{print $0}}}}' > {output}"
 
 #TODO: Add repeat coverage calculation... add to config as well
 rule abInitioCoverage:
 	output:
-		"FILTER/augustus_coverage.bed",
-		"FILTER/helixer_coverage.bed",
-		"FILTER/repeat_coverage.bed"
+		f"{RESULTS_DIR}FILTER/augustus_coverage.bed",
+		f"{RESULTS_DIR}FILTER/helixer_coverage.bed",
+		f"{RESULTS_DIR}FILTER/repeat_coverage.bed"
 	singularity: image
-	params: 
+	params:
 		augustus = config_dict["Input"]["augustus_gff"],
 		helixer = config_dict["Input"]["helixer_gff"],
 		repeat = config_dict["Input"]["repeat_gff"],
-		gff = config_dict['Input']['anot_gff']
+		gff = config_dict['Input']['anot_gff'],
+		results_dir = RESULTS_DIR
 	shell:"""
 		grep -P '\tmRNA\t' {params.augustus} | \
-		   cut -f1,4,5,7 > FILTER/augustus.bed
+		   cut -f1,4,5,7 > {params.results_dir}FILTER/augustus.bed
 
 		grep -P '\tmRNA\t' {params.helixer} | \
-		   cut -f1,4,5,7 > FILTER/helixer.bed
+		   cut -f1,4,5,7 > {params.results_dir}FILTER/helixer.bed
 
-		cut -f1,4,5,7 {params.repeat} > FILTER/repeat.bed
+		cut -f1,4,5,7 {params.repeat} > {params.results_dir}FILTER/repeat.bed
 
 		grep -P '\\tmRNA\\t' {params.gff} | \
 			cut -f1,4,5,7,9 | \
 			awk -F';' '{{print $1}}'| \
 			sed 's/ID=//' | \
-			sed 's/;.*//' > FILTER/prefilter.bed
+			sed 's/;.*//' > {params.results_dir}FILTER/prefilter.bed
 
-		bedtools coverage -a FILTER/prefilter.bed -b FILTER/augustus.bed > FILTER/augustus_coverage.bed
-		bedtools coverage -a FILTER/prefilter.bed -b FILTER/helixer.bed > FILTER/helixer_coverage.bed
-		bedtools coverage -a FILTER/prefilter.bed -b FILTER/repeat.bed > FILTER/repeat_coverage.bed
+		bedtools coverage -a {params.results_dir}FILTER/prefilter.bed -b {params.results_dir}FILTER/augustus.bed > {params.results_dir}FILTER/augustus_coverage.bed
+		bedtools coverage -a {params.results_dir}FILTER/prefilter.bed -b {params.results_dir}FILTER/helixer.bed > {params.results_dir}FILTER/helixer_coverage.bed
+		bedtools coverage -a {params.results_dir}FILTER/prefilter.bed -b {params.results_dir}FILTER/repeat.bed > {params.results_dir}FILTER/repeat_coverage.bed
 		"""
 
 rule lncRNA_pred:
 	input: anot_cdna
-	output: "FILTER/lncrna_predict.csv"
+	output: f"{RESULTS_DIR}FILTER/lncrna_predict.csv"
 	params: s = image
 	threads: config_dict["Threads"]["lncRNA_pred"]
 	shell:'''
@@ -408,31 +441,33 @@ rule lncRNA_pred:
 
 rule busco:
 	input: rules.makeCDSPep.output.pep
-	output: f"FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv"
-	params: busco_lin = config_dict["Input"]["busco_lin"]
+	output: f"{RESULTS_DIR}FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv"
+	params:
+		busco_lin = config_dict["Input"]["busco_lin"],
+		results_dir = RESULTS_DIR
 	singularity: image
 	shell:"""
 		busco -i {input} \
 		-l {params.busco_lin} \
-		-o FILTER/busco_{params.busco_lin} \
+		-o {params.results_dir}FILTER/busco_{params.busco_lin} \
 		-m protein \
 		-f
 		"""
 
 rule filter:
 	input:
-		blast = "FILTER/BLASTP.OUT.TMP",
-		rex = "FILTER/BLASTP.OUT.Rex",
-		pfam = "FILTER/pfam.out",
-		rsem = "FILTER/rsem_outdir/RSEM.isoforms.results",
-		augustus = "FILTER/augustus_coverage.bed",
-		helixer = "FILTER/helixer_coverage.bed",
-		repeat = "FILTER/repeat_coverage.bed",
-		cov = "FILTER/cov.bed",
-		lncrna = "FILTER/lncrna_predict.csv",
-		busco = f"FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv"
-	output: 
-		"filter.gff3"
+		blast = f"{RESULTS_DIR}FILTER/BLASTP.OUT.TMP",
+		rex = f"{RESULTS_DIR}FILTER/BLASTP.OUT.Rex",
+		pfam = f"{RESULTS_DIR}FILTER/pfam.out",
+		rsem = f"{RESULTS_DIR}FILTER/rsem_outdir/RSEM.isoforms.results",
+		augustus = f"{RESULTS_DIR}FILTER/augustus_coverage.bed",
+		helixer = f"{RESULTS_DIR}FILTER/helixer_coverage.bed",
+		repeat = f"{RESULTS_DIR}FILTER/repeat_coverage.bed",
+		cov = f"{RESULTS_DIR}FILTER/cov.bed",
+		lncrna = f"{RESULTS_DIR}FILTER/lncrna_predict.csv",
+		busco = f"{RESULTS_DIR}FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv"
+	output:
+		f"{RESULTS_DIR}FILTER/filter.gff3"
 	params:
 		anot_gff = config_dict["Input"]["anot_gff"],
 		tpm = config_dict["Cutoff"]["tpm"],
@@ -444,7 +479,8 @@ rule filter:
 		blast_qcovs = config_dict["Cutoff"]["blast_qcovs"],
 		rex_pident = config_dict["Cutoff"]["rex_pident"],
 		rex_qcovs = config_dict["Cutoff"]["rex_qcovs"],
-		regex = config_dict["Input"]["chrom_regex"]
+		regex = config_dict["Input"]["chrom_regex"],
+		results_dir = RESULTS_DIR
 	singularity: image
 	shell:"""
 		python bin/Filter.py \
@@ -464,5 +500,7 @@ rule filter:
 		--predictors 5 \
 		--recycle 0.95 \
 		--max-iter 10 \
-		--chromRegex '{params.regex}'
+		--chromRegex '{params.regex}' \
+		--output {output} \
+		--output-dir {params.results_dir}FILTER
 	"""

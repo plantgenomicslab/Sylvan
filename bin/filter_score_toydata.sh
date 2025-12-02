@@ -18,9 +18,9 @@ snakemake -p \
 	--use-conda \
 	--keep-going \
 	--keep-incomplete \
-	--stats filter_runtime_stats.json \
+	--stats filter_score_runtime_stats.json \
 	--cluster-config toydata/config/config_filter.yml \
-	--snakefile bin/Snakefile_filter \
+	--snakefile bin/Snakefile_filter_score \
 	--max-jobs-per-second 50 \
 	--max-status-checks-per-second 50 \
 	--jobs 150 \
@@ -33,7 +33,7 @@ snakemake -p \
 		"$@"
 
 # Generate report after run
-SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml" snakemake --report results/report_filter.html --snakefile bin/Snakefile_filter
+SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml" snakemake --report results/report_filter.html --snakefile bin/Snakefile_filter_score
 
 # To force rerun:
-# ./bin/filter_toydata.sh --forceall
+# ./bin/filter_score_toydata.sh --forceall
