@@ -296,6 +296,8 @@ if __name__ == "__main__":
 	parser.add_argument("--max-iter", type = int, default = 5, help = "Maximum number of random forest re-training iterations (Default: 5)")
 	parser.add_argument("--seed", type = int, default = 123, help = "Random seed for reproducibility (Default: 123)")
 	parser.add_argument("--chromRegex", type = str, default = "", help = "Regular expression to match chromosome prefixes (Default: '')")
+	parser.add_argument("--output", type = str, default = "filter.gff3", help = "Output file path (Default: filter.gff3)")
+	parser.add_argument("--output-dir", type = str, default = "FILTER", help = "Output directory for intermediate files (Default: FILTER)")
 	args = parser.parse_args()
 
 	gff = args.gff
@@ -310,28 +312,31 @@ if __name__ == "__main__":
 	rex_pident = args.rex_pident
 	rex_qcovs = args.rex_qcovs
 
+	output_dir = args.output_dir
+	output_file = args.output
+
 	# Apply initial round of labeling
 	data = filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, rex_qcovs)
-	data.to_csv("FILTER/data.tsv", sep = "\t", index=False)
+	data.to_csv(f"{output_dir}/data.tsv", sep = "\t", index=False)
 	# Apply semi-supervised learning to classify gene models
 	keep, report = semiSupRandomForest(data, args.predictors, busco, args.trees, seed=args.seed, recycle_prob=args.recycle, maxiter=args.max_iter)
 	pprint(report)
 
 	# Reformat GFF with easier IDs
-	TidyGFF.tidyGFF("FILTER", gff, True, "tidy.gff", "t", 8 , True, True, chrom_regex=args.chromRegex)
+	TidyGFF.tidyGFF(output_dir, gff, True, "tidy.gff", "t", 8 , True, True, chrom_regex=args.chromRegex)
 	map_file = pd.read_csv(f"{os.path.basename(gff)}.map", sep = "\t", names = ["transcript_id", "New_ID"], usecols = [1,2])
 	gff_data = read_gff_file("tidy.gff")
-	
-	
+
+
 	keep = keep.merge(map_file, on="transcript_id", how="left")
 	keep["basenames"] = keep['New_ID'].apply(formatKeepIDs)
-	
+
 	# Filter gff
 	gff_keep, gff_discard = filter_gff(gff_data, keep)
-	
+
 	# Write output
-	gff_keep.iloc[:, 0:9].to_csv("filter.gff3", sep = "\t", index=False, header=False)
-	gff_discard.iloc[:, 0:9].to_csv("FILTER/discard.gff3", sep = "\t")
+	gff_keep.iloc[:, 0:9].to_csv(output_file, sep = "\t", index=False, header=False)
+	gff_discard.iloc[:, 0:9].to_csv(f"{output_dir}/discard.gff3", sep = "\t")
 
 	# Display stats
 	print(f"\nTotal genes	: {sum(gff_data[2] == 'gene')}")
@@ -340,9 +345,9 @@ if __name__ == "__main__":
 	print(f"mRNA kept	 : {sum(gff_keep[2] == 'mRNA')}\n")
 	print(f"\nGenes discarded: {sum(gff_discard[2] == 'gene')}")
 	print(f"mRNA discarded: {sum(gff_discard[2] == 'mRNA')}\n")
-	
-	print(f"Filtered gene models written to: filter.gff3")
-	print(f"Discarded gene models written to: discard.gff3\n")
 
-	print("Filter data written to: discard_data.tsv   keep_data.tsv")
+	print(f"Filtered gene models written to: {output_file}")
+	print(f"Discarded gene models written to: {output_dir}/discard.gff3\n")
+
+	print(f"Filter data written to: {output_dir}/discard_data.tsv   {output_dir}/keep_data.tsv")
 	print(f"See {gff}.map for associations with original IDs.")

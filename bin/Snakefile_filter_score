@@ -1,10 +1,13 @@
-import yaml, sys, re
+import yaml, sys, os, re
 from pathlib import Path
 
-# Load config (reuse filter config)
-config_path = Path("config_filter.yml")
+# Results directory prefix - all outputs will be placed under this directory
+RESULTS_DIR = "results/"
+
+# Load config file (can be overridden via SYLVAN_FILTER_CONFIG environment variable)
+config_file_path = os.environ.get('SYLVAN_FILTER_CONFIG', 'config_filter.yml')
 try:
-	with config_path.open() as f:
+	with open(config_file_path, 'r') as f:
 		config_dict = yaml.safe_load(f)
 except yaml.YAMLError as e:
 	sys.exit("Could not load configs! Check config_filter.yml ...")
@@ -15,25 +18,27 @@ image = config_dict["Singularity"]
 pep_string = re.sub(r"\.fa.*$", "", config_dict["Input"]["anot_gff"] + ".fa")
 pep_string = re.sub(r"^.*\/", "", pep_string)
 
+os.makedirs(f"{RESULTS_DIR}logs", exist_ok=True)
+
 rule all:
 	input:
-		"FILTER/scores.csv",
-		"FILTER/scores.metrics.txt"
+		f"{RESULTS_DIR}FILTER/scores.csv",
+		f"{RESULTS_DIR}FILTER/scores.metrics.txt"
 
 rule scoreModels:
 	input:
-		pfam = "FILTER/pfam.out",
-		blast = "FILTER/BLASTP.OUT.TMP",
-		blast_rex = "FILTER/BLASTP.OUT.Rex",
-		rsem = "FILTER/rsem_outdir/RSEM.isoforms.results",
-		cov_aug = "FILTER/augustus_coverage.bed",
-		cov_helixer = "FILTER/helixer_coverage.bed",
-		cov_repeat = "FILTER/repeat_coverage.bed",
-		lnc_pred = "FILTER/lncrna_predict.csv",
-		pep = f"FILTER/{pep_string}.pep"
+		pfam = f"{RESULTS_DIR}FILTER/pfam.out",
+		blast = f"{RESULTS_DIR}FILTER/BLASTP.OUT.TMP",
+		blast_rex = f"{RESULTS_DIR}FILTER/BLASTP.OUT.Rex",
+		rsem = f"{RESULTS_DIR}FILTER/rsem_outdir/RSEM.isoforms.results",
+		cov_aug = f"{RESULTS_DIR}FILTER/augustus_coverage.bed",
+		cov_helixer = f"{RESULTS_DIR}FILTER/helixer_coverage.bed",
+		cov_repeat = f"{RESULTS_DIR}FILTER/repeat_coverage.bed",
+		lnc_pred = f"{RESULTS_DIR}FILTER/lncrna_predict.csv",
+		pep = f"{RESULTS_DIR}FILTER/{pep_string}.pep"
 	output:
-		csv = "FILTER/scores.csv",
-		metrics = "FILTER/scores.metrics.txt"
+		csv = f"{RESULTS_DIR}FILTER/scores.csv",
+		metrics = f"{RESULTS_DIR}FILTER/scores.metrics.txt"
 	singularity: image
 	shell: """
 		python bin/score_filter.py \
