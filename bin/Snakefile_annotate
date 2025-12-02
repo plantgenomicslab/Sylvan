@@ -2427,7 +2427,8 @@ rule pasaPrep:
 		f"{RESULTS_DIR}TRANSCRIPT/PASA/transcripts_for_pasa.fasta"
 	singularity: image
 	params:
-		results_dir = RESULTS_DIR
+		results_dir = RESULTS_DIR,
+		results_dir_abs = RESULTS_DIR_ABS
 	shell:"""
 		ln -sf $(readlink -f {input.genome_fasta}) {params.results_dir}TRANSCRIPT/PASA/genome.fasta
 
@@ -2450,8 +2451,8 @@ rule pasaPrep:
 
 		grep "^>" {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta | sed 's/^>//' | awk '{{print $1"\t"$1}}' > {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta.cln
 
-		sed -i "s|DATABASE=.*|DATABASE=$(readlink -f {params.results_dir}TRANSCRIPT/PASA)/pasa.sqlite|" config/alignAssembly.config
-		sed -i "s|DATABASE=.*|DATABASE=$(readlink -f {params.results_dir}TRANSCRIPT/PASA)/pasa.sqlite|" config/annotCompare.config
+		sed -i "s|DATABASE=.*|DATABASE={params.results_dir_abs}/TRANSCRIPT/PASA/pasa.sqlite|" config/alignAssembly.config
+		sed -i "s|DATABASE=.*|DATABASE={params.results_dir_abs}/TRANSCRIPT/PASA/pasa.sqlite|" config/annotCompare.config
 		"""
 rule pasa:
 	input:
