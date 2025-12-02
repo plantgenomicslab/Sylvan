@@ -2451,8 +2451,12 @@ rule pasaPrep:
 
 		grep "^>" {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta | sed 's/^>//' | awk '{{print $1"\t"$1}}' > {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta.cln
 
-		sed -i "s|DATABASE=.*|DATABASE={params.results_dir_abs}/TRANSCRIPT/PASA/pasa.sqlite|" config/alignAssembly.config
-		sed -i "s|DATABASE=.*|DATABASE={params.results_dir_abs}/TRANSCRIPT/PASA/pasa.sqlite|" config/annotCompare.config
+		# Copy config files to results folder and update DATABASE path
+		mkdir -p {params.results_dir}config
+		cp config/alignAssembly.config {params.results_dir}config/alignAssembly.config
+		cp config/annotCompare.config {params.results_dir}config/annotCompare.config
+		sed -i "s|DATABASE=.*|DATABASE={params.results_dir_abs}/TRANSCRIPT/PASA/pasa.sqlite|" {params.results_dir}config/alignAssembly.config
+		sed -i "s|DATABASE=.*|DATABASE={params.results_dir_abs}/TRANSCRIPT/PASA/pasa.sqlite|" {params.results_dir}config/annotCompare.config
 		"""
 rule pasa:
 	input:
@@ -2483,7 +2487,7 @@ rule pasa:
 		export SLURM_TMPDIR={params.results_dir}TMP
 
 		/opt/miniconda3/opt/pasa-2.5.2/Launch_PASA_pipeline.pl \
-		-c $WORKDIR/config/alignAssembly.config \
+		-c $WORKDIR/{params.results_dir}config/alignAssembly.config \
 		--trans_gtf evigene.gtf \
 		-C -r -R \
 		--ALIGNER gmap,minimap2 \
@@ -2830,12 +2834,12 @@ rule pasaPost:
 			export SLURM_TMPDIR=$WORKDIR/{params.results_dir}TMP
 
 			/opt/miniconda3/opt/pasa-2.5.2/scripts/Load_Current_Gene_Annotations.dbi \
-			-c $WORKDIR/config/alignAssembly.config \
+			-c $WORKDIR/{params.results_dir}config/alignAssembly.config \
 			-g genome.fasta \
 			-P $WORKDIR/{input.evm}
 
 			/opt/miniconda3/opt/pasa-2.5.2/Launch_PASA_pipeline.pl \
-			-c $WORKDIR/config/annotCompare.config \
+			-c $WORKDIR/{params.results_dir}config/annotCompare.config \
 			--CPU {threads} \
 			-A \
 			-g genome.fasta \
