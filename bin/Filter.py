@@ -164,12 +164,15 @@ def filter_gff(gff_data, keep):
 	return gff_keep, gff_discard
 
 def getGeneId(attr):
-	m = re.search("ID=(FILTER\d+)(\.t[0-9]+){0,1}(\.[a-zA-Z\d\_\.]+){0,1};", attr)
+	# Handle various ID formats, not just FILTER prefix
+	m = re.search(r"ID=([A-Za-z_]+\d+)(\.t[0-9]+)?(\.[a-zA-Z\d\_\.]+)?;", attr)
+	if not m:
+		return None
 	match = m.group(1)
 	try:
-		return(match + m.group(2))
+		return(match + m.group(2)) if m.group(2) else match
 	except:
-		return(m.group(1))
+		return match
 
 def getParent(attr):
 	m = re.search("Parent=[a-zA-Z\d\._-]*;", attr)
