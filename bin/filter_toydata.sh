@@ -32,8 +32,8 @@ snakemake -p \
 	--singularity-args "--cleanenv --env PYTHONNOUSERSITE=1" \
 		"$@"
 
-# To generate report after run:
-# snakemake --report filter_report.html --snakefile bin/Snakefile_filter
+# Generate report after run
+SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml" snakemake --report results.html --snakefile bin/Snakefile_filter
 
 # To force rerun:
 # ./bin/filter_toydata.sh --forceall
