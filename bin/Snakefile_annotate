@@ -2487,7 +2487,7 @@ rule pasa:
 		export SLURM_TMPDIR={params.results_dir}TMP
 
 		/opt/miniconda3/opt/pasa-2.5.2/Launch_PASA_pipeline.pl \
-		-c $WORKDIR/{params.results_dir}config/alignAssembly.config \
+		-c {params.results_dir}config/alignAssembly.config \
 		--trans_gtf evigene.gtf \
 		-C -r -R \
 		--ALIGNER gmap,minimap2 \
@@ -2830,22 +2830,22 @@ rule pasaPost:
 
 			cd {params.pasa_dir}
 
-			export TMPDIR=$WORKDIR/{params.results_dir}TMP
-			export SLURM_TMPDIR=$WORKDIR/{params.results_dir}TMP
+			export TMPDIR={params.results_dir}TMP
+			export SLURM_TMPDIR={params.results_dir}TMP
 
 			/opt/miniconda3/opt/pasa-2.5.2/scripts/Load_Current_Gene_Annotations.dbi \
-			-c $WORKDIR/{params.results_dir}config/alignAssembly.config \
+			-c {params.results_dir}config/alignAssembly.config \
 			-g genome.fasta \
-			-P $WORKDIR/{input.evm}
+			-P {input.evm}
 
 			/opt/miniconda3/opt/pasa-2.5.2/Launch_PASA_pipeline.pl \
-			-c $WORKDIR/{params.results_dir}config/annotCompare.config \
+			-c {params.results_dir}config/annotCompare.config \
 			--CPU {threads} \
 			-A \
 			-g genome.fasta \
 			-t transcripts_for_pasa.fasta.clean
 
-			touch $WORKDIR/{params.results_dir}pasaPost.ok
+			touch {params.results_dir}pasaPost.ok
 			"""
 
 rule agat_clean_final:
