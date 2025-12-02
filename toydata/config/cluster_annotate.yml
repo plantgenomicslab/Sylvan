@@ -1,3 +1,11 @@
+################################################################################
+#                           SLURM CLUSTER CONFIGURATION
+#                    Sylvan Genome Annotation Pipeline
+################################################################################
+
+#===============================================================================
+# DEFAULT SETTINGS
+#===============================================================================
 __default__:
   account: cpu-s1-pgl-0                  # SLURM account
   partition: cpu-s1-pgl-0                # SLURM partition
@@ -8,71 +16,86 @@ __default__:
   time: 14-00:00:00
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
-helixer:
-  #account: placeholder                # SLURM gpu account
-  #partition: placeholder              # SLURM gpu parition
-  ncpus: 12
-  threads: 12
-  memory: 48g
-liftoff:
-  ncpus: 24
-  threads: 24
-  memory: 96g
-miniprot:
-  ncpus: 48
-  threads: 48
-  memory: 192g
-gmapPrep:
+
+################################################################################
+#                           ANNOTATE PHASE
+################################################################################
+
+#===============================================================================
+# Genome Preparation
+#===============================================================================
+prepareGenome:
+  ncpus: 1
+  memory: 4g
+genomeSplitJoin:
+  ncpus: 2
+  memory: 8g
+
+#===============================================================================
+# Repeat Masking (GETA)
+#===============================================================================
+RepeatMasker_species:
+  ncpus: 4
+  threads: 4
+  memory: 16g
+RepeatModeler:
+  ncpus: 4
+  threads: 4
+  memory: 16g
+RepeatMasker_custom:
+  ncpus: 4
+  threads: 4
+  memory: 16g
+RepeatMasker_merge:
+  ncpus: 4
+  threads: 4
+  memory: 16g
+
+#===============================================================================
+# RNA-seq Quality Control (GETA)
+#===============================================================================
+fastp_PAIRED:
+  ncpus: 8
+  threads: 8
+  memory: 32g
+fastp_SINGLE:
+  ncpus: 8
+  threads: 8
+  memory: 32g
+
+#===============================================================================
+# RNA-seq Alignment - HiSat2 (GETA)
+#===============================================================================
+HiSat2_build:
   ncpus: 4
   memory: 16g
-gmapExon:
+HiSat2_PAIRED:
   ncpus: 16
   threads: 16
   memory: 64g
-bam2Fasta:
-  ncpus: 32
-  threads: 32
-  memory: 124g
-spades:
+HiSat2_SINGLE:
+  ncpus: 16
+  threads: 16
+  memory: 64g
+mergeHiSat:
   ncpus: 48
   threads: 48
   memory: 192g
-evigene:
-  ncpus: 12
-  threads: 12
-  memory: 48g
-pasaPrep:
-  ncpus: 4
-  memory: 16g
-pasa:
-  ncpus: 64
-  threads: 64
-  memory: 216g
+  sortthreads: 8
+  sortmem: 16G
+HiSat2_split:
+  ncpus: 48
+  threads: 48
+  memory: 192g
 addXS:
   ncpus: 12
   memory: 48g
-psiClass_HiSat:
-  ncpus: 16
-  threads: 16
-  memory: 64g
-stringtie_HiSat:
-  ncpus: 32
-  threads: 32
-  memory: 128g
-psiClass_STAR:
-  ncpus: 48
-  threads: 48
-  memory: 192g
-stringtie_STAR:
-  ncpus: 32
-  threads: 32
-  memory: 128g
-bamToFastq:
-  ncpus:  12
-  threads: 12
-  memory: 48g
+
+#===============================================================================
+# RNA-seq Alignment - STAR (GETA)
+#===============================================================================
 STAR_generate:
-  ncpus:  12
+  ncpus: 12
   threads: 12
   memory: 48g
 STAR_paired:
@@ -93,82 +116,36 @@ STAR_split:
   ncpus: 4
   threads: 4
   memory: 16g
-convertToEvmFormat:
-  ncpus: 1
-  memory: 4g
-combineEVMInputs:
-  ncpus: 1
-  memory: 4g
-partitionEVM:
-  ncpus: 12
-  memory: 48g
-writeEVMCommands:
-  ncpus: 4
-  memory: 16g
-runEVM:
-  ncpus: 1
-  memory: "{resources.mem_mb}M"
-recombineEVM:
-  ncpus: 4
-  memory: 16g
-pasaPost:
-  ncpus: 48
-  threads: 48
-  memory: 192g
-prepareGenome:
-  ncpus: 1
-  memory: 4g
-RepeatMasker_species:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-RepeatModeler:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-RepeatMasker_custom:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-RepeatMasker_merge:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-fastp_PAIRED:
-  ncpus: 8
-  threads: 8
-  memory: 32g
-fastp_SINGLE:
-  ncpus: 8
-  threads: 8
-  memory: 32g
-HiSat2_split:
-  ncpus: 48
-  threads: 48
-  memory: 192g
-HiSat2_build:
-  ncpus: 4
-  memory: 16g
-HiSat2_PAIRED:
+
+#===============================================================================
+# Transcript Assembly (GETA)
+#===============================================================================
+psiClass_HiSat:
   ncpus: 16
   threads: 16
   memory: 64g
-HiSat2_SINGLE:
-  ncpus: 16
-  threads: 16
-  memory: 64g
-mergeHiSat:
+stringtie_HiSat:
+  ncpus: 32
+  threads: 32
+  memory: 128g
+psiClass_STAR:
   ncpus: 48
   threads: 48
   memory: 192g
-  sortthreads: 8
-  sortmem: 16G
+stringtie_STAR:
+  ncpus: 32
+  threads: 32
+  memory: 128g
 Sam2Transfrag:
   ncpus: 4
   memory: 16g
 mergeTransfrag:
   ncpus: 4
   memory: 16g
+
+#===============================================================================
+# TransDecoder - ORF Prediction (GETA)
+#===============================================================================
 transDecoder_LongOrfs:
   ncpus: 4
   memory: 16g
@@ -184,16 +161,10 @@ GFF3Clear:
 transfragComplete:
   ncpus: 4
   memory: 16g
-ORF2bestGeneModels:
-  ncpus: 4
-  memory: 16g
-bestGeneModels2lowIdentity:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-genomeSplitJoin:
-  ncpus: 2
-  memory: 8g
+
+#===============================================================================
+# Homolog Alignment - Miniprot/Genewise (GETA)
+#===============================================================================
 mergeProteins:
   ncpus: 4
   threads: 4
@@ -202,6 +173,10 @@ splitProteins:
   ncpus: 4
   threads: 4
   memory: 16g
+miniprot:
+  ncpus: 48
+  threads: 48
+  memory: 192g
 miniprot2genewise:
   ncpus: 1
   memory: 4g
@@ -215,6 +190,10 @@ geneRegion2Genewise:
 genewiseGFF2GFF3:
   ncpus: 4
   memory: 16g
+
+#===============================================================================
+# Gene Model Combination - Step 1 (GETA)
+#===============================================================================
 combineGeneModelsPlus:
   ncpus: 4
   memory: 16g
@@ -227,6 +206,17 @@ aggregate_CombineGeneModels:
 clearCombined:
   ncpus: 4
   memory: 16g
+ORF2bestGeneModels:
+  ncpus: 4
+  memory: 16g
+bestGeneModels2lowIdentity:
+  ncpus: 4
+  threads: 4
+  memory: 16g
+
+#===============================================================================
+# Augustus Training & Prediction (GETA)
+#===============================================================================
 geneModels2AugusutsTrainingInput:
   ncpus: 4
   threads: 4
@@ -244,6 +234,10 @@ augustusWithHints:
 combineAugustusWithHints:
   ncpus: 4
   memory: 16g
+
+#===============================================================================
+# Gene Model Combination - Step 2 (GETA)
+#===============================================================================
 combineGeneModelsPlus_step6:
   ncpus: 4
   memory: 16g
@@ -259,6 +253,10 @@ clearCombined_step6:
 pickBetterModels:
   ncpus: 4
   memory: 16g
+
+#===============================================================================
+# Gene Model Filling & Alternative Splicing (GETA)
+#===============================================================================
 fillingEndsOfGeneModels_ef:
   ncpus: 4
   memory: 16g
@@ -280,6 +278,10 @@ AS_gf:
 aggregateAS_gf:
   ncpus: 4
   memory: 16g
+
+#===============================================================================
+# Gene Model Filtering (GETA)
+#===============================================================================
 extractTranscriptsForFilter:
   ncpus: 4
   memory: 16g
@@ -313,10 +315,108 @@ fillingEndsOfGeneModels_final:
 GETA_output:
   ncpus: 4
   memory: 16g
+
+#===============================================================================
+# Ab Initio Prediction - Helixer
+#===============================================================================
+helixer:
+  #account: placeholder                # SLURM gpu account
+  #partition: placeholder              # SLURM gpu parition
+  ncpus: 12
+  threads: 12
+  memory: 48g
+
+#===============================================================================
+# Liftover - LiftOff & GMAP
+#===============================================================================
+liftoff:
+  ncpus: 24
+  threads: 24
+  memory: 96g
+gmapPrep:
+  ncpus: 4
+  memory: 16g
+gmapExon:
+  ncpus: 16
+  threads: 16
+  memory: 64g
+
+#===============================================================================
+# Transcript Assembly from Reads - SPAdes & Evigene
+#===============================================================================
+bamToFastq:
+  ncpus: 12
+  threads: 12
+  memory: 48g
+bam2Fasta:
+  ncpus: 32
+  threads: 32
+  memory: 124g
+spades:
+  ncpus: 48
+  threads: 48
+  memory: 192g
+evigene:
+  ncpus: 12
+  threads: 12
+  memory: 48g
+
+#===============================================================================
+# PASA - Transcript Alignment & Assembly
+#===============================================================================
+pasaPrep:
+  ncpus: 4
+  memory: 16g
+pasa:
+  ncpus: 64
+  threads: 64
+  memory: 216g
+
+#===============================================================================
+# EVM - Evidence Modeler
+#===============================================================================
+convertToEvmFormat:
+  ncpus: 1
+  memory: 4g
+combineEVMInputs:
+  ncpus: 1
+  memory: 4g
+partitionEVM:
+  ncpus: 12
+  memory: 48g
+writeEVMCommands:
+  ncpus: 4
+  memory: 16g
+runEVM:
+  ncpus: 1
+  memory: "{resources.mem_mb}M"
+recombineEVM:
+  ncpus: 4
+  memory: 16g
+
+#===============================================================================
+# Post-EVM - PASA Update
+#===============================================================================
+pasaPost:
+  ncpus: 48
+  threads: 48
+  memory: 192g
+
+################################################################################
+#                           FILTER PHASE
+################################################################################
+
+#===============================================================================
+# Portcullis - Junction Filtering
+#===============================================================================
 portcullis:
   ncpus: 12
   threads: 12
   memory: 48g
+
+#===============================================================================
+# Mikado - Transcript Selection
+#===============================================================================
 mikadoConfigure:
   ncpus: 1
   memory: 4g
@@ -344,6 +444,10 @@ mikadoSerialise:
 mikadoPick:
   ncpus: 4
   memory: 16g
+
+#===============================================================================
+# Evidence-Based Combination
+#===============================================================================
 EvidentialCombine:
   ncpus: 16
   memory: 64g

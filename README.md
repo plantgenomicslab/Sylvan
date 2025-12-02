@@ -6,18 +6,81 @@ Sylvan is a comprehensive genome annotation pipeline that combines EVM/PASA, GET
 
 ## Pipeline Workflow
 
-The Sylvan pipeline consists of interconnected modules that process evidence from multiple sources and combine them into a unified gene model.
+The Sylvan pipeline consists of two main phases with interconnected modules that process evidence from multiple sources and combine them into a unified gene model.
 
 ![Pipeline DAG](https://github.com/plantgenomicslab/Sylvan/blob/main/docs/images/rulegraph.png?raw=true)
 
-The workflow includes:
-- **Repeat Masking**: RepeatMasker with species-specific and custom libraries
-- **RNA-seq Processing**: STAR alignment, StringTie/PsiCLASS assembly, PASA refinement
-- **Protein Homology**: Miniprot, GeneWise, and GMAP alignments
-- **Ab Initio Prediction**: Helixer (deep learning) and Augustus (HMM-based)
-- **Liftover**: LiftOff for transferring annotations from neighbor species
-- **Evidence Combination**: EvidenceModeler (EVM) integration with PASA updates
-- **Consistent outputs**: All intermediate/final outputs live under `<repo>/results/` (e.g., `results/EVM`, `results/GETA/RepeatMasker/...`); no working-directory-sensitive symlinks.
+---
+
+## Phase 1: Annotate
+
+The annotation phase generates gene models from multiple evidence sources.
+
+### Evidence Generation
+- **Repeat Masking**
+  - RepeatMasker with species-specific libraries
+  - RepeatModeler for de novo repeat identification
+  - Custom repeat library support (EDTA)
+
+- **RNA-seq Processing**
+  - Quality control with fastp
+  - Alignment with HiSat2 and STAR
+  - Transcript assembly with StringTie and PsiCLASS
+  - PASA refinement and clustering
+
+- **Protein Homology**
+  - Miniprot for fast protein-to-genome alignment
+  - GeneWise for refined gene structure prediction
+  - GMAP for exonerate-style alignments
+
+- **Ab Initio Prediction**
+  - Helixer (deep learning-based)
+  - Augustus (HMM-based, trained on your data)
+
+- **Liftover**
+  - LiftOff for transferring annotations from neighbor species
+
+### Evidence Combination
+- **GETA Pipeline**
+  - TransDecoder for ORF prediction
+  - Gene model combination and filtering
+  - Alternative splicing detection
+
+- **EvidenceModeler (EVM)**
+  - Weighted evidence integration
+  - Consensus gene model generation
+
+- **PASA Update**
+  - UTR addition and refinement
+  - Alternative isoform incorporation
+
+**Output:** `results/complete_draft.gff3`
+
+---
+
+## Phase 2: Filter
+
+The filter phase refines and validates the annotation using additional evidence.
+
+### Junction Filtering
+- **Portcullis**
+  - Splice junction validation from RNA-seq
+
+### Transcript Selection
+- **Mikado**
+  - Configure scoring metrics
+  - TransDecoder ORF prediction
+  - BlastX homology search
+  - Best transcript selection per locus
+
+### Evidence-Based Combination
+- **EvidentialCombine**
+  - Final integration of all evidence
+  - Quality filtering and validation
+
+**Output:** `results/FILTER/filter.gff3`
+
+---
 
 ## Features
 
@@ -82,7 +145,7 @@ sudo singularity build sylvan.sif Sylvan.def
 
 ## Input Requirements
 
-### Annotation Phase
+### Annotate Phase
 
 | Input | Description | Config Field |
 |-------|-------------|--------------|
@@ -92,7 +155,6 @@ sudo singularity build sylvan.sif Sylvan.def
 | Neighbor species | GFF3 + genome FASTA files | `liftoff.neighbor_gff`, `liftoff.neighbor_fasta` |
 | Repeat library | EDTA output (`.TElib.fa`) | `geta.RM_lib` |
 | Singularity image | Path to `sylvan.sif` | `singularity` |
-| RexDB (filter) | RepeatExplorer protein DB (retroelement proteins); e.g. Viridiplantae_v4.0.fasta from https://github.com/repeatexplorer/rexdb | `RexDB` |
 
 ### Filter Phase (additional)
 
@@ -110,48 +172,59 @@ Sylvan uses two separate configuration files:
 | `config_annotate.yml` | **Pipeline options**: input paths, species parameters, tool settings |
 | `cluster_annotate.yml` | **SLURM resources**: CPU, memory, partition for each rule |
 
-**`config_annotate.yml`** contains:
+### Pipeline Config (`config_annotate.yml`)
+
+Contains:
 - Input file paths (genome, RNA-seq, proteins, neighbor species)
 - Species-specific settings (Helixer model, Augustus species)
 - Tool parameters (max intron length, EVM weights)
 - Output prefix and directories
 
-**`cluster_annotate.yml`** contains:
-- SLURM account and partition (in `__default__` section)
-- Per-rule resource allocation (CPUs, memory, time limit)
-- Log file locations
+### Cluster Config (`cluster_annotate.yml`)
 
-Example structure:
+Contains SLURM resource allocation organized by pipeline phase:
+
 ```yaml
-__default__:
-  account: your-account      # SLURM billing account
-  partition: your-partition  # SLURM partition (queue)
-  memory: 4g                 # Default memory
-  ncpus: 1                   # Default CPUs
-  time: 14-00:00:00          # Max wall time
-  output: results/logs/{rule}_{wildcards}.out
-  error: results/logs/{rule}_{wildcards}.err
+################################################################################
+#                           ANNOTATE PHASE
+################################################################################
 
-# Override per rule:
-pasa:
-  ncpus: 64
-  threads: 64
-  memory: 216g
+#===============================================================================
+# Genome Preparation
+#===============================================================================
+prepareGenome:
+  ncpus: 1
+  memory: 4g
 
-Output locations:
-- `results/` is created under the repo root; all modules write there regardless of current working directory.
-- RepeatMasker/RepeatModeler run inside `results/GETA/RepeatMasker/...`, so temporary `.RepeatMaskerCache`/`RM_*` folders also stay under `results/`.
-- EVM commands/outputs live in `results/EVM/` (absolute paths in command lists; no `EVM -> results/EVM` symlink needed).
+#===============================================================================
+# Repeat Masking (GETA)
+#===============================================================================
+RepeatMasker_species:
+  ncpus: 4
+  threads: 4
+  memory: 16g
+# ... more rules ...
+
+#===============================================================================
+# EVM - Evidence Modeler
+#===============================================================================
+runEVM:
+  ncpus: 1
+  memory: 8g
+
+################################################################################
+#                           FILTER PHASE
+################################################################################
+
+#===============================================================================
+# Mikado - Transcript Selection
+#===============================================================================
+mikadoPick:
+  ncpus: 4
+  memory: 16g
 ```
 
 This separation allows you to reuse the same pipeline config across different clusters by only changing the cluster config.
-
-Copy and edit the configuration files:
-
-```bash
-cp config/config_annotate.yml my_config.yml
-cp config/cluster_annotate.yml my_cluster.yml
-```
 
 ### Using Custom Config Location
 
@@ -209,7 +282,7 @@ __default__:
 
 ## Running the Pipeline
 
-### Annotation Phase
+### Annotate Phase
 
 ```bash
 # Dry run
@@ -247,19 +320,42 @@ snakemake --report report.html --snakefile bin/Snakefile_annotate
 
 ## Output
 
-All outputs are in `results/`:
+All outputs are organized under `results/`:
 
 ```
 results/
-├── complete_draft.gff3      # Final combined annotation
-├── AB_INITIO/Helixer/       # Helixer predictions
-├── GETA/Augustus/           # Augustus predictions
-├── LIFTOVER/LiftOff/        # Neighbor species liftover
-├── TRANSCRIPT/PASA/         # PASA assemblies
-├── PROTEIN/                 # Protein alignments
-├── EVM/                     # EvidenceModeler output
-├── FILTER/filter.gff3       # Filtered final output
-└── logs/                    # SLURM job logs
+├── complete_draft.gff3          # Annotate phase output
+│
+├── AB_INITIO/
+│   └── Helixer/                 # Helixer predictions
+│
+├── GETA/
+│   ├── RepeatMasker/            # Repeat masking results
+│   ├── Augustus/                # Augustus predictions
+│   ├── transcript/              # TransDecoder results
+│   ├── homolog/                 # Protein alignments
+│   └── CombineGeneModels/       # GETA gene models
+│
+├── LIFTOVER/
+│   └── LiftOff/                 # Neighbor species liftover
+│
+├── TRANSCRIPT/
+│   ├── PASA/                    # PASA assemblies
+│   ├── spades/                  # De novo assembly
+│   └── evigene/                 # Evigene clustering
+│
+├── PROTEIN/                     # Protein alignments
+│
+├── EVM/                         # EvidenceModeler output
+│
+├── FILTER/
+│   ├── portcullis/              # Junction filtering
+│   ├── mikado/                  # Mikado results
+│   └── filter.gff3              # Filter phase output
+│
+├── config/                      # Runtime config copies
+│
+└── logs/                        # SLURM job logs
 ```
 
 ## Formatting Output
