@@ -37,7 +37,7 @@ snakemake -p \
 		"$@"
 
 # To generate report after run:
-# snakemake --report report.html --snakefile bin/Snakefile_annotate
+# snakemake --report results/report.html --snakefile bin/Snakefile_annotate
 
 # To force rerun:
 # ./bin/annotate.sh --forceall
