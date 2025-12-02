@@ -15,7 +15,7 @@ Input:
   augustus_gff: results/GETA/Augustus/augustus.gff3     # [path] Augustus annotation (GETA/Augustus/augustus.gff3)
   helixer_gff: results/AB_INITIO/Helixer/helixer.gff3   # [path] Helixer annotation (AB_INITIO/Helixer/helixer.gff3)
   repeat_gff: results/GETA/RepeatMasker/genome.repeat.gff3 # [path] Repeat annotation
-  HmmDB: /usr/local/src/Pfam-A.hmm             # [path] PFAM directory for Pfam scanning (inside container)
+  HmmDB: /usr/local/src                        # [path] PFAM directory for pfam scanning (contains Pfam-A.hmm files)
   RexDB: toydata/misc/Viridiplantae_v4.0.fasta # [path] RexDB protein FASTA for retroelement filtering
                                                # Example (Viridiplantae v4.0): wget -O toydata/misc/Viridiplantae_v4.0.fasta https://raw.githubusercontent.com/repeatexplorer/rexdb/refs/heads/main/Viridiplantae_v4.0.fasta
   busco_lin: eudicots_odb10                    # [string] Busco lineage to use for filter monitoring (e.g. eudicots_odb10)

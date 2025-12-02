@@ -316,6 +316,7 @@ rule blastDB:
 rule blastRexDB:
 	input: config_dict['Input']['RexDB']
 	output: f"{RESULTS_DIR}FILTER/rexdb.pdb"
+	singularity: image
 	params:
 		results_dir = RESULTS_DIR
 	shell: "makeblastdb -in {input} -dbtype prot -out {params.results_dir}FILTER/rexdb"
