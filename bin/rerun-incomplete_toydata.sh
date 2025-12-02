@@ -34,4 +34,4 @@ snakemake -p \
 		"$@"
 
 # Generate report after run
-SYLVAN_CONFIG="toydata/config/config_annotate.yml" snakemake --report report.html --snakefile bin/Snakefile_annotate
+SYLVAN_CONFIG="toydata/config/config_annotate.yml" snakemake --report results/report.html --snakefile bin/Snakefile_annotate

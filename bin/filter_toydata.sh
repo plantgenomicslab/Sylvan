@@ -33,7 +33,7 @@ snakemake -p \
 		"$@"
 
 # Generate report after run
-SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml" snakemake --report results.html --snakefile bin/Snakefile_filter
+SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml" snakemake --report results/report.html --snakefile bin/Snakefile_filter
 
 # To force rerun:
 # ./bin/filter_toydata.sh --forceall

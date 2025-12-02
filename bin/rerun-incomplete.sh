@@ -36,4 +36,4 @@ snakemake -p \
 		"$@"
 
 # Generate report after run
-snakemake --report report.html --snakefile bin/Snakefile_annotate
+snakemake --report results/report.html --snakefile bin/Snakefile_annotate
