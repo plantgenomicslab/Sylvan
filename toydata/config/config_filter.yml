@@ -48,7 +48,7 @@ Cutoff:
 ###############################################################################################
  
 Threads:
-  PfamScan: 48
+  PfamScan: 24
   sortSTAR: 16
   blast: 16
   STAR_generate: 12
@@ -57,7 +57,7 @@ Threads:
   STAR: 12
   mergeSTAR: 16
   calculateRSEMExpression: 16
-  lncRNA_pred: 48
+  lncRNA_pred: 24
   STAR_index: 12
 
 
@@ -72,8 +72,8 @@ __default__:
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
 PfamScan:
-  ncpus: 48
-  memory: 192g
+  ncpus: 24
+  memory: 96g
 RSEM:
   ncpus: 32
   memory: 128g
@@ -120,8 +120,8 @@ prepRSEM:
   ncpus: 16
   memory: 64g
 lncRNA_pred:
-  ncpus: 48
-  memory: 192g
+  ncpus: 24
+  memory: 96g
 STAR_index:
   ncpus: 12
   memory: 48g
