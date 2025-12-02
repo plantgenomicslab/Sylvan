@@ -33,5 +33,5 @@ snakemake -p \
 	--singularity-args "--cleanenv --env PYTHONNOUSERSITE=1" \
 		"$@"
 
-# To generate report after run:
-# snakemake --report report.html --snakefile bin/Snakefile_annotate
+# Generate report after run
+SYLVAN_CONFIG="toydata/config/config_annotate.yml" snakemake --report report.html --snakefile bin/Snakefile_annotate
