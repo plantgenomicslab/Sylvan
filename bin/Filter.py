@@ -184,8 +184,14 @@ def checkKeep(id, names):
 	return(val)
 
 def formatKeepIDs(id):
-	base = re.search("^(FILTER\d+)\.*", id).group(1)
-	return(base)
+	# Handle various ID formats - extract base gene ID before any suffix
+	if pd.isna(id):
+		return id
+	# Try to match pattern like "PREFIX123" or "PREFIX123.1"
+	match = re.search(r"^([A-Za-z_]+\d+)", str(id))
+	if match:
+		return match.group(1)
+	return id
 
 def getGene(data, starts, name_vec):
 	ns = data.loc[(data[2]=='mRNA') & (data[8].str.startswith(starts))]
