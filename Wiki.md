@@ -405,6 +405,27 @@ toydata/
 | Chr4_3 | 6,195,018 bp | 36.69 |
 | **Total** | **18,585,138 bp** | 36.20 |
 
+### TAIR10 Reference Annotation (Chr4)
+
+For comparison, the official TAIR10 annotation of *Arabidopsis thaliana* (Col-0) chromosome 4 contains:
+
+| Feature Type | Count |
+|--------------|-------|
+| Protein-coding genes | 4,124 |
+| pre-tRNA genes | 79 |
+| rRNA genes | 0 |
+| snRNA genes | 0 |
+| snoRNA genes | 11 |
+| miRNA genes | 28 |
+| Other RNA genes | 62 |
+| Pseudogenes | 121 |
+| Transposable element (TE) genes | 711 |
+| **Total annotated loci** | **5,410** |
+
+> **Note:** The original chromosome 4 paper reported 3,744 protein-coding genes. TAIR10 increased this count to 4,124 as annotation methods improved.
+>
+> Source: [Phoenix Bioinformatics / TAIR](https://www.arabidopsis.org/)
+
 ### Neighbor Species
 
 | Code | Species | Common Name |
