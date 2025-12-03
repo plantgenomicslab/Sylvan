@@ -526,7 +526,20 @@ The following summarizes the runtime distribution across all pipeline rules when
 - **Parallelizable rules**: Rules like `geneRegion2Genewise`, `gmapExon`, and `STAR_paired` run as multiple parallel jobs (shown as multiple dots), significantly reducing wall-clock time
 - **GPU-accelerated**: `helixer` benefits from GPU acceleration when available
 
-The total wall-clock time depends heavily on cluster availability and parallelization. With sufficient resources, the toy dataset completes in 4-8 hours.
+**Runtime variability:**
+
+Actual runtime will vary significantly depending on your hardware and cluster configuration:
+
+| Factor | Impact |
+|--------|--------|
+| **CPU speed** | Faster clock speeds reduce single-threaded bottlenecks |
+| **Available nodes** | More nodes = more parallel jobs = faster wall-clock time |
+| **Memory per node** | Insufficient memory causes job failures or swapping |
+| **Storage I/O** | GPFS/Lustre faster than NFS; SSD faster than HDD |
+| **Queue wait time** | Busy clusters add significant delays between jobs |
+| **GPU availability** | Helixer runs ~10x faster with GPU acceleration |
+
+With the test environment above (4 nodes, 256 CPUs, 256 GB/node), the toy dataset completes in **4-8 hours** wall-clock time. On smaller clusters or shared resources, expect longer runtimes.
 
 ---
 
