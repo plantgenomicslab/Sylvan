@@ -24,7 +24,7 @@ The annotation phase generates gene models from multiple evidence sources.
 
 - **RNA-seq Processing**
   - Quality control with fastp
-  - Alignment with HiSat2 and STAR
+  - Alignment with STAR
   - Transcript assembly with StringTie and PsiCLASS
   - PASA refinement and clustering
 
@@ -44,7 +44,6 @@ The annotation phase generates gene models from multiple evidence sources.
 - **GETA Pipeline**
   - TransDecoder for ORF prediction
   - Gene model combination and filtering
-  - Alternative splicing detection
 
 - **EvidenceModeler (EVM)**
   - Weighted evidence integration
