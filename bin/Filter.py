@@ -125,16 +125,22 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	filter = filter.merge(lncrna, on="transcript_id", how="left")
 
 	# Identify strong keep hits while maintaining as much feature diversity as possible
-	data["keep"] = pd.Series(((filter["COVERAGE"] == True) & ((filter["blast_pident"] == True) & (filter["blast_qcovs"] == True) & (filter["PFAM"] == True) | ((filter["AUGUSTUS"] == True) & (filter["HELIXER"] == True)))) |
-			  ((filter["singleExon"] == False) & (filter["LncRNA_predict"] == False) & (filter["COVERAGE"] == True) & (filter["TPM"] == True)) |
-			  ((filter["singleExon"] == False) & (filter["PFAM"] == True) & (filter["blast_pident"] == True) & (filter["blast_qcovs"] == True)) |
-			  ((filter["AUGUSTUS"] == True) & (filter["HELIXER"] == True) & ((filter["rex_pident"] == False) & (filter["rex_qcovs"] == False)) & (filter["REPEAT"] == False) & (filter["LncRNA_predict"] == False) & (filter["singleExon"] == False)))).fillna(False)
+	keep_cond = (
+		((filter["COVERAGE"] == True) & (((filter["blast_pident"] == True) & (filter["blast_qcovs"] == True) & (filter["PFAM"] == True)) | ((filter["AUGUSTUS"] == True) & (filter["HELIXER"] == True)))) |
+		((filter["singleExon"] == False) & (filter["LncRNA_predict"] == False) & (filter["COVERAGE"] == True) & (filter["TPM"] == True)) |
+		((filter["singleExon"] == False) & (filter["PFAM"] == True) & (filter["blast_pident"] == True) & (filter["blast_qcovs"] == True)) |
+		((filter["AUGUSTUS"] == True) & (filter["HELIXER"] == True) & ((filter["rex_pident"] == False) & (filter["rex_qcovs"] == False)) & (filter["REPEAT"] == False) & (filter["LncRNA_predict"] == False) & (filter["singleExon"] == False))
+	)
+	data["keep"] = pd.Series(keep_cond).fillna(False)
 
 	# Identify strong discard hits while maintaining as much feature diversity as possible
-	data["discard"] = pd.Series((filter["COVERAGE"] == False)  & (filter["AUGUSTUS"] == False) & (filter["HELIXER"] == False) & (filter["blast_pident"] == False) & (filter["blast_qcovs"] == False) & (filter["PFAM"] == False) |
+	discard_cond = (
+		((filter["COVERAGE"] == False)  & (filter["AUGUSTUS"] == False) & (filter["HELIXER"] == False) & (filter["blast_pident"] == False) & (filter["blast_qcovs"] == False) & (filter["PFAM"] == False)) |
 		((filter["singleExon"] == True) & ((filter["blast_pident"] == False) & (filter["blast_qcovs"] == False)) & (filter["PFAM"] == False) & (filter["COVERAGE"] == False)) |
-		(((filter["rex_pident"] == True) & (filter["rex_qcovs"] == True)) & (filter["REPEAT"] == True)) & ((filter["blast_pident"] == False) & (filter["blast_qcovs"] == False)) |
-		(filter["LncRNA_predict"] == True) & (filter["singleExon"] == True) & (filter["PFAM"] == "False") & (filter["AUGUSTUS"] == False) & (filter["HELIXER"] == False))).fillna(False)
+		((((filter["rex_pident"] == True) & (filter["rex_qcovs"] == True)) & (filter["REPEAT"] == True)) & ((filter["blast_pident"] == False) & (filter["blast_qcovs"] == False))) |
+		((filter["LncRNA_predict"] == True) & (filter["singleExon"] == True) & (filter["PFAM"] == "False") & (filter["AUGUSTUS"] == False) & (filter["HELIXER"] == False))
+	)
+	data["discard"] = pd.Series(discard_cond).fillna(False)
 	
 	data["label"] = data.apply(lambda x: "Discard" if x["discard"] else ("Keep" if x["keep"] else "None"), axis=1)
 	
