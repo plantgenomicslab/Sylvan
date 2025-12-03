@@ -1301,8 +1301,14 @@ rule BGM2AT:
 				f"{params.a_species}"
 			)
 
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f firsttest.out {params.results_dir}GETA/Augustus/firsttest.out")
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f secondtest.out {params.results_dir}GETA/Augustus/secondtest.out")
+			shell(
+				f"cd {params.results_dir}GETA/Augustus && "
+				f'if [ "$(realpath firsttest.out)" != "$(realpath {params.results_dir}GETA/Augustus/firsttest.out)" ]; then '
+				f"mv -f firsttest.out {params.results_dir}GETA/Augustus/firsttest.out; fi")
+			shell(
+				f"cd {params.results_dir}GETA/Augustus && "
+				f'if [ "$(realpath secondtest.out)" != "$(realpath {params.results_dir}GETA/Augustus/secondtest.out)" ]; then '
+				f"mv -f secondtest.out {params.results_dir}GETA/Augustus/secondtest.out; fi")
 			# Clean up intermediate files created by BGM2AT in this directory
 			shell(f"cd {params.results_dir}GETA/Augustus && mv -f ati.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
 			shell(f"cd {params.results_dir}GETA/Augustus && mv -f genes.*.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
