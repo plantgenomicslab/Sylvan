@@ -1287,22 +1287,22 @@ rule BGM2AT:
 			if flanking_length == 0:
 				flanking_length = 200
 			
-            shell(
-                f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training && "
-                f"rm -rf {params.results_dir}GETA/Augustus/config/* && "
-                # Copy Augustus config from inside the Singularity image into the run directory
-                f"singularity exec {params.singularity_abs} /bin/sh -c "
-                f"\"cp -rf /opt/miniconda3/config/. {params.results_dir}GETA/Augustus/config\" && "
-                f"cd {params.results_dir}GETA/Augustus && "
-                f"export AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
-                f"singularity exec {params.singularity_abs} BGM2AT "
-                f"{params.args} "
-                f"--flanking_length {flanking_length} "
-                f"--CPU {threads} "
-                f"--onlytrain_GFF3 {input.one} {input.two} "
-                f"{input.genome_fasta} "
-                f"{params.a_species}"
-            )
+			shell(
+				f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training && "
+				f"rm -rf {params.results_dir}GETA/Augustus/config/* && "
+				# Copy Augustus config from inside the Singularity image into the run directory
+				f"singularity exec {params.singularity_abs} /bin/sh -c "
+				f"\"cp -rf /opt/miniconda3/config/. {params.results_dir}GETA/Augustus/config\" && "
+				f"cd {params.results_dir}GETA/Augustus && "
+				f"export AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
+				f"singularity exec {params.singularity_abs} BGM2AT "
+				f"{params.args} "
+				f"--flanking_length {flanking_length} "
+				f"--CPU {threads} "
+				f"--onlytrain_GFF3 {input.one} {input.two} "
+				f"{input.genome_fasta} "
+				f"{params.a_species}"
+			)
 
 			shell(
 				f"cd {params.results_dir}GETA/Augustus && "
