@@ -1263,29 +1263,30 @@ rule BGM2AT:
 					start_end = f"{fields[3]}\t{fields[4]}"
 					gene_info.setdefault(chromosome, {}).setdefault(strand, {})[start_end] = 1
 
-		for chromosome in gene_info:
-			for strand in gene_info[chromosome]:
-				regions = sorted(gene_info[chromosome][strand].keys())
-				first_region = regions.pop(0)
-				start, end = map(int, first_region.split("\t"))
-				gene_length.append(end - start + 1)
-				for region in regions:
-					aa, bb = map(int, region.split("\t"))
-					gene_length.append(bb - aa + 1)
-					distance = aa - end - 1
-					if distance >= 50:
-						flanking_length.append(distance)
-					end = max(end, bb)
+	for chromosome in gene_info:
+		for strand in gene_info[chromosome]:
+			regions = sorted(gene_info[chromosome][strand].keys())
+			first_region = regions.pop(0)
+			start, end = map(int, first_region.split("\t"))
+			gene_length.append(end - start + 1)
+			for region in regions:
+				aa, bb = map(int, region.split("\t"))
+				gene_length.append(bb - aa + 1)
+				distance = aa - end - 1
+				if distance >= 50:
+					flanking_length.append(distance)
+				end = max(end, bb)
 
-			gene_length.sort()
-			flanking_length.sort()
-			mid_flanking_length = flanking_length[len(flanking_length) // 2] if flanking_length else 0
-			flanking_length = int(mid_flanking_length / 8) if flanking_length else 0
-			mid_gene_length = gene_length[len(gene_length) // 2] if gene_length else 0
-			if flanking_length >= mid_gene_length and mid_gene_length > 0:
-				flanking_length = mid_gene_length
-			if flanking_length == 0:
-				flanking_length = 200
+	# Derive a single flanking length value after collecting all distances
+	gene_length.sort()
+	flanking_length.sort()
+	mid_flanking_length = flanking_length[len(flanking_length) // 2] if flanking_length else 0
+	flanking_length = int(mid_flanking_length / 8) if flanking_length else 0
+	mid_gene_length = gene_length[len(gene_length) // 2] if gene_length else 0
+	if flanking_length >= mid_gene_length and mid_gene_length > 0:
+		flanking_length = mid_gene_length
+	if flanking_length == 0:
+		flanking_length = 200
 			
 			# Copy Augustus config from inside the Singularity image into the run directory
 			shell(
