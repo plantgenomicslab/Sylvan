@@ -1236,6 +1236,7 @@ rule BGM2AT:
 		singularity_abs = image,
 		results_dir = RESULTS_DIR
 	run:
+		print(f"BGM2AT is requesting mem_mb: {resources.mem_mb}")
 		gene_info = {}
 		flanking_length = []
 		gene_length = []
