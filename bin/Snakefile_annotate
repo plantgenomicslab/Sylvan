@@ -1227,6 +1227,8 @@ rule BGM2AT:
 		f"{RESULTS_DIR}GETA/Augustus/firsttest.out",
 		f"{RESULTS_DIR}GETA/Augustus/secondtest.out"
 	threads: config_dict["BGM2AT"]["threads"]
+	resources:
+		mem_mb = parse_memory_to_mb(config_dict["BGM2AT"]["memory"])
 	params: a_species = augustus_species,
 		a_start = None, # Augustus species start from
 		args = config_dict["Internal"]["BGM2AT"],
