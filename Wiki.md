@@ -547,3 +547,16 @@ With the test environment above (4 nodes, 256 CPUs, 256 GB/node), the toy datase
 
 - Issues: https://github.com/plantgenomicslab/Sylvan/issues
 - See also: [README.md](README.md) for configuration reference
+
+
+### Generate cluster config from config_annotate
+```
+python bin/generate_cluster_from_config.py   --config config/config_annotate.yml   --out    config/cluster_annotate.yml   --account cpu-s1-pgl-0 --partition cpu-s1-pgl-0
+```
+(To regenerate toydata cluster config, point --config/--out to toydata paths.)
+```
+python bin/generate_cluster_from_config.py   --config toydata/config/config_annotate.yml   --out    toydata/config/cluster_annotate.yml   --account cpu-s1-pgl-0 --partition cpu-s1-pgl-0
+```
+```
+chmod 775 bin/generate_cluster_from_config.py
+```
