@@ -10,7 +10,7 @@ Input:
   rna_seq: placeholder          # [!!!!REQUIRED!!!!:directory] folder containing RNA-seq data. Files should be gzipped
                                 # fastq (i.e. fastq.gz)
   proteins: placeholder         # [!!!!REQUIRED!!!!:file] Comma separated list of protein fasta files for homology search
-  singularity: placeholder      # [!!!!REQUIRED!!!!:file] the singularity image or sandbox
+  singularity: /data/gpfs/assoc/pgl/data/Sylvan/Sylvan/sylvan.sif      # [!!!!REQUIRED!!!!:file] the singularity image or sandbox
   liftoff:
     neighbor_gff: placeholder     # [!!!!REQUIRED!!!!:directory] folder containing neighbor species annotations (supported: .gff, .gff3)
     neighbor_fasta: placeholder   # [!!!!REQUIRED!!!!:directory] folder containing neighbor species genome assemblies (supported: .fa, .fasta)
