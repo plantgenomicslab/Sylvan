@@ -143,9 +143,9 @@ cd Sylvan/singularity
 sudo singularity build sylvan.sif Sylvan.def
 ```
 
-## Input Requirements
+## Annotate Phase
 
-### Annotate Phase
+### Input Requirements
 
 | Input | Description | Config Field |
 |-------|-------------|--------------|
@@ -156,12 +156,64 @@ sudo singularity build sylvan.sif Sylvan.def
 | Repeat library | EDTA output (`.TElib.fa`) | `geta.RM_lib` |
 | Singularity image | Path to `sylvan.sif` | `singularity` |
 
-### Filter Phase (additional)
+### Running the Pipeline
+
+```bash
+# Set config (required)
+export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
+
+# Dry run
+snakemake -n --snakefile bin/Snakefile_annotate
+
+# Submit to SLURM
+sbatch -A [account] -p [partition] -c 1 --mem=1g \
+  -J annotate -o annotate.out -e annotate.err \
+  --wrap="./bin/annotate_toydata.sh"
+
+# Or run directly
+./bin/annotate_toydata.sh
+```
+
+**Output:** `results/complete_draft.gff3`
+
+---
+
+## Filter Phase
+
+### Input Requirements
 
 | Input | Description | Config Field |
 |-------|-------------|--------------|
+| Annotated GFF | Output from Annotate phase | `anot_gff` |
+| Genome | Same as Annotate phase | `genome` |
+| RNA-seq data | Same as Annotate phase | `rna_seq` |
+| Protein sequences | Same as Annotate phase | `protein` |
+| Augustus GFF | Augustus predictions | `augustus_gff` |
+| Helixer GFF | Helixer predictions | `helixer_gff` |
+| Repeat GFF | RepeatMasker output | `repeat_gff` |
+| HmmDB | Pfam database directory | `HmmDB` |
 | RexDB | Plant repeat database (e.g. Viridiplantae_v4.0.fasta) | `RexDB` |
 | BUSCO lineage | e.g., `eudicots_odb10` | `busco_lin` |
+
+### Running the Pipeline
+
+```bash
+# Set config (required)
+export SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml"
+
+# Dry run
+snakemake -n --snakefile bin/Snakefile_filter
+
+# Submit to SLURM
+sbatch -A [account] -p [partition] -c 1 --mem=4g \
+  -J filter -o filter.out -e filter.err \
+  --wrap="./bin/filter_toydata.sh"
+
+# Or run directly
+./bin/filter_toydata.sh
+```
+
+**Output:** `results/FILTER/filter.gff3`
 
 ## Configuration
 
@@ -280,29 +332,7 @@ __default__:
   partition: your-partition
 ```
 
-## Running the Pipeline
-
-### Annotate Phase
-
-```bash
-# Dry run
-snakemake -n --snakefile bin/Snakefile_annotate
-
-# Submit to SLURM
-sbatch -A [account] -p [partition] -c 1 --mem=1g \
-  -J annotate -o annotate.out -e annotate.err \
-  --wrap="./bin/annotate.sh"
-```
-
-### Filter Phase
-
-```bash
-sbatch -A [account] -p [partition] -c 1 --mem=4g \
-  -J filter -o filter.out -e filter.err \
-  --wrap="./bin/filter.sh"
-```
-
-### Useful Commands
+## Useful Commands
 
 ```bash
 # Force rerun all
