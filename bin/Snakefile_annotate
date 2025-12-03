@@ -1287,10 +1287,10 @@ rule BGM2AT:
 			if flanking_length == 0:
 				flanking_length = 200
 			
+			# Copy Augustus config from inside the Singularity image into the run directory
 			shell(
 				f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training && "
 				f"rm -rf {params.results_dir}GETA/Augustus/config/* && "
-				# Copy Augustus config from inside the Singularity image into the run directory
 				f"singularity exec {params.singularity_abs} /bin/sh -c "
 				f"\"cp -rf /opt/miniconda3/config/. {params.results_dir}GETA/Augustus/config\" && "
 				f"cd {params.results_dir}GETA/Augustus && "
