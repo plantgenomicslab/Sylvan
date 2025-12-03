@@ -39,12 +39,12 @@ if not RESULTS_DIR.endswith("/"):
 	RESULTS_DIR += "/"
 RESULTS_DIR_ABS = os.path.abspath(RESULTS_DIR)
 EVM_DIR_ABS = os.path.join(RESULTS_DIR_ABS, "EVM")
-	try:
-		with open(config_file_path, "r") as config_file:
-			config_dict = yaml.safe_load(config_file)
-	except yaml.YAMLError as e:
-		logging.error("Could not load config file! Check config.yml ... see error below")
-		sys.exit(e)
+try:
+	with open(config_file_path, "r") as config_file:
+		config_dict = yaml.safe_load(config_file)
+except yaml.YAMLError as e:
+	logging.error("Could not load config file! Check config.yml ... see error below")
+	sys.exit(e)
 
 # Resolve singularity image to absolute path to avoid relative-path failures after cd
 image_cfg = config_dict["Input"]["singularity"]
