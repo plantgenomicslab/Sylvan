@@ -184,9 +184,9 @@ merge_geneRegion2Genewise:
   ncpus: 1
   memory: 4g
 geneRegion2Genewise:
-  ncpus: 48
-  threads: 48
-  memory: 192g
+  ncpus: 2
+  threads: 2
+  memory: 8g
 genewiseGFF2GFF3:
   ncpus: 4
   memory: 16g
