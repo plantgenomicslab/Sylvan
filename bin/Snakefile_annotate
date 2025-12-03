@@ -39,12 +39,21 @@ if not RESULTS_DIR.endswith("/"):
 	RESULTS_DIR += "/"
 RESULTS_DIR_ABS = os.path.abspath(RESULTS_DIR)
 EVM_DIR_ABS = os.path.join(RESULTS_DIR_ABS, "EVM")
-try:
-	with open(config_file_path, "r") as config_file:
-		config_dict = yaml.safe_load(config_file)
-except yaml.YAMLError as e:
-	logging.error("Could not load config file! Check config.yml ... see error below")
-	sys.exit(e)
+	try:
+		with open(config_file_path, "r") as config_file:
+			config_dict = yaml.safe_load(config_file)
+	except yaml.YAMLError as e:
+		logging.error("Could not load config file! Check config.yml ... see error below")
+		sys.exit(e)
+
+# Resolve singularity image to absolute path to avoid relative-path failures after cd
+image_cfg = config_dict["Input"]["singularity"]
+image_path = Path(image_cfg).expanduser()
+if not image_path.is_absolute():
+	image_candidate = ROOT_DIR / image_path
+	if image_candidate.exists():
+		image_path = image_candidate
+image = str(image_path.resolve())
 
 # Check config inputs
 for input in config_dict["Input"]:
@@ -1222,6 +1231,7 @@ rule BGM2AT:
 		a_start = None, # Augustus species start from
 		args = config_dict["Internal"]["BGM2AT"],
 		singularity = image,
+		singularity_abs = image,
 		results_dir = RESULTS_DIR
 	run:
 		gene_info = {}
@@ -1275,12 +1285,12 @@ rule BGM2AT:
 				flanking_length = 200
 			
 			shell(f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training")
-			shell(f"cd {params.results_dir}GETA/Augustus && singularity exec {params.singularity} cp -rf /opt/miniconda3/config ./config")
+			shell(f"singularity exec {params.singularity_abs} cp -rf /opt/miniconda3/config {params.results_dir}GETA/Augustus/config")
 
 			shell(
 				f"cd {params.results_dir}GETA/Augustus && "
 				f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
-				f"singularity exec {params.singularity} BGM2AT "
+				f"singularity exec {params.singularity_abs} BGM2AT "
 				f"{params.args} "
 				f"--flanking_length {flanking_length} "
 				f"--CPU {threads} "
