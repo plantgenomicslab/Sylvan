@@ -58,8 +58,6 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	blast_data["blast_pident"] = blast_data["pident"] > float(blast_pident)*100
 	blast_data["blast_qcovs"] = blast_data["qcovs"] > float(blast_qcovs)*100 
 	filter = filter.merge(blast_data.loc[:, ("transcript_id", "blast_pident", "blast_qcovs")], on="transcript_id", how="left")
-	filter.fillna(False, inplace=True)
-	data.fillna(0, inplace=True)
 
 	## Coverage results
 	cov_file = os.path.join(output_dir, "cov.bed")
@@ -79,8 +77,6 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	data = data.merge(pfam_data, on="transcript_id", how="left")
 	filter = filter.merge(pfam_data, on="transcript_id", how="left")
 	filter.drop_duplicates(subset=["transcript_id"], keep='first', inplace=True, ignore_index=True)
-	filter.fillna(False, inplace=True)
-	data.fillna(False, inplace=True)
 
 	## Ab Initio coverage results
 	augustus_cov = read_abInitio_cov(os.path.join(output_dir, "augustus_coverage.bed"))
@@ -95,8 +91,6 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	helixer_cov["HELIXER"] = helixer_cov["HELIXER"] > float(helixer_cutoff)
 	filter = filter.merge(augustus_cov, on="transcript_id", how="left")
 	filter = filter.merge(helixer_cov, on="transcript_id", how="left")
-	filter.fillna(False, inplace=True)
-	data.fillna(0, inplace=True)
 
 	## Repeat coverage results
 	repeat_cov = read_abInitio_cov(os.path.join(output_dir, "repeat_coverage.bed"))
@@ -105,16 +99,12 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	
 	repeat_cov["REPEAT"] = repeat_cov["REPEAT"] < float(repeat_cutoff)
 	filter = filter.merge(repeat_cov, on="transcript_id", how="left")
-	filter.fillna(False, inplace=True)
-	data.fillna(0, inplace=True)
 
 	## Single Exons
 	singleExons = TidyGFF.singleExonGenes(TidyGFF.loadGFF(sys.argv[1]))
 	singleExons["singleExon"] = True
 	data = data.merge(singleExons, on="transcript_id", how="left")
 	filter = filter.merge(singleExons, on="transcript_id", how="left")
-	filter.fillna(False, inplace=True)
-	data.fillna(False, inplace=True)
 
 	## RexDB Blastp
 	rexdb = os.path.join(output_dir, "BLASTP.OUT.Rex")
@@ -126,8 +116,6 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	rexdb["rex_pident"] = rexdb["pident"] > float(rex_pident)*100
 	rexdb["rex_qcovs"] = rexdb["qcovs"] > float(rex_qcovs)*100
 	filter = filter.merge(rexdb.loc[:, ("transcript_id", "rex_pident", "rex_qcovs")], on="transcript_id", how="left")
-	filter.fillna(False, inplace=True)
-	data.fillna(0, inplace=True)
 	
 	## LncRNA prediction
 	lncrna = pd.read_csv(os.path.join(output_dir, "lncrna_predict.csv"), comment='#', usecols=[0,25], names=["transcript_id","LncRNA_predict"])
@@ -135,20 +123,18 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	lncrna["LncRNA_predict"] = lncrna["LncRNA_predict"] == "lncrna"
 	data = data.merge(lncrna, on="transcript_id", how="left")
 	filter = filter.merge(lncrna, on="transcript_id", how="left")
-	filter.fillna(False, inplace=True)
-	data.fillna(False, inplace=True)
 
 	# Identify strong keep hits while maintaining as much feature diversity as possible
 	data["keep"] = pd.Series(((filter["COVERAGE"] == True) & ((filter["blast_pident"] == True) & (filter["blast_qcovs"] == True) & (filter["PFAM"] == True) | ((filter["AUGUSTUS"] == True) & (filter["HELIXER"] == True)))) |
 			  ((filter["singleExon"] == False) & (filter["LncRNA_predict"] == False) & (filter["COVERAGE"] == True) & (filter["TPM"] == True)) |
 			  ((filter["singleExon"] == False) & (filter["PFAM"] == True) & (filter["blast_pident"] == True) & (filter["blast_qcovs"] == True)) |
-			  ((filter["AUGUSTUS"] == True) & (filter["HELIXER"] == True) & ((filter["rex_pident"] == False) & (filter["rex_qcovs"] == False)) & (filter["REPEAT"] == False) & (filter["LncRNA_predict"] == False) & (filter["singleExon"] == False)))
+			  ((filter["AUGUSTUS"] == True) & (filter["HELIXER"] == True) & ((filter["rex_pident"] == False) & (filter["rex_qcovs"] == False)) & (filter["REPEAT"] == False) & (filter["LncRNA_predict"] == False) & (filter["singleExon"] == False)))).fillna(False)
 
 	# Identify strong discard hits while maintaining as much feature diversity as possible
 	data["discard"] = pd.Series((filter["COVERAGE"] == False)  & (filter["AUGUSTUS"] == False) & (filter["HELIXER"] == False) & (filter["blast_pident"] == False) & (filter["blast_qcovs"] == False) & (filter["PFAM"] == False) |
 		((filter["singleExon"] == True) & ((filter["blast_pident"] == False) & (filter["blast_qcovs"] == False)) & (filter["PFAM"] == False) & (filter["COVERAGE"] == False)) |
 		(((filter["rex_pident"] == True) & (filter["rex_qcovs"] == True)) & (filter["REPEAT"] == True)) & ((filter["blast_pident"] == False) & (filter["blast_qcovs"] == False)) |
-		(filter["LncRNA_predict"] == True) & (filter["singleExon"] == True) & (filter["PFAM"] == "False") & (filter["AUGUSTUS"] == False) & (filter["HELIXER"] == False))
+		(filter["LncRNA_predict"] == True) & (filter["singleExon"] == True) & (filter["PFAM"] == "False") & (filter["AUGUSTUS"] == False) & (filter["HELIXER"] == False))).fillna(False)
 	
 	data["label"] = data.apply(lambda x: "Discard" if x["discard"] else ("Keep" if x["keep"] else "None"), axis=1)
 	
@@ -201,6 +187,16 @@ def getGene(data, starts, name_vec):
 	ns = ns.iloc[:,8].apply(getParent)
 	return(ns)
 
+def prepare_features(df, feature_cols):
+	# Add explicit missingness indicators and impute remaining NaN to neutral zeros
+	features = df.loc[:, feature_cols].copy()
+	for col in feature_cols:
+		missing_flag = f"{col}_missing"
+		features[missing_flag] = features[col].isna().astype(int)
+		features[col] = pd.to_numeric(features[col], errors="coerce")
+		features[col] = features[col].fillna(0)
+	return features
+
 def semiSupRandomForest(data, predictors, busco_table, num_trees, seed=None, recycle_prob=0.95, maxiter=5):
 	# data        : initialized data with labeled and unlabled cases
 	# predictors  : Number of predictors to consider when splitting each node
@@ -215,10 +211,12 @@ def semiSupRandomForest(data, predictors, busco_table, num_trees, seed=None, rec
 	train = data.loc[data["label"] != "None"].set_index("transcript_id")
 	test = data.loc[data["label"] == "None"].set_index("transcript_id")
 
-	#for i in range(0, 10):
-	x_train = train.loc[:, train.columns != "label"]
+	feature_cols = [c for c in data.columns if c not in ("transcript_id", "label")]
+
+	# Build feature matrices with explicit missing indicators so absent evidence is not treated as negative evidence
+	x_train = prepare_features(train, feature_cols)
 	y_train = train.loc[:, train.columns == "label"]
-	x_test = test.loc[:, test.columns != "label"]
+	x_test = prepare_features(test, feature_cols)
 	
 	stop = False
 	iter = 0
@@ -269,8 +267,9 @@ def semiSupRandomForest(data, predictors, busco_table, num_trees, seed=None, rec
 			recycle = pd.DataFrame(recycle).merge(data, on="transcript_id", how="left")
 			recycle["label"] = yhat["prediction"]
 			recycle = recycle.set_index("transcript_id")
+			recycle_features = prepare_features(recycle, feature_cols)
 		
-			x_train = pd.concat([x_train, recycle.loc[:, recycle.columns != "label"]], axis=0)
+			x_train = pd.concat([x_train, recycle_features], axis=0)
 			y_train = pd.concat([y_train, recycle.loc[:, recycle.columns == "label"]], axis = 0)
 			x_test  = x_test.loc[[x_test.index[i] not in recycle.index for i in range(len(x_test))]]
 			iter += 1
