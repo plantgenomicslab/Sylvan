@@ -424,7 +424,36 @@ For comparison, the official TAIR10 annotation of *Arabidopsis thaliana* (Col-0)
 
 > **Note:** The original chromosome 4 paper reported 3,744 protein-coding genes. TAIR10 increased this count to 4,124 as annotation methods improved.
 >
-> Source: [Phoenix Bioinformatics / TAIR](https://www.arabidopsis.org/)
+> Source: [Phoenix Bioinformatics - Genome Annotation at TAIR](https://phoenixbioinformatics.atlassian.net/wiki/spaces/COM/pages/42216279/Genome+Annotation+at+TAIR)
+
+### Sylvan Pipeline Results (Toy Data)
+
+Running the Sylvan pipeline on the Chr4 toy dataset produces the following results:
+
+**Annotation Phase (complete_draft.gff3):**
+
+| Metric | Count |
+|--------|-------|
+| Total genes | 5,720 |
+| Total mRNA | 5,800 |
+
+**Filter Phase (filter.gff3):**
+
+| Metric | Count |
+|--------|-------|
+| Genes kept | 3,756 |
+| mRNA kept | 3,834 |
+| Genes discarded | 1,964 |
+| mRNA discarded | 1,966 |
+
+**Output files:**
+- `results/FILTER/filter.gff3` - Filtered gene models
+- `results/FILTER/discard.gff3` - Discarded gene models
+- `results/FILTER/keep_data.tsv` - Evidence data for kept genes
+- `results/FILTER/discard_data.tsv` - Evidence data for discarded genes
+- `results/complete_draft.gff3.map` - ID mapping between original and new IDs
+
+> **Comparison:** The 3,756 kept genes represents ~91% of TAIR10's 4,124 protein-coding genes on Chr4. The higher initial count (5,720) includes transposable elements (TAIR10 has 711 TE genes) and low-confidence predictions that are filtered out.
 
 ### Neighbor Species
 
