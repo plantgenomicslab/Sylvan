@@ -109,6 +109,9 @@ snakemake -n --snakefile bin/Snakefile_annotate
 ./bin/annotate_toydata.sh
 ```
 
+Helper script:
+- `bin/generate_cluster_from_config.py`: regenerate `cluster_annotate.yml` from `config_annotate.yml` so SLURM 요청 자원이 파이프라인 threads/memory와 동기화될 때 사용.
+
 For a detailed tutorial with toy data, see the **[Wiki](Wiki.md)**.
 
 ## Installation
@@ -168,10 +171,12 @@ snakemake -n --snakefile bin/Snakefile_annotate
 # Submit to SLURM
 sbatch -A [account] -p [partition] -c 1 --mem=1g \
   -J annotate -o annotate.out -e annotate.err \
-  --wrap="./bin/annotate_toydata.sh"
+  --wrap="./bin/annotate_toydata.sh
+"
 
 # Or run directly
 ./bin/annotate_toydata.sh
+
 ```
 
 **Output:** `results/complete_draft.gff3`
