@@ -156,9 +156,12 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 
 def filter_gff(gff_data, keep):
 	gff_data["transcript_id"] = gff_data[8].apply(getGeneId)
+	gff_data["parent_id"] = gff_data[8].apply(getParent)
 	names = keep['New_ID']
+	# Add gene IDs (without .t1 suffix) to match gene features
 	names = pd.concat([names, names.str.split(".").str.get(0)])
-	to_keep = gff_data["transcript_id"].isin(names)
+	# Keep rows where either ID or Parent matches the keep list
+	to_keep = gff_data["transcript_id"].isin(names) | gff_data["parent_id"].isin(names)
 	gff_keep = gff_data[to_keep]
 	gff_discard = gff_data[~to_keep]
 	return gff_keep, gff_discard
