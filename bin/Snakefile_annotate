@@ -1289,12 +1289,12 @@ rule BGM2AT:
 			shell(f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training")
 			shell(f"rm -rf {params.results_dir}GETA/Augustus/config/*")
 			# Copy Augustus config files without nesting an extra 'config/config' layer
-			shell(f"singularity exec {params.singularity_abs} cp -rf /opt/miniconda3/config/. {params.results_dir}GETA/Augustus/config")
+			shell(f"cp -rf /opt/miniconda3/config/. {params.results_dir}GETA/Augustus/config")
 
 			shell(
 				f"cd {params.results_dir}GETA/Augustus && "
-				f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
-				f"singularity exec {params.singularity_abs} BGM2AT "
+				f"export AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
+				f"BGM2AT "
 				f"{params.args} "
 				f"--flanking_length {flanking_length} "
 				f"--CPU {threads} "
