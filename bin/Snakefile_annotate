@@ -2437,6 +2437,14 @@ rule evigene:
 		# Copy okayset to spades folder for downstream use
 		mkdir -p {params.results_dir}TRANSCRIPT/spades/okayset
 		cp -rlf {params.results_dir}TRANSCRIPT/evigene/okayset/* {params.results_dir}TRANSCRIPT/spades/okayset || true
+
+		# Normalise output: ensure spades.okay.tr exists (decompress if only .gz is present)
+		if [ ! -s {output} ] && [ -s {params.results_dir}TRANSCRIPT/spades/okayset/spades.okay.tr.gz ]; then
+			gzip -dc {params.results_dir}TRANSCRIPT/spades/okayset/spades.okay.tr.gz > {output}
+		elif [ ! -s {output} ] && ls {params.results_dir}TRANSCRIPT/spades/okayset/*.okay.tr 1>/dev/null 2>&1; then
+			# If file has a different prefix, copy the first match
+			cp $(ls {params.results_dir}TRANSCRIPT/spades/okayset/*.okay.tr | head -1) {output}
+		fi
 		"""
 
 rule pasaPrep:
