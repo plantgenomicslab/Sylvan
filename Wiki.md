@@ -422,7 +422,7 @@ For comparison, the official TAIR10 annotation of *Arabidopsis thaliana* (Col-0)
 | Transposable element (TE) genes | 711 |
 | **Total annotated loci** | **5,410** |
 
-> **Note:** The original chromosome 4 paper reported 3,744 protein-coding genes. TAIR10 increased this count to 4,124 as annotation methods improved.
+> **Note:** TAIR10 is the current reference annotation standard for *A. thaliana*. The protein-coding gene count increased from 3,744 (original Chr4 paper) to 4,124 as annotation methods improved.
 >
 > Source: [Phoenix Bioinformatics - Genome Annotation at TAIR](https://phoenixbioinformatics.atlassian.net/wiki/spaces/COM/pages/42216279/Genome+Annotation+at+TAIR)
 
