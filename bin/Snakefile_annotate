@@ -1285,7 +1285,9 @@ rule BGM2AT:
 				flanking_length = 200
 			
 			shell(f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training")
-			shell(f"singularity exec {params.singularity_abs} cp -rf /opt/miniconda3/config {params.results_dir}GETA/Augustus/config")
+			shell(f"rm -rf {params.results_dir}GETA/Augustus/config/*")
+			# Copy Augustus config files without nesting an extra 'config/config' layer
+			shell(f"singularity exec {params.singularity_abs} cp -rf /opt/miniconda3/config/. {params.results_dir}GETA/Augustus/config")
 
 			shell(
 				f"cd {params.results_dir}GETA/Augustus && "
