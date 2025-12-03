@@ -359,10 +359,11 @@ rule RepeatMasker_custom:
 		results_dir = RESULTS_DIR
 	singularity: image
 	shell:"""
+		LIB_PATH=$(readlink -f {input.lib})
 		cd {params.results_dir}GETA/RepeatMasker/repeatModeler && \
 		RepeatMasker {params.args} \
 			-pa {threads} \
-			-lib {input.lib} \
+			-lib $LIB_PATH \
 			-dir {params.results_dir}GETA/RepeatMasker/repeatModeler \
 			{input.genome_fasta}
 		"""
