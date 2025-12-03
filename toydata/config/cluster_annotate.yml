@@ -43,9 +43,9 @@ RepeatModeler:
   threads: 4
   memory: 16g
 RepeatMasker_custom:
-  ncpus: 4
-  threads: 4
-  memory: 16g
+  ncpus: 64
+  threads: 64
+  memory: 220g
 RepeatMasker_merge:
   ncpus: 4
   threads: 4
