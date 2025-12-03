@@ -1262,74 +1262,74 @@ rule BGM2AT:
 					strand = fields[6]
 					start_end = f"{fields[3]}\t{fields[4]}"
 					gene_info.setdefault(chromosome, {}).setdefault(strand, {})[start_end] = 1
+		
+		for chromosome in gene_info:
+			for strand in gene_info[chromosome]:
+				regions = sorted(gene_info[chromosome][strand].keys())
+				first_region = regions.pop(0)
+				start, end = map(int, first_region.split("\t"))
+				gene_length.append(end - start + 1)
+				for region in regions:
+					aa, bb = map(int, region.split("\t"))
+					gene_length.append(bb - aa + 1)
+					distance = aa - end - 1
+					if distance >= 50:
+						flanking_length.append(distance)
+					end = max(end, bb)
 
-	for chromosome in gene_info:
-		for strand in gene_info[chromosome]:
-			regions = sorted(gene_info[chromosome][strand].keys())
-			first_region = regions.pop(0)
-			start, end = map(int, first_region.split("\t"))
-			gene_length.append(end - start + 1)
-			for region in regions:
-				aa, bb = map(int, region.split("\t"))
-				gene_length.append(bb - aa + 1)
-				distance = aa - end - 1
-				if distance >= 50:
-					flanking_length.append(distance)
-				end = max(end, bb)
-
-	# Derive a single flanking length value after collecting all distances
-	gene_length.sort()
-	flanking_length.sort()
-	mid_flanking_length = flanking_length[len(flanking_length) // 2] if flanking_length else 0
-	flanking_length = int(mid_flanking_length / 8) if flanking_length else 0
-	mid_gene_length = gene_length[len(gene_length) // 2] if gene_length else 0
-	if flanking_length >= mid_gene_length and mid_gene_length > 0:
-		flanking_length = mid_gene_length
-	if flanking_length == 0:
-		flanking_length = 200
+		# Derive a single flanking length value after collecting all distances
+		gene_length.sort()
+		flanking_length.sort()
+		mid_flanking_length = flanking_length[len(flanking_length) // 2] if flanking_length else 0
+		flanking_length = int(mid_flanking_length / 8) if flanking_length else 0
+		mid_gene_length = gene_length[len(gene_length) // 2] if gene_length else 0
+		if flanking_length >= mid_gene_length and mid_gene_length > 0:
+			flanking_length = mid_gene_length
+		if flanking_length == 0:
+			flanking_length = 200
 			
-			# Copy Augustus config from inside the Singularity image into the run directory
-			shell(
-				f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training && "
-				f"rm -rf {params.results_dir}GETA/Augustus/config/* && "
-				f"singularity exec {params.singularity_abs} /bin/sh -c "
-				f"\"cp -rf /opt/miniconda3/config/. {params.results_dir}GETA/Augustus/config\" && "
-				f"cd {params.results_dir}GETA/Augustus && "
-				f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
-				f"singularity exec {params.singularity_abs} BGM2AT "
-				f"{params.args} "
-				f"--flanking_length {flanking_length} "
-				f"--CPU {threads} "
-				f"--onlytrain_GFF3 {input.one} {input.two} "
-				f"{input.genome_fasta} "
-				f"{params.a_species}"
-			)
+		# Copy Augustus config from inside the Singularity image into the run directory
+		os.system(
+			f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training && "
+			f"rm -rf {params.results_dir}GETA/Augustus/config/* && "
+			f"singularity exec {params.singularity_abs} /bin/sh -c "
+			f"\"cp -rf /opt/miniconda3/config/. {params.results_dir}GETA/Augustus/config\" && "
+			f"cd {params.results_dir}GETA/Augustus && "
+			f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
+			f"singularity exec {params.singularity_abs} BGM2AT "
+			f"{params.args} "
+			f"--flanking_length {flanking_length} "
+			f"--CPU {threads} "
+			f"--onlytrain_GFF3 {input.one} {input.two} "
+			f"{input.genome_fasta} "
+			f"{params.a_species}"
+		)
 
-			shell(
-				f"cd {params.results_dir}GETA/Augustus && "
-				f'if [ "$(realpath firsttest.out)" != "$(realpath {params.results_dir}GETA/Augustus/firsttest.out)" ]; then '
-				f"mv -f firsttest.out {params.results_dir}GETA/Augustus/firsttest.out; fi")
-			shell(
-				f"cd {params.results_dir}GETA/Augustus && "
-				f'if [ "$(realpath secondtest.out)" != "$(realpath {params.results_dir}GETA/Augustus/secondtest.out)" ]; then '
-				f"mv -f secondtest.out {params.results_dir}GETA/Augustus/secondtest.out; fi")
-			# Clean up intermediate files created by BGM2AT in this directory
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f ati.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f genes.*.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f gff2gbSmallDNA.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f etraining.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f badgenes.lst {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f new_species.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f optimize.out {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f training.gb.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"cd {params.results_dir}GETA/Augustus && mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"cd {params.results_dir}GETA/Augustus && rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true")
-			# Also clean up files that may have been created in the project root directory
-			shell(f"mv -f genes.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-			shell(f"mv -f cleaning_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(
+			f"cd {params.results_dir}GETA/Augustus && "
+			f'if [ "$(realpath firsttest.out)" != "$(realpath {params.results_dir}GETA/Augustus/firsttest.out)" ]; then '
+			f"mv -f firsttest.out {params.results_dir}GETA/Augustus/firsttest.out; fi")
+		os.system(
+			f"cd {params.results_dir}GETA/Augustus && "
+			f'if [ "$(realpath secondtest.out)" != "$(realpath {params.results_dir}GETA/Augustus/secondtest.out)" ]; then '
+			f"mv -f secondtest.out {params.results_dir}GETA/Augustus/secondtest.out; fi")
+		# Clean up intermediate files created by BGM2AT in this directory
+		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f ati.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f genes.*.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f gff2gbSmallDNA.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f etraining.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f badgenes.lst {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f new_species.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f optimize.out {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f training.gb.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"cd {params.results_dir}GETA/Augustus && rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true")
+		# Also clean up files that may have been created in the project root directory
+		os.system(f"mv -f genes.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		os.system(f"mv -f cleaning_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
 
 rule prepareAugusutusHints:
 	input:
