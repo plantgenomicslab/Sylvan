@@ -222,9 +222,9 @@ geneModels2AugusutsTrainingInput:
   threads: 4
   memory: 16g
 BGM2AT:
-  ncpus: 12
-  threads: 12
-  memory: 220g
+  ncpus: 64
+  threads: 64
+  memory: 225280  # MB (220 GB)
 prepareAugusutusHints:
   ncpus: 4
   memory: 16g
