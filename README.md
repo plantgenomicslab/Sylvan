@@ -1,12 +1,12 @@
 # Sylvan Genome Annotation
 
-Sylvan is a comprehensive genome annotation pipeline that combines EVM/PASA, GETA, Mikado, and Helixer with semi-supervised filtering for high-quality gene models.
+Sylvan is a comprehensive genome annotation pipeline that combines EVM/PASA, GETA, and Helixer with semi-supervised random forest filtering for generating high-quality gene models from raw genome assemblies.
 
 ![Sylvan Workflow](https://github.com/plantgenomicslab/Sylvan/blob/main/docs/images/sylvan_workflow.jpg?raw=true)
 
 ## Pipeline Workflow
 
-The Sylvan pipeline consists of two main phases with interconnected modules that process evidence from multiple sources and combine them into a unified gene model.
+The Sylvan pipeline consists of two main phases, annotation and filtration, with interconnected modules that process evidence from multiple sources and combine them into a unified gene model.
 
 ![Pipeline DAG](https://github.com/plantgenomicslab/Sylvan/blob/main/docs/images/rulegraph.png?raw=true)
 
@@ -57,25 +57,33 @@ The annotation phase generates gene models from multiple evidence sources.
 
 ---
 
-## Phase 2: Filter
+## Phase 2: Semi-Supervised Random Forest Filter
 
 The filter phase refines and validates the annotation using additional evidence.
 
-### Junction Filtering
-- **Portcullis**
-  - Splice junction validation from RNA-seq
+### Data generation
+- **PfamScan**
+  - Identification of conserved protein domains
+- **RSEM**
+  - Transcript quantification
+  - RNAseq data coverage
+- **BLAST**
+  - Similarity to protein database
+  - Similarity to repeat element database
+- **lncDC**
+  - Classification of long non-coding RNAs
+- **BUSCO**
+  - Identify conserved gene models
+  - *Used only to monitor filtration process*
 
-### Transcript Selection
-- **Mikado**
-  - Configure scoring metrics
-  - TransDecoder ORF prediction
-  - BlastX homology search
-  - Best transcript selection per locus
+### Semi-supervised classification
+- **Select high confidence genes**
+  - Data-driven heuristic to select intial gene set
+  - Select both true and spurious genes
 
-### Evidence-Based Combination
-- **EvidentialCombine**
-  - Final integration of all evidence
-  - Quality filtering and validation
+- **Classification**
+  - Train random forest binary classifier on intial gene set
+  - Iteratively update gene set from predictions and re-train
 
 **Output:** `results/FILTER/filter.gff3`
 
@@ -84,7 +92,7 @@ The filter phase refines and validates the annotation using additional evidence.
 ## Features
 
 - **Multi-evidence integration**: RNA-seq, protein homology, neighbor species annotations
-- **Multiple ab initio predictors**: Helixer, Augustus, GETA
+- **Multiple ab initio predictors**: Helixer, Augustus
 - **Semi-supervised filtering**: Random forest-based spurious gene removal
 - **HPC-ready**: SLURM cluster support with Singularity containers
 - **TidyGFF**: Format annotations for public distribution
@@ -109,7 +117,7 @@ snakemake -n --snakefile bin/Snakefile_annotate
 ```
 
 Helper script:
-- `bin/generate_cluster_from_config.py`: regenerate `cluster_annotate.yml` from `config_annotate.yml` so SLURM 요청 자원이 파이프라인 threads/memory와 동기화될 때 사용.
+- `bin/generate_cluster_from_config.py`: regenerate `cluster_annotate.yml` from `config_annotate.yml` - used to keep SLURM resource requests in sync with the pipeline's threads/memory.
 
 For a detailed tutorial with toy data, see the **[Wiki](Wiki.md)**.
 
