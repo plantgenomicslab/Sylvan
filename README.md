@@ -227,6 +227,24 @@ sbatch -A [account] -p [partition] -c 1 --mem=4g \
 
 **Output:** `results/FILTER/filter.gff3`
 
+### Feature Importance Test
+
+Reviewers often ask for an ablation study of the semi-supervised filter. After a
+filter run completes (which produces `FILTER/data.tsv`), launch the automated
+leave-one-feature-out test:
+
+```bash
+python bin/filter_feature_importance.py FILTER/data.tsv results/busco/full_table.tsv \
+  --output-table FILTER/feature_importance.tsv
+```
+
+The script reuses `Filter.semiSupRandomForest`, trains a baseline model with all
+features, and then retrains while removing each feature individually. The final
+out-of-bag error deltas are written to `FILTER/feature_importance.tsv` (and
+`FILTER/feature_importance.json`). Use `--features` to restrict the analysis to a
+subset of columns or `--ignore` to drop metadata columns that should never be
+used as predictors.
+
 ## Configuration
 
 Sylvan uses two separate configuration files:

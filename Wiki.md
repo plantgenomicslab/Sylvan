@@ -560,3 +560,42 @@ python bin/generate_cluster_from_config.py   --config toydata/config/config_anno
 ```
 chmod 775 bin/generate_cluster_from_config.py
 ```
+
+## Feature Importance Analysis
+
+After finishing the filter phase you will have `FILTER/data.tsv` (the feature
+matrix used by `Filter.py`) and a BUSCO run directory such as
+`results/busco/eudicots_odb10`. Reviewers often ask for a feature ablation
+study, so we provide an automated helper:
+
+```bash
+python bin/filter_feature_importance.py FILTER/data.tsv results/busco/<lineage>/full_table.tsv \
+  --output-table FILTER/feature_importance.tsv
+```
+
+- **What is the BUSCO full table?** Every BUSCO run writes a
+  `full_table.tsv` inside its lineage-specific run folder. Each non-Missing
+  BUSCO row lists the BUSCO ID, status (Complete/Duplicated/Fragmented), and the
+  transcript/gene ID it matched. The feature-importance script reuses this file
+  to count how many BUSCOs remain in the “keep” set during each iteration—no new
+  BUSCO analysis is required.
+- **Outputs**: `FILTER/feature_importance.tsv` (table) plus
+  `FILTER/feature_importance.json` (machine-readable). Both include the baseline
+  run (all features) and each leave-one-feature-out run, along with final
+  out-of-bag (OOB) error, BUSCO counts, and iteration counts.
+- **Optional flags**:
+  - `--features TPM COVERAGE PFAM ...` restricts the analysis to specific
+    columns from `FILTER/data.tsv`.
+  - `--ignore TPM_missing singleExon` removes metadata columns so the script
+    automatically uses every other feature column.
+
+Workflow summary:
+
+1. Run `Filter.py` as usual to create `FILTER/data.tsv`.
+2. Identify the BUSCO `full_table.tsv` path you already used for filter
+   monitoring (e.g., `results/busco/eudicots_odb10/full_table.tsv`).
+3. Execute the command above. Inspect `FILTER/feature_importance.tsv` to see how
+   dropping each feature affects OOB error (positive delta ⇒ feature is
+   important).
+4. Incorporate the results (table/plot) into your manuscript or reviewer
+   response.
