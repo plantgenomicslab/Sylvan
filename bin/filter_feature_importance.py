@@ -172,6 +172,9 @@ def format_delta(value: float) -> str:
 def main() -> None:
     args = parse_args()
     data = pd.read_csv(args.data, sep="\t")
+    # Ensure any NaN labels are treated as unlabeled ("None")
+    # This prevents NaN values from passing through the != "None" filter in semiSupRandomForest
+    data["label"] = data["label"].fillna("None")
 
     feature_list = resolve_feature_list(data, args.features, args.ignore)
     if not feature_list:
