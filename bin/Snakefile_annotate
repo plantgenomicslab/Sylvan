@@ -2444,6 +2444,7 @@ rule evigene:
 		# Move all evigene output directories to results (for potential rerun)
 		# First try from current directory (inside results)
 		mv okayset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
+		mv okayset1st {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
 		mv dropset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
 		mv inputset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
 		mv intermediate_files {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
@@ -2452,13 +2453,20 @@ rule evigene:
 		# Also clean up from project root (in case Singularity created files there)
 		cd ${{WORKDIR:-$(pwd)}}
 		mv okayset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
+		mv okayset1st {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
 		mv dropset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
 		mv inputset {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
 		mv tmpfiles {params.results_dir}TRANSCRIPT/evigene/ 2>/dev/null || true
 
 		# Copy okayset to spades folder for downstream use
 		mkdir -p {params.results_dir}TRANSCRIPT/spades/okayset
-		cp -rlf {params.results_dir}TRANSCRIPT/evigene/okayset/* {params.results_dir}TRANSCRIPT/spades/okayset || true
+
+		# Try okayset1st first (newer evigene versions), then fall back to okayset
+		if [ -d {params.results_dir}TRANSCRIPT/evigene/okayset1st ]; then
+			cp -rlf {params.results_dir}TRANSCRIPT/evigene/okayset1st/* {params.results_dir}TRANSCRIPT/spades/okayset/ || true
+		elif [ -d {params.results_dir}TRANSCRIPT/evigene/okayset ]; then
+			cp -rlf {params.results_dir}TRANSCRIPT/evigene/okayset/* {params.results_dir}TRANSCRIPT/spades/okayset/ || true
+		fi
 
 		# Normalise output: ensure spades.okay.tr exists (decompress if only .gz is present)
 		if [ ! -s {output} ] && [ -s {params.results_dir}TRANSCRIPT/spades/okayset/spades.okay.tr.gz ]; then
