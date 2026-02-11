@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/skills/auto-format-python/scripts/format_python.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
