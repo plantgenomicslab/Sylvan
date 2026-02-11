@@ -139,8 +139,7 @@ The pipeline uses several environment variables for configuration:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `SYLVAN_CONFIG` | Path to pipeline config file | `toydata/config/config_annotate.yml` |
-| `SYLVAN_CLUSTER_CONFIG` | Path to SLURM cluster config (optional, auto-derived: replaces `config_` with `cluster_` in `SYLVAN_CONFIG` path) | `toydata/config/cluster_annotate.yml` |
+| `SYLVAN_CONFIG` | Path to pipeline config file (also used as `--cluster-config` for SLURM settings) | `toydata/config/config_annotate.yml` |
 | `SYLVAN_FILTER_CONFIG` | Path to filter config file | `toydata/config/config_filter.yml` |
 | `SYLVAN_RESULTS_DIR` | Override results output directory (default: `$(pwd)/results/`). Useful on HPC systems with separate storage. | `/scratch/$USER/sylvan_results` |
 | `TMPDIR` | Temporary directory for intermediate files | `$(pwd)/results/TMP` |
@@ -538,7 +537,7 @@ Most users should not need to modify this file. For organisms with unusual intro
 
 ### Helixer GPU Configuration
 
-Helixer runs ~10x faster with GPU acceleration. Configure a separate GPU partition in `cluster_annotate.yml`:
+Helixer runs ~10x faster with GPU acceleration. Configure a separate GPU partition in the per-rule overrides section of `config_annotate.yml`:
 
 ```yaml
 helixer:
@@ -608,13 +607,13 @@ cat results/logs/geneRegion2Genewise_seqid=group17400.err
 
 | Issue | Solution |
 |-------|----------|
-| Out of memory | Increase `memory` in `cluster_annotate.yml` for the failing rule |
+| Out of memory | Increase `memory` in the per-rule overrides section of `config_annotate.yml` for the failing rule |
 | `No space left on device` | `TMPDIR` is on tmpfs or quota exceeded — set `TMPDIR` to project storage |
 | `Segmentation fault` | Often caused by tmpfs exhaustion — set `TMPDIR` to disk-backed storage |
 | LFS files are pointers | Run `git lfs pull`; verify with `ls -la toydata/` (files should be > 200 bytes) |
 | Singularity bind error | Ensure paths are within working directory or use `SINGULARITY_BIND` |
 | Augustus training fails | Needs ~500 training genes minimum; use `augustus_start_from` with a close species or `use_augustus` to skip training |
-| Job timeout | Increase `time` in `cluster_annotate.yml` for the rule |
+| Job timeout | Increase `time` in the per-rule overrides section of `config_annotate.yml` for the rule |
 | Variables not in SLURM job | Add `#SBATCH --export=ALL` or explicitly export in submit script |
 | Filter `chrom_regex` error | Ensure `chrom_regex` in `config_filter.yml` matches your chromosome naming convention |
 
@@ -631,8 +630,7 @@ The toy dataset contains *Arabidopsis thaliana* chromosome 4 split into 3 segmen
 ```
 toydata/
 ├── config/                      # Configuration files
-│   ├── config_annotate.yml      # Annotation pipeline config (pre-configured)
-│   ├── cluster_annotate.yml     # SLURM resource config
+│   ├── config_annotate.yml      # Annotation pipeline + SLURM resource config (pre-configured)
 │   ├── config_filter.yml        # Filter pipeline config
 │   ├── evm_weights.txt          # EVM evidence weights
 │   └── plant.yaml               # Mikado transcript scoring parameters
@@ -813,16 +811,16 @@ With the test environment above (4 nodes, 256 CPUs, 256 GB/node), the toy datase
 
 ### Generate Cluster Config
 
-`bin/generate_cluster_from_config.py` regenerates `cluster_annotate.yml` from `config_annotate.yml`, keeping SLURM resource requests in sync with the pipeline's threads/memory settings.
+`bin/generate_cluster_from_config.py` extracts the SLURM-relevant sections (`__default__` and per-rule overrides) from `config_annotate.yml` into a standalone cluster-only YAML. This is optional — `config_annotate.yml` already serves as both pipeline config and `--cluster-config`, so you only need this script if you want a minimal, separate cluster file.
 
 ```bash
-# For production config
+# Extract standalone cluster YAML from production config
 python bin/generate_cluster_from_config.py \
   --config config/config_annotate.yml \
   --out config/cluster_annotate.yml \
   --account your-account --partition your-partition
 
-# For toydata config
+# Extract from toydata config
 python bin/generate_cluster_from_config.py \
   --config toydata/config/config_annotate.yml \
   --out toydata/config/cluster_annotate.yml \
@@ -847,6 +845,18 @@ python bin/generate_cluster_from_config.py \
 | `miniprot2Genewise.py` | Convert Miniprot output to GeneWise format |
 | `splitBam.py` | Split BAM files for parallel processing |
 | `MonitorFilter.py` | Visualize filter iteration progress (matplotlib) |
+
+### Claude Code Agents
+
+The project ships three [Claude Code](https://claude.com/claude-code) sub-agents (`.claude/agents/`) for development assistance:
+
+| Agent | Model | Mode | Purpose |
+|-------|-------|------|---------|
+| **debugger** | Opus | Proactive (read-only) | Diagnoses runtime errors, Snakemake failures, and data bugs. Parses tracebacks, traces rule dependencies, proposes fixes. |
+| **doc-writer** | Inherit | Proactive | Adds docstrings and inline comments to recently modified code (NumPy/SciPy style for Python, `#` blocks for shell/Perl, roxygen for R). |
+| **code-improver** | Sonnet | On request | Reviews code for readability, performance, and best practices with prioritized before/after examples. |
+
+Invoke manually: `/debugger`, `/doc-writer`, `/code-improver`. Proactive agents auto-delegate when errors are encountered or code is modified.
 
 ---
 

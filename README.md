@@ -145,7 +145,7 @@ snakemake -n --snakefile bin/Snakefile_annotate
 The toy data experiment uses *A. thaliana* chromosome 4 with 12 paired-end RNA-seq samples, 3 neighbor species, and the `land_plant` Helixer model. For a detailed walkthrough of this experiment, see the **[Wiki](Wiki.md)**.
 
 Helper script:
-- `bin/generate_cluster_from_config.py`: regenerate `cluster_annotate.yml` from `config_annotate.yml` — keeps SLURM resource requests in sync with the pipeline's threads/memory.
+- `bin/generate_cluster_from_config.py`: optionally regenerate per-rule SLURM defaults within `config_annotate.yml` — keeps resource requests in sync with the pipeline's threads/memory.
 
 ## Installation
 
@@ -222,8 +222,7 @@ snakemake -n --snakefile bin/Snakefile_annotate
 # Submit to SLURM
 sbatch -A [account] -p [partition] -c 1 --mem=1g \
   -J annotate -o annotate.out -e annotate.err \
-  --wrap="./bin/annotate_toydata.sh
-"
+  --wrap="./bin/annotate_toydata.sh"
 
 # Or run directly
 ./bin/annotate_toydata.sh
@@ -312,8 +311,7 @@ Sylvan uses several configuration files:
 
 | File | Purpose |
 |------|---------|
-| `config_annotate.yml` | **Pipeline options**: input paths, species parameters, tool settings |
-| `cluster_annotate.yml` | **SLURM resources**: CPU, memory, partition for each rule |
+| `config_annotate.yml` | **Pipeline options and SLURM resources**: input paths, species parameters, tool settings, plus per-rule CPU/memory/partition allocation |
 | `config_filter.yml` | **Filter options**: input paths, cutoff thresholds, thread allocation |
 | `evm_weights.txt` | **EVM evidence weights**: priority of each evidence source |
 | `config/plant.yaml` | **Mikado scoring**: transcript selection parameters (plant-specific defaults provided) |
@@ -325,6 +323,7 @@ Contains:
 - Species-specific settings (Helixer model, Augustus species)
 - Tool parameters (max intron length, EVM weights)
 - Output prefix and directories
+- SLURM resource allocation (`__default__` section with account, partition, memory, ncpus, time, plus per-rule overrides)
 
 ### EVM Weights (`evm_weights.txt`)
 
@@ -345,58 +344,11 @@ PROTEIN              miniprot    2
 
 Adjust weights based on the quality of each evidence type for your organism. PASA transcripts (weight 10) typically have the highest weight as they represent direct transcript evidence.
 
-### Cluster Config (`cluster_annotate.yml`)
-
-Contains SLURM resource allocation organized by pipeline phase:
-
-```yaml
-################################################################################
-#                           ANNOTATE PHASE
-################################################################################
-
-#===============================================================================
-# Genome Preparation
-#===============================================================================
-prepareGenome:
-  ncpus: 1
-  memory: 4g
-
-#===============================================================================
-# Repeat Masking (GETA)
-#===============================================================================
-RepeatMasker_species:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-# ... more rules ...
-
-#===============================================================================
-# EVM - Evidence Modeler
-#===============================================================================
-runEVM:
-  ncpus: 1
-  memory: 8g
-
-################################################################################
-#                           FILTER PHASE
-################################################################################
-
-#===============================================================================
-# Mikado - Transcript Selection
-#===============================================================================
-mikadoPick:
-  ncpus: 4
-  memory: 16g
-```
-
-This separation allows you to reuse the same pipeline config across different clusters by only changing the cluster config.
-
 ### Environment Variables
 
 | Variable | Phase | Description |
 |----------|-------|-------------|
 | `SYLVAN_CONFIG` | Annotate | Path to `config_annotate.yml` (default: `config_annotate.yml` in cwd) |
-| `SYLVAN_CLUSTER_CONFIG` | Annotate | Path to `cluster_annotate.yml` (auto-derived: replaces `config_` with `cluster_` in `SYLVAN_CONFIG` path) |
 | `SYLVAN_FILTER_CONFIG` | Filter | Path to `config_filter.yml` (default: `config_filter.yml` in cwd) |
 | `SYLVAN_RESULTS_DIR` | Annotate | Override results output directory (default: `$(pwd)/results/`) |
 | `TMPDIR` | Both | Temporary directory — **critical on HPC** (see below) |
@@ -419,10 +371,6 @@ export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
 
 # For custom project
 export SYLVAN_CONFIG="/path/to/my_config.yml"
-
-# The cluster config is auto-derived (config_ → cluster_ in same directory)
-# Or set explicitly:
-export SYLVAN_CLUSTER_CONFIG="/path/to/my_cluster.yml"
 ```
 
 This is required for any Snakemake command (dry-run, unlock, etc.):
@@ -448,7 +396,7 @@ snakemake --unlock --snakefile bin/Snakefile_annotate  # unlock
 
 ### Helixer GPU Configuration
 
-Helixer benefits significantly from GPU acceleration (~10x speedup). To use a separate GPU partition, set the following in `cluster_annotate.yml`:
+Helixer benefits significantly from GPU acceleration (~10x speedup). To use a separate GPU partition, add the following per-rule override in `config_annotate.yml`:
 
 ```yaml
 helixer:
@@ -472,11 +420,14 @@ sinfo -s
 sinfo -o "%P %l %D %c %m"
 ```
 
-Set in `cluster_annotate.yml`:
+Set in `config_annotate.yml` under the `__default__` section:
 ```yaml
 __default__:
   account: your-account
   partition: your-partition
+  time: "3-00:00:00"
+  memory: 8g
+  ncpus: 1
 ```
 
 ## Useful Commands
@@ -604,7 +555,7 @@ cat results/logs/{rule}_{wildcards}.err
 
 | Issue | Solution |
 |-------|----------|
-| Out of memory | Increase `memory` in cluster config for the rule |
+| Out of memory | Increase `memory` in `config_annotate.yml` for the rule |
 | `No space left on device` | `TMPDIR` is on tmpfs or quota exceeded — set `TMPDIR` to project storage |
 | `Segmentation fault` | Often caused by tmpfs exhaustion — set `TMPDIR` to disk-backed storage |
 | File not found (Singularity) | Path not bound in container — add to `SINGULARITY_BIND` |
@@ -612,16 +563,28 @@ cat results/logs/{rule}_{wildcards}.err
 | SLURM account error | Use `account` (billing account), not username |
 | LFS files not downloaded | Run `git lfs pull`; verify with `ls -la toydata/` (files should be > 200 bytes) |
 | Augustus training fails | Needs minimum ~500 training genes; use `augustus_start_from` with a close species |
-| Job timeout | Increase `time` in `cluster_annotate.yml` for the rule |
+| Job timeout | Increase `time` in `config_annotate.yml` for the rule |
 | Variables not in SLURM job | Add `#SBATCH --export=ALL` or explicitly export in submit script |
 
 ### Memory Guidelines
 
 - General recommendation: **4GB per thread**
 - Example: 48 threads = 192g memory
-- `ncpus` and `threads` should match in `cluster_annotate.yml`
+- `ncpus` and `threads` should match in `config_annotate.yml`
 - Some rules need more: `mergeSTAR` may require ~18GB per thread for large datasets
 - Check `df -h $TMPDIR` to ensure temp storage is on real disk, not tmpfs
+
+## Claude Code Agents
+
+The project includes three [Claude Code](https://claude.com/claude-code) sub-agents in `.claude/agents/` to assist with development:
+
+| Agent | Model | Mode | Purpose |
+|-------|-------|------|---------|
+| **debugger** | Opus | Proactive (read-only) | Diagnoses runtime errors, Snakemake pipeline failures, and logic/data bugs. Parses tracebacks, traces rule dependencies, and proposes fixes. |
+| **doc-writer** | Inherit | Proactive | Adds docstrings, inline comments, and header documentation to recently modified code. Follows NumPy/SciPy conventions for Python; `#` blocks for shell/Perl; roxygen for R. |
+| **code-improver** | Sonnet | On request | Reviews code for readability, performance, and best practices. Produces prioritized findings with before/after code examples. |
+
+Invoke manually with `/debugger`, `/doc-writer`, or `/code-improver`. The proactive agents are also auto-delegated when their trigger conditions are met (errors encountered, code modified).
 
 ## No HPC?
 
