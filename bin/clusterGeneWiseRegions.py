@@ -1,5 +1,8 @@
-import duckdb, sys, os
+import duckdb
+import sys
+import os
 import pandas as pd
+from fasta_utils import readFasta
 
 genome_file = sys.argv[1] # Genome file
 protein_file = sys.argv[2] # Protein file
@@ -7,37 +10,7 @@ gff_file = sys.argv[3] # Helixer gff
 region_file = sys.argv[4] # GETA/homolog/homolog_gene_region.tab
 segment_threshold = sys.argv[5] # Segment threshold
 
-# Read fasta file into a dictionary
-def readFasta(path:str, sep=" " ,index=0) -> dict:
-	seq = {}
-	id = None
-	lines = []
-	
-	with open(path, 'r') as file:	
-		while True:
-			line = file.readline()
-			if not line:
-				break
-
-			line = line.strip()
-			if line.startswith('>'):
-				if lines:
-					seq[id] = "".join(lines)
-				id = line[1:]
-				try:
-					id = id.split(sep)[index]
-				except:
-					id = id.split(" ")[0]
-				lines = []
-			else:
-				lines.append(line)
-	
-	if id and lines:
-			seq[id] = "".join(lines)
-
-	return seq
-
-# Parse gene:transcript relationships 
+# Parse gene:transcript relationships
 def parse_gff(gff:str) -> dict:
 	genes = {}
 	with open(gff, 'r') as file:
@@ -45,11 +18,11 @@ def parse_gff(gff:str) -> dict:
 			if line.startswith("#") or line == "\n":
 				continue
 			line = line.strip().split("\t")
-			id = line[8].split(";")[0].split("=")[1]
+			seq_id = line[8].split(";")[0].split("=")[1]
 			if line[2] == "gene":
-				gene_id  = id
+				gene_id  = seq_id
 			if line[2] == "mRNA":
-				genes[id] = gene_id
+				genes[seq_id] = gene_id
 	return genes
 
 # Read in gene regions
@@ -58,7 +31,7 @@ regions = duckdb.read_csv(region_file)
 # Parse gene:transcript relationships for neighbor species proteins
 gene_map = parse_gff(gff_file)
 gene_map = pd.DataFrame.from_dict([gene_map]).T.reset_index()
-gene_map.columns = ["transctip_id", "gene_id"]
+gene_map.columns = ["transcript_id", "gene_id"]
 
 duckdb.sql("CREATE SEQUENCE clustered_regions_seq START 1")
 
@@ -77,7 +50,7 @@ clustered_regions = duckdb.sql(
 		"CASE WHEN gm.gene_id IS NULL THEN r.prot ELSE gm.gene_id END AS gene " +
 	"FROM regions_cte AS r " +
 	"LEFT JOIN gene_map AS gm " +
-	"ON r.prot = gm.transctip_id), "
+	"ON r.prot = gm.transcript_id), "
 "GroupedProteins AS ( " +
 	"SELECT " + 
 		"r1.chromosome, " +

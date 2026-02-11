@@ -1,11 +1,15 @@
 #!/usr/bin/env python
 """
-Generate a cluster_annotate.yml from a config_annotate.yml.
+Generate a standalone cluster config YAML from a config_annotate.yml.
+
+Note: config_annotate.yml can be used directly as --cluster-config for Snakemake
+(extra top-level keys like Input and Internal are ignored). This script is only
+needed if you want a separate, minimal cluster-only file.
 
 Usage:
   python bin/generate_cluster_from_config.py \
     --config config/config_annotate.yml \
-    --out config/cluster_annotate.yml \
+    --out cluster_annotate.yml \
     --account cpu-s1-pgl-0 --partition cpu-s1-pgl-0
 
 Only top-level sections that contain ncpus/threads/memory/time are copied.
@@ -21,14 +25,33 @@ import yaml
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Generate cluster_annotate.yml from config_annotate.yml")
+    p = argparse.ArgumentParser(
+        description="Generate cluster_annotate.yml from config_annotate.yml"
+    )
     p.add_argument("--config", required=True, help="Path to config_annotate.yml")
     p.add_argument("--out", required=True, help="Output path for cluster_annotate.yml")
-    p.add_argument("--account", default="placeholder", help="SLURM account (default: placeholder)")
-    p.add_argument("--partition", default="placeholder", help="SLURM partition (default: placeholder)")
-    p.add_argument("--time", default="14-00:00:00", help="Walltime (default: 14-00:00:00)")
-    p.add_argument("--default-memory", default="4g", help="Default memory for __default__ (default: 4g)")
-    p.add_argument("--default-ncpus", type=int, default=1, help="Default CPUs for __default__ (default: 1)")
+    p.add_argument(
+        "--account", default="placeholder", help="SLURM account (default: placeholder)"
+    )
+    p.add_argument(
+        "--partition",
+        default="placeholder",
+        help="SLURM partition (default: placeholder)",
+    )
+    p.add_argument(
+        "--time", default="3-00:00:00", help="Walltime (default: 3-00:00:00)"
+    )
+    p.add_argument(
+        "--default-memory",
+        default="4g",
+        help="Default memory for __default__ (default: 4g)",
+    )
+    p.add_argument(
+        "--default-ncpus",
+        type=int,
+        default=1,
+        help="Default CPUs for __default__ (default: 1)",
+    )
     p.add_argument(
         "--output-pattern",
         default="results/logs/{rule}_{wildcards}.out",
@@ -77,7 +100,13 @@ def main() -> None:
             cluster[name] = {}
             for key in ("ncpus", "threads", "memory", "time"):
                 if key in section:
-                    cluster[name][key] = section[key]
+                    val = section[key]
+                    # YAML 1.1 parses unquoted colon-separated values (e.g. 72:00:00)
+                    # as sexagesimal integers.  Coerce time back to a string so sbatch
+                    # receives a valid walltime instead of a huge minute count.
+                    if key == "time" and not isinstance(val, str):
+                        val = str(val)
+                    cluster[name][key] = val
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w") as fh:

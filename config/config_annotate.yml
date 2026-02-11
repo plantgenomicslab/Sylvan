@@ -37,6 +37,11 @@ Input:
 
 ###############################################################################################
 #
+# SLURM cluster configuration
+#
+# This section doubles as Snakemake's --cluster-config (no separate cluster file needed).
+# The __default__ values apply to every rule; per-rule overrides follow below.
+#
 # [Required] Configure cluster with account information
 # [Optional] modify resource allocation and threading for specific processes
 #
@@ -54,7 +59,7 @@ __default__:
   name: "{rule}.{wildcards}"
   ncpus: 1
   nodes: 1
-  time: 14-00:00:00
+  time: "3-00:00:00"
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
 helixer:

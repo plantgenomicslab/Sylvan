@@ -1,4 +1,7 @@
-import os,re,sys,argparse
+import os
+import re
+import sys
+import argparse
 from pprint import pprint
 import pandas as pd
 import TidyGFF
@@ -44,9 +47,9 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	## RSEM results
 	rsem_file = os.path.join(output_dir, "rsem_outdir", "RSEM.isoforms.results")
 	rsem_data = read_rsem_file(rsem_file)
-	filter = rsem_data.loc[:, ("transcript_id", "TPM")]
+	filter_df = rsem_data.loc[:, ("transcript_id", "TPM")]
 	data = rsem_data.loc[:, ("transcript_id", "TPM")]
-	filter.loc[:,"TPM"] = rsem_data["TPM"] > float(tpm_cutoff)
+	filter_df.loc[:,"TPM"] = rsem_data["TPM"] > float(tpm_cutoff)
 
 	## BlastP results
 	blast_file = os.path.join(output_dir, "BLASTP.OUT.TMP")
@@ -56,8 +59,8 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	blast_data["blast_qcovs"] = blast_data["qcovs"]
 	data = data.merge(blast_data.loc[:, ("transcript_id", "blast_pident", "blast_qcovs")], on="transcript_id", how="left")
 	blast_data["blast_pident"] = blast_data["pident"] > float(blast_pident)*100
-	blast_data["blast_qcovs"] = blast_data["qcovs"] > float(blast_qcovs)*100 
-	filter = filter.merge(blast_data.loc[:, ("transcript_id", "blast_pident", "blast_qcovs")], on="transcript_id", how="left")
+	blast_data["blast_qcovs"] = blast_data["qcovs"] > float(blast_qcovs)*100
+	filter_df = filter_df.merge(blast_data.loc[:, ("transcript_id", "blast_pident", "blast_qcovs")], on="transcript_id", how="left")
 
 	## Coverage results
 	cov_file = os.path.join(output_dir, "cov.bed")
@@ -66,7 +69,7 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	data = data.merge(cov_data, on="transcript_id", how="left")
 	
 	cov_data["COVERAGE"] = cov_data["COVERAGE"] > float(cov_cutoff)
-	filter = filter.merge(cov_data, on="transcript_id", how="left")
+	filter_df = filter_df.merge(cov_data, on="transcript_id", how="left")
 	
 	## Pfam results
 	pfam_file = os.path.join(output_dir, "pfam.out")
@@ -75,8 +78,8 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	pfam_data = pd.DataFrame(pfam_data, columns=["transcript_id"])
 	pfam_data["PFAM"] = True
 	data = data.merge(pfam_data, on="transcript_id", how="left")
-	filter = filter.merge(pfam_data, on="transcript_id", how="left")
-	filter.drop_duplicates(subset=["transcript_id"], keep='first', inplace=True, ignore_index=True)
+	filter_df = filter_df.merge(pfam_data, on="transcript_id", how="left")
+	filter_df.drop_duplicates(subset=["transcript_id"], keep='first', inplace=True, ignore_index=True)
 
 	## Ab Initio coverage results
 	augustus_cov = read_abInitio_cov(os.path.join(output_dir, "augustus_coverage.bed"))
@@ -89,8 +92,8 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	
 	augustus_cov["AUGUSTUS"] = augustus_cov["AUGUSTUS"] > float(augustus_cutoff)
 	helixer_cov["HELIXER"] = helixer_cov["HELIXER"] > float(helixer_cutoff)
-	filter = filter.merge(augustus_cov, on="transcript_id", how="left")
-	filter = filter.merge(helixer_cov, on="transcript_id", how="left")
+	filter_df = filter_df.merge(augustus_cov, on="transcript_id", how="left")
+	filter_df = filter_df.merge(helixer_cov, on="transcript_id", how="left")
 
 	## Repeat coverage results
 	repeat_cov = read_abInitio_cov(os.path.join(output_dir, "repeat_coverage.bed"))
@@ -98,13 +101,13 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	data = data.merge(repeat_cov, on="transcript_id", how="left")
 	
 	repeat_cov["REPEAT"] = repeat_cov["REPEAT"] < float(repeat_cutoff)
-	filter = filter.merge(repeat_cov, on="transcript_id", how="left")
+	filter_df = filter_df.merge(repeat_cov, on="transcript_id", how="left")
 
 	## Single Exons
 	singleExons = TidyGFF.singleExonGenes(TidyGFF.loadGFF(sys.argv[1]))
 	singleExons["singleExon"] = True
 	data = data.merge(singleExons, on="transcript_id", how="left")
-	filter = filter.merge(singleExons, on="transcript_id", how="left")
+	filter_df = filter_df.merge(singleExons, on="transcript_id", how="left")
 
 	## RexDB Blastp
 	rexdb = os.path.join(output_dir, "BLASTP.OUT.Rex")
@@ -115,30 +118,30 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	data = data.merge(rexdb.loc[:, ("transcript_id", "rex_pident", "rex_qcovs")], on="transcript_id", how="left")
 	rexdb["rex_pident"] = rexdb["pident"] > float(rex_pident)*100
 	rexdb["rex_qcovs"] = rexdb["qcovs"] > float(rex_qcovs)*100
-	filter = filter.merge(rexdb.loc[:, ("transcript_id", "rex_pident", "rex_qcovs")], on="transcript_id", how="left")
+	filter_df = filter_df.merge(rexdb.loc[:, ("transcript_id", "rex_pident", "rex_qcovs")], on="transcript_id", how="left")
 	
 	## LncRNA prediction
 	lncrna = pd.read_csv(os.path.join(output_dir, "lncrna_predict.csv"), comment='#', usecols=[0,25], names=["transcript_id","LncRNA_predict"])
 	lncrna["transcript_id"] = lncrna["transcript_id"].str.split(" ").str.get(0)
 	lncrna["LncRNA_predict"] = lncrna["LncRNA_predict"] == "lncrna"
 	data = data.merge(lncrna, on="transcript_id", how="left")
-	filter = filter.merge(lncrna, on="transcript_id", how="left")
+	filter_df = filter_df.merge(lncrna, on="transcript_id", how="left")
 
 	# Identify strong keep hits while maintaining as much feature diversity as possible
 	keep_cond = (
-		((filter["COVERAGE"] == True) & (((filter["blast_pident"] == True) & (filter["blast_qcovs"] == True) & (filter["PFAM"] == True)) | ((filter["AUGUSTUS"] == True) & (filter["HELIXER"] == True)))) |
-		((filter["singleExon"] == False) & (filter["LncRNA_predict"] == False) & (filter["COVERAGE"] == True) & (filter["TPM"] == True)) |
-		((filter["singleExon"] == False) & (filter["PFAM"] == True) & (filter["blast_pident"] == True) & (filter["blast_qcovs"] == True)) |
-		((filter["AUGUSTUS"] == True) & (filter["HELIXER"] == True) & ((filter["rex_pident"] == False) & (filter["rex_qcovs"] == False)) & (filter["REPEAT"] == False) & (filter["LncRNA_predict"] == False) & (filter["singleExon"] == False))
+		((filter_df["COVERAGE"] == True) & (((filter_df["blast_pident"] == True) & (filter_df["blast_qcovs"] == True) & (filter_df["PFAM"] == True)) | ((filter_df["AUGUSTUS"] == True) & (filter_df["HELIXER"] == True)))) |
+		((filter_df["singleExon"] == False) & (filter_df["LncRNA_predict"] == False) & (filter_df["COVERAGE"] == True) & (filter_df["TPM"] == True)) |
+		((filter_df["singleExon"] == False) & (filter_df["PFAM"] == True) & (filter_df["blast_pident"] == True) & (filter_df["blast_qcovs"] == True)) |
+		((filter_df["AUGUSTUS"] == True) & (filter_df["HELIXER"] == True) & ((filter_df["rex_pident"] == False) & (filter_df["rex_qcovs"] == False)) & (filter_df["REPEAT"] == False) & (filter_df["LncRNA_predict"] == False) & (filter_df["singleExon"] == False))
 	)
 	data["keep"] = pd.Series(keep_cond).fillna(False)
 
 	# Identify strong discard hits while maintaining as much feature diversity as possible
 	discard_cond = (
-		((filter["COVERAGE"] == False)  & (filter["AUGUSTUS"] == False) & (filter["HELIXER"] == False) & (filter["blast_pident"] == False) & (filter["blast_qcovs"] == False) & (filter["PFAM"] == False)) |
-		((filter["singleExon"] == True) & ((filter["blast_pident"] == False) & (filter["blast_qcovs"] == False)) & (filter["PFAM"] == False) & (filter["COVERAGE"] == False)) |
-		((((filter["rex_pident"] == True) & (filter["rex_qcovs"] == True)) & (filter["REPEAT"] == True)) & ((filter["blast_pident"] == False) & (filter["blast_qcovs"] == False))) |
-		((filter["LncRNA_predict"] == True) & (filter["singleExon"] == True) & (filter["PFAM"] == "False") & (filter["AUGUSTUS"] == False) & (filter["HELIXER"] == False))
+		((filter_df["COVERAGE"] == False)  & (filter_df["AUGUSTUS"] == False) & (filter_df["HELIXER"] == False) & (filter_df["blast_pident"] == False) & (filter_df["blast_qcovs"] == False) & (filter_df["PFAM"] == False)) |
+		((filter_df["singleExon"] == True) & ((filter_df["blast_pident"] == False) & (filter_df["blast_qcovs"] == False)) & (filter_df["PFAM"] == False) & (filter_df["COVERAGE"] == False)) |
+		((((filter_df["rex_pident"] == True) & (filter_df["rex_qcovs"] == True)) & (filter_df["REPEAT"] == True)) & ((filter_df["blast_pident"] == False) & (filter_df["blast_qcovs"] == False))) |
+		((filter_df["LncRNA_predict"] == True) & (filter_df["singleExon"] == True) & (filter_df["PFAM"] == False) & (filter_df["AUGUSTUS"] == False) & (filter_df["HELIXER"] == False))
 	)
 	data["discard"] = pd.Series(discard_cond).fillna(False)
 	

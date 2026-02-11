@@ -14,12 +14,12 @@ export SLURM_TMPDIR="$TMPDIR"
 # $2: path to bam file
 # $3: threads
 
-samtools index $2
+samtools index "$2"
 
-mosdepth $1 $2 -t $3
+mosdepth "$1" "$2" -t "$3"
 
-echo "chromosome position $1" > $1.basedepth
+echo "chromosome position $1" > "$1.basedepth"
 
 zcat "$1.per-base.bed.gz" | \
   awk '{for(i=$2;i<$3;i++){ print $1,i,i+1,$4} }' | \
-  cut -f1,3,4 -d" " >> $1.basedepth
+  cut -f1,3,4 -d" " >> "$1.basedepth"

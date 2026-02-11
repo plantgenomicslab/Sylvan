@@ -1,11 +1,21 @@
-import argparse, re, math, os, subprocess
+import argparse
+import re
+import math
+import os
+import subprocess
 import pandas as pd
 
 def getParent(attr: str) -> str:
-	return re.search("Parent=([a-zA-Z\d\\.\-_:]*);{0,1}", attr).group(1)
+	m = re.search("Parent=([a-zA-Z\d\\.\-_:]*);{0,1}", attr)
+	if not m:
+		raise ValueError(f"No Parent= found in attribute string: {attr}")
+	return m.group(1)
 
 def getID(attr:str) -> str:
-	return re.search("ID=([a-zA-Z\d\\.\-_:]*);{0,1}", attr).group(1)
+	m = re.search("ID=([a-zA-Z\d\\.\-_:]*);{0,1}", attr)
+	if not m:
+		raise ValueError(f"No ID= found in attribute string: {attr}")
+	return m.group(1)
 
 def findChroms(chrom: str, chrom_regex = False) -> str:
 	if chrom_regex:
@@ -67,12 +77,12 @@ def upgradeChromosome(chrom: str, just: int, chrom_regex = False, contig_regex =
 	
 	return(chrom)
 
-def getSuffix(id: str) -> str:
-	id = id.lower()
+def getSuffix(feature_id: str) -> str:
+	feature_id = feature_id.lower()
 	suf = ["cds", "exon", "intron", "utr5p", "utr3p", "five_prime_utr", "three_prime_utr"]
 	for suffix in suf:
-		if re.search(suffix, id):
-			return(re.search(f"{suffix}\.{{0,1}}\d*", id)[0].lower())
+		if re.search(suffix, feature_id):
+			return(re.search(f"{suffix}\.{{0,1}}\d*", feature_id)[0].lower())
 
 def loadGFF(gff: str) -> dict:
 	with open(gff, 'r') as infile:
@@ -94,8 +104,8 @@ def loadGFF(gff: str) -> dict:
 			##################################
 			
 			chrom = line[0]
-			id = getID(line[8])
-			feature_data = {"seqid":chrom, 
+			feature_id = getID(line[8])
+			feature_data = {"seqid":chrom,
 							"source":line[1], 
 							"type":line[2], 
 							"start":line[3],
@@ -109,35 +119,35 @@ def loadGFF(gff: str) -> dict:
 				gff_dict[chrom] = {}
 
 			if line[2] == "gene":
-				cur_gene = id
-				gff_dict[chrom][id] = {"data":feature_data}
+				cur_gene = feature_id
+				gff_dict[chrom][feature_id] = {"data":feature_data}
 				protein_coding = True # Support for mikado
 			elif line[2] == "mRNA":
-				cur_mrna = id
+				cur_mrna = feature_id
 				gene = getParent(line[8])
 				missing_parent = False
 		
 				if gene not in gff_dict[chrom].keys():
-					print(f"WARNING: mRNA with id {id} missing parent {gene}")
-					gff_dict[chrom][id] = {"data":feature_data}
+					print(f"WARNING: mRNA with id {feature_id} missing parent {gene}")
+					gff_dict[chrom][feature_id] = {"data":feature_data}
 					missing_parent = True
 				else:
 					if gene != cur_gene:
-						print(f"WARNING: Could not parse parents for {line[2]} type feature with id {id}")
-				
-					gff_dict[chrom][gene][id] = {"data":feature_data}
+						print(f"WARNING: Could not parse parents for {line[2]} type feature with id {feature_id}")
+
+					gff_dict[chrom][gene][feature_id] = {"data":feature_data}
 			else:
 				if not protein_coding: #Support for mikado
 					continue
 				mrna = getParent(line[8])
 				if missing_parent:
-					gff_dict[chrom][mrna][id] = {"data":feature_data}
+					gff_dict[chrom][mrna][feature_id] = {"data":feature_data}
 				else:
 					gene = getParent(gff_dict[chrom][gene][mrna]["data"]["attributes"])
-					if (mrna != cur_mrna) | (gene != cur_gene):
-						print(f"WARNING: Could not parse parents for {line[2]} type feature with id {id}")
+					if (mrna != cur_mrna) or (gene != cur_gene):
+						print(f"WARNING: Could not parse parents for {line[2]} type feature with id {feature_id}")
 
-					gff_dict[chrom][gene][mrna][id] = {"data":feature_data}
+					gff_dict[chrom][gene][mrna][feature_id] = {"data":feature_data}
 	return(gff_dict)
 
 def singleExonGenes(gff_dict):
@@ -292,8 +302,8 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 			map_file.write("\t".join(["mRNA", old_id, transcript_seq]) + "\n")
 		else:
 			line[8] = replaceParent(transcript_seq, line[8])
-			id = getID(line[8])
-			suffix = "." + getSuffix(id)
+			feature_id = getID(line[8])
+			suffix = "." + getSuffix(feature_id)
 			line[8], old_id= replaceID(transcript_seq, line[8], suffix)
 			map_file.write("\t".join([line[2], old_id, transcript_seq + suffix]) + "\n")
 

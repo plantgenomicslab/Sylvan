@@ -68,7 +68,7 @@ __default__:
   name: "{rule}.{wildcards}"
   ncpus: 4
   nodes: 1
-  time: 7-00:00:00
+  time: "7-00:00:00"
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
 PfamScan:

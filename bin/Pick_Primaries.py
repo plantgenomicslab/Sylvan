@@ -2,6 +2,7 @@ import pandas as pd
 import argparse
 import os
 import re
+import subprocess
 
 parser = argparse.ArgumentParser(
 			prog = 'Pick_Primaries',
@@ -24,7 +25,7 @@ print("Primary transcript ids written to: primary_transcripts.txt")
 
 if args.cds != "":
 	print("Filtering primary cds seqeunces ...")
-	os.system(f"seqkit grep -n -r -f primary_transcripts.txt {args.cds} > primary_transcripts.fa")
+	subprocess.run(f"seqkit grep -n -r -f primary_transcripts.txt {args.cds} > primary_transcripts.fa", shell=True, check=True)
 	print("Primary transcript sequences written to: primary_transcripts.fa")
 
 print("Updating GFF...")
@@ -42,7 +43,11 @@ if args.gff != "":
 			line = line.split("\t")
 
 			if line[2] == "mRNA":
-				tID = re.search("ID=([a-zA-Z\_\-\d\.]+);", line[8]).group(1)
+				m = re.search("ID=([a-zA-Z\_\-\d\.]+);", line[8])
+				if not m:
+					out.write("\t".join(line) + "\n")
+					continue
+				tID = m.group(1)
 				score = scores[scores["transcript"]==tID]["score_1"].values[0]
 				line[8] = re.sub(";$", "", line[8]) + f";transdecoder_orf_score={score}"
 				if tID in primary["transcript"].values:

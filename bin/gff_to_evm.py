@@ -4,7 +4,8 @@
 #
 # Note: identifier matches evm config (e.g. nucleotide_to_protein_match)
 
-import re,sys
+import re
+import sys
 import argparse
 
 ap = argparse.ArgumentParser(
