@@ -846,18 +846,6 @@ python bin/generate_cluster_from_config.py \
 | `splitBam.py` | Split BAM files for parallel processing |
 | `MonitorFilter.py` | Visualize filter iteration progress (matplotlib) |
 
-### Claude Code Agents
-
-The project ships three [Claude Code](https://claude.com/claude-code) sub-agents (`.claude/agents/`) for development assistance:
-
-| Agent | Model | Mode | Purpose |
-|-------|-------|------|---------|
-| **debugger** | Opus | Proactive (read-only) | Diagnoses runtime errors, Snakemake failures, and data bugs. Parses tracebacks, traces rule dependencies, proposes fixes. |
-| **doc-writer** | Inherit | Proactive | Adds docstrings and inline comments to recently modified code (NumPy/SciPy style for Python, `#` blocks for shell/Perl, roxygen for R). |
-| **code-improver** | Sonnet | On request | Reviews code for readability, performance, and best practices with prioritized before/after examples. |
-
-Invoke manually: `/debugger`, `/doc-writer`, `/code-improver`. Proactive agents auto-delegate when errors are encountered or code is modified.
-
 ---
 
 ## Getting Help
