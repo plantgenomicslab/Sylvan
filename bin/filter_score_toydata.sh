@@ -26,10 +26,7 @@ snakemake -p \
 	--max-status-checks-per-second 50 \
 	--jobs 150 \
 	--latency-wait 30 \
-	--cluster "sbatch --mem={cluster.memory} --cpus-per-task={cluster.ncpus} \
-			-J {cluster.name} \
-			--parsable -A {cluster.account} -p {cluster.partition} \
-			-t {cluster.time} -o {cluster.output} -e {cluster.error}" \
+	--cluster "$(python3 bin/get_cluster_cmd.py "$SYLVAN_FILTER_CONFIG")" \
 	--singularity-args "--cleanenv --env PYTHONNOUSERSITE=1" \
 		"$@"
 

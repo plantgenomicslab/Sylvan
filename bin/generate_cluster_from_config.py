@@ -26,10 +26,10 @@ import yaml
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Generate cluster_annotate.yml from config_annotate.yml"
+        description="Generate a standalone cluster YAML from config_annotate.yml"
     )
     p.add_argument("--config", required=True, help="Path to config_annotate.yml")
-    p.add_argument("--out", required=True, help="Output path for cluster_annotate.yml")
+    p.add_argument("--out", required=True, help="Output path for cluster YAML")
     p.add_argument(
         "--account", default="placeholder", help="SLURM account (default: placeholder)"
     )

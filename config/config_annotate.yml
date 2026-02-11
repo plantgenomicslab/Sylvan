@@ -62,6 +62,13 @@ __default__:
   time: "3-00:00:00"
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
+  # Customize the sbatch template below. For example, remove '-A {cluster.account}'
+  # if your HPC doesn't require a SLURM account, or add flags like '--gres=gpu:1'.
+  cluster_cmd: >-
+    sbatch -N {cluster.nodes} --mem={cluster.memory} --cpus-per-task={cluster.ncpus}
+    -J {cluster.name} --parsable
+    -A {cluster.account} -p {cluster.partition}
+    -t {cluster.time} -o {cluster.output} -e {cluster.error}
 helixer:
   #account: placeholder                # SLURM gpu account
   #partition: placeholder              # SLURM gpu parition
