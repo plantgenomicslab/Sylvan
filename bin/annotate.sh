@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 
 set -x
+set -e
 
 mkdir -p results/TMP
 export TMPDIR="$(pwd)/results/TMP"
 export SLURM_TMPDIR="$TMPDIR"
 
 # Set config path (can be overridden via SYLVAN_CONFIG environment variable)
+# This file serves as both pipeline config and --cluster-config for Snakemake.
 export SYLVAN_CONFIG="${SYLVAN_CONFIG:-config/config_annotate.yml}"
-# Derive cluster config from SYLVAN_CONFIG (replaces config_ with cluster_)
-CLUSTER_CONFIG="${SYLVAN_CLUSTER_CONFIG:-$(dirname "$SYLVAN_CONFIG")/cluster_annotate.yml}"
+
+# Verify config files exist
+if [ ! -f "$SYLVAN_CONFIG" ]; then
+	echo "ERROR: Config file not found: $SYLVAN_CONFIG" >&2
+	exit 1
+fi
 
 # Print log location on exit (success or failure)
 trap 'echo ""; echo "=== Log files: results/logs/{rule}_{wildcards}.err ==="; echo "Debug: cat results/logs/RULENAME_*.err"; echo "Recent: ls -lt results/logs/*.err | head"' EXIT
@@ -22,7 +28,7 @@ snakemake -p \
 	--keep-going \
 	--keep-incomplete \
 	--stats annotation_runtime_stats.json \
-	--cluster-config "$CLUSTER_CONFIG" \
+	--cluster-config "$SYLVAN_CONFIG" \
 	--snakefile bin/Snakefile_annotate \
 	--groups Sam2Transfrag=group0 --group-components group0=100 \
 	--max-jobs-per-second 50 \

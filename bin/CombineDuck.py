@@ -1,4 +1,9 @@
-import pickle, sys, os, re, argparse, subprocess
+import pickle
+import sys
+import os
+import re
+import argparse
+import subprocess
 import duckdb
 import pandas as pd
 from tqdm import tqdm
@@ -20,9 +25,9 @@ class genome:
 		
 		con = duckdb.connect(self.database)
 		try: con.sql("DROP TABLE annotations CASCADE;")
-		except: pass
+		except duckdb.CatalogException: pass
 		try: con.sql("DROP SEQUENCE seq CASCADE;")
-		except: pass
+		except duckdb.CatalogException: pass
 
 		# Generate tables
 		# TODO: create a view of the annotations table with de-duplicated features and their source affiliations
@@ -75,9 +80,9 @@ class genome:
 		con.close()
 
 	def countChromosomes(self, fasta:str):
-		with open(fasta, 'r') as input:
+		with open(fasta, 'r') as fasta_fh:
 			current_chromosome = None
-			for line in input:
+			for line in fasta_fh:
 				line = line.strip()
 				if line.startswith(">"):
 					current_chromosome = line.split(" ")[0][1:]
@@ -104,7 +109,7 @@ class genome:
 			for line in tqdm(gff, total=num_lines):
 				if not line:
 					break
-				elif line.startswith('#') | (line.strip() == ''):
+				elif line.startswith('#') or (line.strip() == ''):
 					continue
 				else:
 					line = line.strip().split('\t')
@@ -122,7 +127,11 @@ class genome:
 				
 				if typ == "gene":
 					skipFlag = False
-					gene_id = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);{0,1}", attr)[1]
+					m = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);{0,1}", attr)
+					if not m:
+						skipFlag = True
+						continue
+					gene_id = m[1]
 					
 					# Find overlapping loci. 
 					## Assumes start and end coords are from 5'-end  regardless of strand
@@ -155,7 +164,7 @@ class genome:
 								if end > overlaps['fin']:
 									con.sql(f"UPDATE loci SET fin = {end} WHERE locus = {locus_id};")
 
-						except:
+						except Exception:
 							#TODO: how to handle loci like Chr4:10,449,966-10,456,188?
 							skipFlag = True
 							continue
@@ -174,11 +183,17 @@ class genome:
 					if "primary=False" in attr: # Skipping Mikado alternative transcripts
 						skipFlag = True
 						continue
-					mRNA_id = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);", attr)[1]
+					m = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);", attr)
+					if not m:
+						continue
+					mRNA_id = m[1]
 					con.sql("INSERT INTO annotations (chromosome, source, type, start, fin, score, strand, phase, attr, gene_id, mrna_id, feature_id, locus) "
 							f"VALUES ('{chr}', '{source}', '{typ}', {start}, {end}, {score}, '{strand}', {phase}, '{attr}', '{gene_id}', '{mRNA_id}', '{mRNA_id}', {locus_id})")
 				elif typ in ['CDS', 'exon', 'five_prime_UTR', 'three_prime_UTR']:
-					feat_id = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);", attr)[1]
+					m = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);", attr)
+					if not m:
+						continue
+					feat_id = m[1]
 					con.sql("INSERT INTO annotations (chromosome, source, type, start, fin, score, strand, phase, attr, gene_id, mrna_id, feature_id, locus) "
 							f"VALUES ('{chr}', '{source}', '{typ}', {start}, {end}, {score}, '{strand}', {phase}, '{attr}', '{gene_id}', '{mRNA_id}', '{feat_id}', {locus_id})")
 		
@@ -194,11 +209,11 @@ class genome:
 		# Compute base depth if needed
 		if not os.path.exists(f"{title}.basedepth"):
 			print(f"\nCalculating base depth using {threads} threads", file=sys.stderr, flush=True)
-			os.system(f"{wd}/bamBaseDepth.sh {title} {file} {threads}")
+			subprocess.run(f"{wd}/bamBaseDepth.sh {title} {file} {threads}", shell=True, check=True)
 		else:
 			if not resume:
 				print(f"\nCalculating base depth using {threads} threads", file=sys.stderr, flush=True)
-				os.system(f"{wd}/bamBaseDepth.sh {title} {file} {threads}")
+				subprocess.run(f"{wd}/bamBaseDepth.sh {title} {file} {threads}", shell=True, check=True)
 			else:
 				print(f"\nDepth calculation skipped, {title}.basedepth exists", file=sys.stderr, flush=True)
 		
@@ -250,19 +265,19 @@ class genome:
 		
 		## Convert protein GFF output to bed
 		if not os.path.exists(f"protein_alignments_{title}.bed"):
-			os.system(f"grep CDS {file} | cut -f1,4,5 > protein_alignments_{title}.bed")
+			subprocess.run(f"grep CDS {file} | cut -f1,4,5 > protein_alignments_{title}.bed", shell=True, check=True)
 		else:
 			if not resume:
-				os.system(f"grep CDS {file} | cut -f1,4,5 > protein_alignments_{title}.bed")
+				subprocess.run(f"grep CDS {file} | cut -f1,4,5 > protein_alignments_{title}.bed", shell=True, check=True)
 
 		## Calculate depth via bedtools
 		if not os.path.exists("protein_alignments_{title}.depth"):
 			print(f"\nCalculating protein alignment depth.", file=sys.stderr, flush=True)
-			os.system(f"bedtools coverage -d -a genome.bed -b protein_alignments_{title}.bed > protein_alignments_{title}.depth")
+			subprocess.run(f"bedtools coverage -d -a genome.bed -b protein_alignments_{title}.bed > protein_alignments_{title}.depth", shell=True, check=True)
 		else:
 			if not resume:
 				print(f"\nCalculating protein alignment depth.", file=sys.stderr, flush=True)
-				os.system(f"bedtools coverage -d -a genome.bed -b protein_alignments_{title}.bed > protein_alignments_{title}.depth")
+				subprocess.run(f"bedtools coverage -d -a genome.bed -b protein_alignments_{title}.bed > protein_alignments_{title}.depth", shell=True, check=True)
 			else:
 				print(f"\nDepth calculation skipped, protein_alignments_{title}.depth exists and {resume=}", file=sys.stderr, flush=True)
 
@@ -326,13 +341,13 @@ class genome:
 		con = duckdb.connect(self.database)
 		try:
 			con.sql("ALTER TABLE data ADD COLUMN score FLOAT;")
-		except:
+		except duckdb.CatalogException:
 			con.sql("UPDATE data SET score = 0;")
-		
+
 		try:
 			con.sql('DROP TABLE isoform_scores;')
 			con.sql('DROP TABLE sel;')
-		except:
+		except duckdb.CatalogException:
 			pass
 		
 		data_cols = list(con.sql("select * from data limit 1;").df().columns)
@@ -471,7 +486,7 @@ class genome:
 		row = 0
 		for isoform in isoforms:
 			for _,feat in annot[annot['mrna_id'] == isoform].iterrows():
-				if (feat['type'] == 'five_prime_UTR') | (feat['type'] == 'three_prime_UTR'):
+				if (feat['type'] == 'five_prime_UTR') or (feat['type'] == 'three_prime_UTR'):
 					feat_color = 'green'
 				elif feat['type'] == 'CDS':
 					feat_color = 'lightblue'
@@ -512,7 +527,7 @@ class genome:
 		if not sw:
 			for gff in gffs:
 				file, title = gff.split(":")
-				if resume & (file in self.log["readGFF"]): 
+				if resume and (file in self.log["readGFF"]):
 					print(f"Skipping {gff} because {resume=}", file=sys.stderr, flush=True)
 					continue
 				self.readGFF(file, title)
@@ -521,7 +536,7 @@ class genome:
 
 			for bam in bams:
 				file, title = bam.split(":")
-				if resume & (file in self.log["readBam"]):
+				if resume and (file in self.log["readBam"]):
 					print(f"Skipping {bam} because {resume=}", file=sys.stderr, flush=True)
 					continue
 				self.readBam(title, file, resume=resume)
@@ -530,7 +545,7 @@ class genome:
 			
 			for prot in prots:
 				file, title = prot.split(":")
-				if resume & (file in self.log["readProtein"]):
+				if resume and (file in self.log["readProtein"]):
 					print(f"Skipping {prot} because {resume=}", file=sys.stderr, flush=True)
 					continue
 				self.readProtein(title, file, fasta, resume)

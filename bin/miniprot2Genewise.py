@@ -1,44 +1,12 @@
-import re, sys, os, gzip
-import pandas as pd
+import re
+import sys
+import os
+from fasta_utils import readFasta
 
 genome_file = sys.argv[1] # Genome file
 protein_file = sys.argv[2] # Protein file
 miniprot_file = sys.argv[3] # Miniprot file
 output_dir = sys.argv[4] if len(sys.argv) > 4 else "results/GETA/homolog/geneRegion_genewise.tmp"  # Output directory
-
-# Read fasta file into a dictionary (supports gzipped files)
-def readFasta(path:str, sep=" " ,index=0) -> dict:
-	seq = {}
-	id = None
-	lines = []
-
-	# Handle gzipped files
-	open_func = gzip.open if path.endswith('.gz') else open
-	mode = 'rt' if path.endswith('.gz') else 'r'
-
-	with open_func(path, mode) as file:	
-		while True:
-			line = file.readline()
-			if not line:
-				break
-
-			line = line.strip()
-			if line.startswith('>'):
-				if lines:
-					seq[id] = "".join(lines)
-				id = line[1:]
-				try:
-					id = id.split(sep)[index].strip()
-				except:
-					id = id.split(" ")[0]
-				lines = []
-			else:
-				lines.append(line)
-	
-	if id and lines:
-			seq[id] = "".join(lines)
-
-	return seq
 
 # Read miniprot gff regions
 miniprot_regions = {}
@@ -50,7 +18,10 @@ with open(miniprot_file, 'r') as file:
 		line = line.strip().split("\t")
 
 		if line[2] == "mRNA":
-			target = re.search("Target=(\S+)", line[8]).group(1)
+			m = re.search("Target=(\S+)", line[8])
+			if not m:
+				continue
+			target = m.group(1)
 			#if "|" in target:
 			#	target = target.split("|")[1]
 			miniprot_regions[target] = {

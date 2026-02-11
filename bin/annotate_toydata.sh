@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -x
+set -e
 
 mkdir -p results/TMP
 export TMPDIR="$(pwd)/results/TMP"
@@ -20,7 +21,7 @@ snakemake -p \
 	--keep-going \
 	--keep-incomplete \
 	--stats annotation_runtime_stats.json \
-	--cluster-config toydata/config/cluster_annotate.yml \
+	--cluster-config "$SYLVAN_CONFIG" \
 	--snakefile bin/Snakefile_annotate \
 	--groups Sam2Transfrag=group0 --group-components group0=100 \
 	--max-jobs-per-second 50 \

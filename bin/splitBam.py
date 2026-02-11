@@ -33,7 +33,8 @@ def split_bam_by_chromosome(input_bam, chromosomes, outdir):
     for chromosome in chromosomes:
         output_bam = f"{outdir}/{chromosome}.bam"
         print(f"Splitting chromosome {chromosome} into {output_bam}...")
-        subprocess.run(['samtools', 'view', '-b', input_bam, chromosome], check=True, stdout=open(output_bam, 'wb'))
+        with open(output_bam, 'wb') as bam_fh:
+            subprocess.run(['samtools', 'view', '-b', input_bam, chromosome], check=True, stdout=bam_fh)
 
 def main():
     if len(sys.argv) != 3:

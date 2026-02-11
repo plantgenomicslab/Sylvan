@@ -153,22 +153,28 @@ for i,file in enumerate(file_list):
             if line.startswith("#") or line.isspace():
                 continue
             if "gene" in line and "ID=" in line:
-                id = re.search("ID=([^;\s]+)", line).group(1)
+                m = re.search("ID=([^;\s]+)", line)
+                if not m:
+                    continue
+                feature_id = m.group(1)
                 _ = line.strip().split("\t")
                 key = f"{_[3]}\t{_[4]}"
-                geneRegion.setdefault(key, {})[id] = 1
+                geneRegion.setdefault(key, {})[feature_id] = 1
             if i==0:
                 if "mRNA" in line and "ID=" in line:
-                    id = re.search("ID=([^;\s]+)", line).group(1)
-                    aug_gene[id] = {}
+                    m = re.search("ID=([^;\s]+)", line)
+                    if not m:
+                        continue
+                    feature_id = m.group(1)
+                    aug_gene[feature_id] = {}
                     _ = line.strip().split("\t")
                     key = f"{_[3]}\t{_[4]}"
-                    geneRegion.setdefault(key, {})[id] = 1
-                augustus[id] = augustus.get(id, "") + line
+                    geneRegion.setdefault(key, {})[feature_id] = 1
+                augustus[feature_id] = augustus.get(feature_id, "") + line
             elif i==1:
-                transfrag[id] = transfrag.get(id, "") + line
+                transfrag[feature_id] = transfrag.get(feature_id, "") + line
             elif i==2:
-                genewise[id] = genewise.get(id, "") + line
+                genewise[feature_id] = genewise.get(feature_id, "") + line
             elif i==3:
                 if "intron" in line:
                     _ = line.strip().split("\t")
@@ -180,12 +186,12 @@ for region in sorted(geneRegion.keys()):
     ID_str = ','.join(ID)
 
     status_augustus, status_transfrag, status_genewise = (0, 0, 0)
-    for id in ID:
-        if id in augustus:
+    for feature_id in ID:
+        if feature_id in augustus:
             status_augustus = 1
-        if id in transfrag:
+        if feature_id in transfrag:
             status_transfrag = 1
-        if id in genewise:
+        if feature_id in genewise:
             status_genewise = 1
 
     if status_augustus == 1:
