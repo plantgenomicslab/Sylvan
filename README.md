@@ -574,18 +574,6 @@ cat results/logs/{rule}_{wildcards}.err
 - Some rules need more: `mergeSTAR` may require ~18GB per thread for large datasets
 - Check `df -h $TMPDIR` to ensure temp storage is on real disk, not tmpfs
 
-## Claude Code Agents
-
-The project includes three [Claude Code](https://claude.com/claude-code) sub-agents in `.claude/agents/` to assist with development:
-
-| Agent | Model | Mode | Purpose |
-|-------|-------|------|---------|
-| **debugger** | Opus | Proactive (read-only) | Diagnoses runtime errors, Snakemake pipeline failures, and logic/data bugs. Parses tracebacks, traces rule dependencies, and proposes fixes. |
-| **doc-writer** | Inherit | Proactive | Adds docstrings, inline comments, and header documentation to recently modified code. Follows NumPy/SciPy conventions for Python; `#` blocks for shell/Perl; roxygen for R. |
-| **code-improver** | Sonnet | On request | Reviews code for readability, performance, and best practices. Produces prioritized findings with before/after code examples. |
-
-Invoke manually with `/debugger`, `/doc-writer`, or `/code-improver`. The proactive agents are also auto-delegated when their trigger conditions are met (errors encountered, code modified).
-
 ## No HPC?
 
 Deploy a SLURM cluster on Google Cloud: [Cloud Cluster Toolkit](https://docs.cloud.google.com/cluster-toolkit/docs/quickstarts/slurm-cluster)
