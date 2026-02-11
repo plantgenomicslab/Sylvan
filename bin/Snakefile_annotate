@@ -2331,7 +2331,7 @@ rule prepare_liftoff:
 
 		# Uniquify chromosome names and combine everything
 		shell("if test -f {params.results_dir}LIFTOVER/LiftOff/combined.fasta; then rm {params.results_dir}LIFTOVER/LiftOff/combined.fasta;fi")
-		shell('for fasta in $(find {params.neighbor_fasta} -regextype sed -regex ".*.fa\\(sta\\)\\{{0,1\\}}$"); do \
+		shell('for fasta in $(find {params.neighbor_fasta} \\( -name "*.fa" -o -name "*.fasta" -o -name "*.fna" \\)); do \
 			bn=$(basename $fasta); \
 			tri=${{bn:0:3}}; \
 			cat $fasta | sed "s/^>/>${{tri}}/" >> {params.results_dir}LIFTOVER/LiftOff/combined.fasta; \
