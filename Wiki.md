@@ -16,6 +16,7 @@ This tutorial walks you through running Sylvan on the included toy dataset (*A. 
 - [Advanced Configuration](#advanced-configuration)
 - [Monitoring and Debugging](#monitoring-and-debugging)
 - [Toy Data Details](#toy-data-details)
+- [Runtime Benchmark](#runtime-benchmark)
 
 ---
 
@@ -845,6 +846,96 @@ python bin/generate_cluster_from_config.py \
 | `miniprot2Genewise.py` | Convert Miniprot output to GeneWise format |
 | `splitBam.py` | Split BAM files for parallel processing |
 | `MonitorFilter.py` | Visualize filter iteration progress (matplotlib) |
+
+---
+
+## Runtime Benchmark
+
+The following benchmarks were measured on the toy dataset (*A. thaliana* chromosome 4, 18.6 Mb) using the test environment described in [Toy Data Details](#test-environment).
+
+### Test Environment
+
+| Specification | Value |
+|---------------|-------|
+| Nodes | 4 |
+| Total CPUs | 256 |
+| CPU | Intel Xeon E5-2683 v4 @ 2.10GHz |
+| Cores per node | 64 (2 sockets x 16 cores x 2 threads) |
+| Memory per node | 256 GB |
+| Storage | GPFS |
+| GPU | NVIDIA V100 (Helixer only) |
+
+### Phase 1 — Annotate
+
+| Step | Wall-clock time | Notes |
+|------|----------------|-------|
+| EDTA (repeat library) | ~1.5 h | Pre-pipeline; LINE detection is the bottleneck |
+| RepeatMasking | 15–30 min | |
+| RNA-seq alignment (STAR) | 30–60 min | Parallelized across samples |
+| Transcript assembly (StringTie/PsiCLASS) | 20–40 min | |
+| Protein homology (Miniprot/GeneWise) | 30–60 min | Parallelized across genome regions |
+| **Helixer (GPU)** | **~5 min** | **Single NVIDIA V100; see GPU note below** |
+| Augustus training + prediction | 1–2 h | Longest single-threaded bottleneck |
+| Gene model combination (CombineDuck) | 30–60 min | ~50,000 s total CPU across parallel jobs |
+| EvidenceModeler | 30–60 min | |
+| **Phase 1 total** | **4–8 h** | Wall-clock with 4 nodes / 256 CPUs |
+
+### Phase 2 — Filter
+
+| Step | Wall-clock time | Notes |
+|------|----------------|-------|
+| CDS/peptide extraction | < 1 min | |
+| PfamScan | 5–10 min | |
+| RSEM (expression quantification) | 10–20 min | |
+| BLASTp + RexDB | 10–20 min | Parallelized across 20 splits |
+| Ab initio coverage (Helixer/Augustus/RM) | < 5 min | |
+| lncDC | < 5 min | |
+| BUSCO | 5–10 min | |
+| Semi-supervised random forest | < 5 min | 3–5 iterations to convergence |
+| **Phase 2 total** | **~1 h** | |
+
+### End-to-End Summary
+
+| Component | Time |
+|-----------|------|
+| EDTA (pre-pipeline) | ~1.5 h |
+| Phase 1 — Annotate | 4–8 h |
+| Phase 2 — Filter | ~1 h |
+| **Total** | **~7–11 h** |
+
+### Helixer GPU vs CPU
+
+Helixer is the only pipeline step that benefits from GPU acceleration. On the toy dataset (18.6 Mb):
+
+| Hardware | Helixer runtime | Notes |
+|----------|----------------|-------|
+| NVIDIA V100 (1 GPU) | ~5 min | Default in pipeline; `--gres=gpu:1` in SLURM config |
+| CPU-only (16 threads) | ~50 min | ~10x slower; set via Helixer `--no-gpu` flag |
+
+Helixer GPU time represents < 2% of total Sylvan wall-clock time, so GPU availability is helpful but not a bottleneck. The pipeline runs end-to-end without a GPU if needed.
+
+### Scalability for EBP-Scale Genomes
+
+The Earth BioGenome Project (EBP) targets thousands of species with genomes ranging from hundreds of Mb to several Gb. Key scaling considerations:
+
+| Factor | Scaling behavior |
+|--------|-----------------|
+| **Genome size** | Most steps scale linearly (repeat masking, alignment, EVM). Augustus training and CombineDuck scale super-linearly due to increased model complexity. |
+| **RNA-seq volume** | STAR/HiSat2 alignment scales linearly with read count. Parallelized across samples. |
+| **Protein DB size** | Miniprot/GeneWise scale linearly. BLASTp is parallelized across 20 splits. |
+| **Helixer (GPU)** | Scales linearly with genome size via `--subsequence-length`. A 1 Gb genome takes ~30–60 min on a V100. |
+| **Filter phase** | Scales with gene count, not genome size. Typically < 2 h even for large annotations (50k+ genes). |
+
+**Estimated runtimes by genome size** (4 nodes / 256 CPUs / 1 GPU):
+
+| Genome size | Example organism | Estimated wall-clock |
+|-------------|-----------------|---------------------|
+| 18.6 Mb (toy) | *A. thaliana* chr4 | 7–11 h |
+| ~135 Mb | *A. thaliana* (full) | 1–2 days |
+| ~750 Mb | Rice, tomato | 3–5 days |
+| ~2.5 Gb | Maize, wheat subgenome | 1–2 weeks |
+
+These estimates assume continuous job scheduling. In practice, SLURM queue wait times can dominate wall-clock time on shared clusters. Snakemake's job-level parallelism means that adding nodes provides near-linear speedup for the parallelizable steps (RNA-seq alignment, GeneWise, BLASTp, EVM).
 
 ---
 
