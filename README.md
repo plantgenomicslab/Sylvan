@@ -4,13 +4,92 @@ Sylvan is a comprehensive genome annotation pipeline that combines EVM/PASA, GET
 
 ![Sylvan Workflow](https://github.com/plantgenomicslab/Sylvan/blob/main/docs/images/sylvan_workflow.jpg?raw=true)
 
+## Features
+
+- **Multi-evidence integration**: RNA-seq, protein homology, neighbor species annotations
+- **Dual RNA-seq alignment pathways**: STAR and HiSat2 with StringTie/PsiCLASS
+- **Multiple ab initio predictors**: Helixer (GPU-accelerated), Augustus
+- **Semi-supervised filtering**: Random forest-based spurious gene removal
+- **Score-based filtering**: Alternative logistic regression + random forest scoring pipeline
+- **HPC-ready**: SLURM cluster support with Singularity containers
+- **Customizable cluster command**: `sbatch` template lives in the config YAML — no shell script edits needed
+- **TidyGFF**: Format annotations for public distribution
+- **Cleanup utility**: Remove intermediate files after pipeline completion
+
+---
+
+## Quick Start
+
+1. Complete [Installation](#installation) (conda environment, Singularity image, git clone)
+2. Run with toy data:
+
+```bash
+# Dry-run first
+snakemake -n --snakefile bin/Snakefile_annotate
+
+# Run annotation
+./bin/annotate_toydata.sh
+```
+
+The toy data experiment uses *A. thaliana* chromosome 4 with 12 paired-end RNA-seq samples, 3 neighbor species, and the `land_plant` Helixer model. For a detailed walkthrough, see the **[Wiki](Wiki.md)**.
+
+---
+
+## Installation
+
+### Requirements
+
+- Linux (tested on CentOS/RHEL)
+- Singularity 3.x+
+- Conda/Mamba
+- SLURM for cluster execution (no HPC? deploy via [Cloud Cluster Toolkit](https://docs.cloud.google.com/cluster-toolkit/docs/quickstarts/slurm-cluster))
+- Git LFS (for toy data)
+
+### Dependencies
+
+Most bioinformatics tools (STAR, Augustus, GeneWise, PASA, EVM, BLAST, BUSCO, etc.) are bundled inside the Singularity container. The host environment needs:
+
+| Package | Purpose |
+|---------|---------|
+| Python 3.10+ | Pipeline orchestration |
+| Snakemake 7 | Workflow engine |
+| pandas | Data manipulation |
+| scikit-learn | Random forest classifier |
+| NumPy | Numerical operations |
+| PyYAML | Config parsing |
+| rich | Logging (optional) |
+
+Perl and R scripts (`fillingEndsOfGeneModels.pl`, `filter_distributions.R`) run inside the Singularity container and do not require host installation.
+
+### Setup
+
+```bash
+# Create conda environment
+conda create -n sylvan -c conda-forge -c bioconda python=3.11 snakemake=7 -y
+conda activate sylvan
+
+# Download Singularity image
+singularity pull --arch amd64 sylvan.sif library://wyim/sylvan/sylvan:latest
+
+# Clone repository (with Git LFS for toy data)
+git lfs install
+git clone https://github.com/plantgenomicslab/Sylvan.git
+```
+
+### Build from source (optional)
+
+```bash
+cd Sylvan/singularity
+sudo singularity build sylvan.sif Sylvan.def
+```
+
+---
+
 ## Pipeline Design
 
 The Sylvan pipeline consists of two main phases — annotation and filtration — with configurable modules that process evidence from multiple sources and combine them into a unified gene model. The following describes the available tools and modules. Users configure which components to enable and how to parameterize them via `config_annotate.yml` and `config_filter.yml`.
 
 ![Pipeline DAG](https://github.com/plantgenomicslab/Sylvan/blob/main/docs/images/rulegraph.png?raw=true)
-
----
 
 ### Phase 1: Annotate
 
@@ -64,8 +143,6 @@ The annotation phase generates gene models by integrating multiple configurable 
 
 **Output:** `results/complete_draft.gff3`
 
----
-
 ### Phase 2: Semi-Supervised Random Forest Filter
 
 The filter phase computes additional evidence features for each gene model and applies a semi-supervised random forest classifier to separate high-quality genes from spurious predictions.
@@ -97,8 +174,6 @@ The following features are computed for every gene model in the draft annotation
 - `results/FILTER/{prefix}.cdna` — Extracted transcript sequences
 - `results/FILTER/{prefix}.pep` — Extracted peptide sequences
 
----
-
 ### Alternative: Score-based Filter
 
 An alternative scoring pipeline (`Snakefile_filter_score`) uses logistic regression and random forest scoring with pseudo-labels instead of the iterative semi-supervised approach. This requires the same feature generation outputs and produces:
@@ -112,89 +187,6 @@ export SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml"
 
 ---
 
-## Features
-
-- **Multi-evidence integration**: RNA-seq, protein homology, neighbor species annotations
-- **Dual RNA-seq alignment pathways**: STAR and HiSat2 with StringTie/PsiCLASS
-- **Multiple ab initio predictors**: Helixer (GPU-accelerated), Augustus
-- **Semi-supervised filtering**: Random forest-based spurious gene removal
-- **Score-based filtering**: Alternative logistic regression + random forest scoring pipeline
-- **HPC-ready**: SLURM cluster support with Singularity containers
-- **TidyGFF**: Format annotations for public distribution
-- **Cleanup utility**: Remove intermediate files after pipeline completion
-
-## Quick Start
-
-```bash
-# 1. Install environment
-conda create -n sylvan -c conda-forge -c bioconda python=3.11 snakemake=7 -y
-conda activate sylvan
-
-# 2. Download Singularity image
-singularity pull --arch amd64 sylvan.sif library://wyim/sylvan/sylvan:latest
-
-# 3. Clone repository
-git clone https://github.com/plantgenomicslab/Sylvan.git
-cd Sylvan
-
-# 4. Run with toy data (dry-run first)
-snakemake -n --snakefile bin/Snakefile_annotate
-./bin/annotate_toydata.sh
-```
-
-The toy data experiment uses *A. thaliana* chromosome 4 with 12 paired-end RNA-seq samples, 3 neighbor species, and the `land_plant` Helixer model. For a detailed walkthrough of this experiment, see the **[Wiki](Wiki.md)**.
-
-Helper script:
-- `bin/generate_cluster_from_config.py`: optionally regenerate per-rule SLURM defaults within `config_annotate.yml` — keeps resource requests in sync with the pipeline's threads/memory.
-
-## Installation
-
-### Requirements
-
-- Linux (tested on CentOS/RHEL)
-- Singularity 3.x+
-- Conda/Mamba
-- SLURM (for cluster execution)
-- Git LFS (for toy data)
-
-### Dependencies
-
-Most bioinformatics tools (STAR, Augustus, GeneWise, PASA, EVM, BLAST, BUSCO, etc.) are bundled inside the Singularity container. The host environment needs:
-
-| Package | Purpose |
-|---------|---------|
-| Python 3.10+ | Pipeline orchestration |
-| Snakemake 7 | Workflow engine |
-| pandas | Data manipulation |
-| scikit-learn | Random forest classifier |
-| NumPy | Numerical operations |
-| PyYAML | Config parsing |
-| rich | Logging (optional) |
-
-Perl and R scripts (`fillingEndsOfGeneModels.pl`, `filter_distributions.R`) run inside the Singularity container and do not require host installation.
-
-### Setup
-
-```bash
-# Create conda environment
-conda create -n sylvan -c conda-forge -c bioconda python=3.11 snakemake=7 -y
-conda activate sylvan
-
-# Download Singularity image
-singularity pull --arch amd64 sylvan.sif library://wyim/sylvan/sylvan:latest
-
-# Clone repository (with Git LFS for toy data)
-git lfs install
-git clone https://github.com/plantgenomicslab/Sylvan.git
-```
-
-### Build from source (optional)
-
-```bash
-cd Sylvan/singularity
-sudo singularity build sylvan.sif Sylvan.def
-```
-
 ## Running the Annotate Phase
 
 This section describes the inputs, configuration, and commands needed to run the annotation pipeline on your data.
@@ -206,7 +198,7 @@ This section describes the inputs, configuration, and commands needed to run the
 | Genome assembly | FASTA file (`.fa`, `.fasta`, `.fa.gz`, `.fasta.gz`) | `genome` |
 | RNA-seq data | Paired-end gzipped FASTQ files (`*_1.fastq.gz`/`*_2.fastq.gz` or `*_R1.fastq.gz`/`*_R2.fastq.gz`) in a folder | `rna_seq` |
 | Protein sequences | FASTA from UniProt, OrthoDB, etc. (comma-separated for multiple files) | `proteins` |
-| Neighbor species | Directories containing GFF3 and genome FASTA files (one file per species) | `liftoff.neighbor_gff`, `liftoff.neighbor_fasta` |
+| Neighbor species | Directories containing GFF3 and genome FASTA (`.fa`, `.fasta`, `.fna`) files, one per species | `liftoff.neighbor_gff`, `liftoff.neighbor_fasta` |
 | Repeat library | EDTA output (`.TElib.fa`) | `geta.RM_lib` |
 | Singularity image | Path to `sylvan.sif` | `singularity` |
 
@@ -226,7 +218,6 @@ sbatch -A [account] -p [partition] -c 1 --mem=1g \
 
 # Or run directly
 ./bin/annotate_toydata.sh
-
 ```
 
 **Output:** `results/complete_draft.gff3`
@@ -259,12 +250,9 @@ This section describes the inputs and commands for the filter pipeline. All inpu
 |-----------|-------------|---------|
 | `tpm` | TPM threshold for initial gene selection | 3 |
 | `rsem_cov` | RNA-seq coverage threshold | 0.5 |
-| `blast_pident` | BLASTp percent identity threshold | 0.6 |
-| `blast_qcovs` | BLASTp query coverage threshold | 0.6 |
-| `rex_pident` | RexDB percent identity threshold | 0.6 |
-| `rex_qcovs` | RexDB query coverage threshold | 0.6 |
-| `helixer_cov` | Helixer overlap coverage threshold | 0.8 |
-| `augustus_cov` | Augustus overlap coverage threshold | 0.8 |
+| `blast_pident` / `blast_qcovs` | BLASTp identity / coverage | 0.6 / 0.6 |
+| `rex_pident` / `rex_qcovs` | RexDB identity / coverage | 0.6 / 0.6 |
+| `helixer_cov` / `augustus_cov` | Ab initio overlap | 0.8 / 0.8 |
 | `repeat_cov` | Repeat overlap coverage threshold | 0.5 |
 
 ### Running the Pipeline
@@ -289,30 +277,25 @@ sbatch -A [account] -p [partition] -c 1 --mem=4g \
 
 ### Feature Importance Test
 
-Reviewers often ask for an ablation study of the semi-supervised filter. After a
-filter run completes (which produces `FILTER/data.tsv`), launch the automated
-leave-one-feature-out test:
+After a filter run completes, run the leave-one-feature-out ablation test:
 
 ```bash
 python bin/filter_feature_importance.py FILTER/data.tsv results/busco/full_table.tsv \
   --output-table FILTER/feature_importance.tsv
 ```
 
-The script reuses `Filter.semiSupRandomForest`, trains a baseline model with all
-features, and then retrains while removing each feature individually. The final
-out-of-bag error deltas are written to `FILTER/feature_importance.tsv` (and
-`FILTER/feature_importance.json`). Use `--features` to restrict the analysis to a
-subset of columns or `--ignore` to drop metadata columns that should never be
-used as predictors.
+See the [Wiki](Wiki.md#step-5c-feature-importance-analysis) for detailed usage, optional flags, and workflow.
+
+---
 
 ## Configuration
 
-Sylvan uses several configuration files:
+Sylvan uses several configuration files. Each config YAML serves as **both** the pipeline config and the Snakemake `--cluster-config`, so no separate cluster file is needed.
 
 | File | Purpose |
 |------|---------|
-| `config_annotate.yml` | **Pipeline options and SLURM resources**: input paths, species parameters, tool settings, plus per-rule CPU/memory/partition allocation |
-| `config_filter.yml` | **Filter options**: input paths, cutoff thresholds, thread allocation |
+| `config_annotate.yml` | **Pipeline options and SLURM resources**: input paths, species parameters, tool settings, plus per-rule CPU/memory/partition allocation and `cluster_cmd` template |
+| `config_filter.yml` | **Filter options**: input paths, cutoff thresholds, thread allocation, and `cluster_cmd` template |
 | `evm_weights.txt` | **EVM evidence weights**: priority of each evidence source |
 | `config/plant.yaml` | **Mikado scoring**: transcript selection parameters (plant-specific defaults provided) |
 
@@ -323,7 +306,7 @@ Contains:
 - Species-specific settings (Helixer model, Augustus species)
 - Tool parameters (max intron length, EVM weights)
 - Output prefix and directories
-- SLURM resource allocation (`__default__` section with account, partition, memory, ncpus, time, plus per-rule overrides)
+- SLURM resource allocation (`__default__` section with account, partition, memory, ncpus, time, `cluster_cmd`, plus per-rule overrides)
 
 ### EVM Weights (`evm_weights.txt`)
 
@@ -430,37 +413,25 @@ __default__:
   ncpus: 1
 ```
 
-## Useful Commands
+### Customizing the Cluster Submit Command
 
-```bash
-# Force rerun all
-./bin/annotate.sh --forceall
+The `cluster_cmd` field in the `__default__` section defines the `sbatch` template used by Snakemake's `--cluster` option. All entry scripts (`annotate.sh`, `filter.sh`, etc.) read this template via `bin/get_cluster_cmd.py`, so you only need to edit the config YAML:
 
-# Rerun specific rule
-./bin/annotate.sh --forcerun helixer
-
-# Rerun incomplete jobs (jobs that started but didn't finish)
-./bin/rerun-incomplete.sh
-
-# Generate report after completion
-snakemake --report report.html --snakefile bin/Snakefile_annotate
-
-# Unlock after interruption
-./bin/annotate.sh --unlock
-
-# Clean up intermediate files (run after BOTH phases complete)
-./bin/cleanup.sh
+```yaml
+__default__:
+  cluster_cmd: >-
+    sbatch -N {cluster.nodes} --mem={cluster.memory} --cpus-per-task={cluster.ncpus}
+    -J {cluster.name} --parsable
+    -A {cluster.account} -p {cluster.partition}
+    -t {cluster.time} -o {cluster.output} -e {cluster.error}
 ```
 
-### Cleanup
+Common customizations:
+- Remove `-A {cluster.account}` if your HPC doesn't require a billing account
+- Add `--gres=gpu:1` for GPU rules
+- Add `--export=ALL` to pass environment variables
 
-`bin/cleanup.sh` removes intermediate files generated during the annotation phase while preserving:
-- Final outputs (`complete_draft.gff3`, `filter.gff3`)
-- Log files (`results/logs/`)
-- Configuration files
-- Filter phase outputs (`FILTER/`)
-
-Run this only after both annotation and filter phases have completed successfully.
+---
 
 ## Output
 
@@ -511,6 +482,8 @@ results/
 └── logs/                        # SLURM job logs
 ```
 
+---
+
 ## Formatting Output
 
 Use TidyGFF to prepare annotations for public distribution:
@@ -538,6 +511,49 @@ singularity exec sylvan.sif python bin/TidyGFF.py \
 | `--remove-names` | Remove Name attributes from GFF |
 | `--no-chrom-id` | Do not number gene IDs by chromosome |
 
+---
+
+## Useful Commands
+
+```bash
+# Force rerun all
+./bin/annotate.sh --forceall
+
+# Rerun specific rule
+./bin/annotate.sh --forcerun helixer
+
+# Rerun incomplete jobs (jobs that started but didn't finish)
+./bin/rerun-incomplete.sh
+
+# Generate report after completion
+snakemake --report report.html --snakefile bin/Snakefile_annotate
+
+# Unlock after interruption
+./bin/annotate.sh --unlock
+
+# Clean up intermediate files (run after BOTH phases complete)
+./bin/cleanup.sh
+```
+
+### Cleanup
+
+`bin/cleanup.sh` removes intermediate files generated during the annotation phase while preserving:
+- Final outputs (`complete_draft.gff3`, `filter.gff3`)
+- Log files (`results/logs/`)
+- Configuration files
+- Filter phase outputs (`FILTER/`)
+
+Run this only after both annotation and filter phases have completed successfully.
+
+### Helper Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `bin/generate_cluster_from_config.py` | Regenerate per-rule SLURM defaults within `config_annotate.yml` — keeps resource requests in sync with the pipeline's threads/memory |
+| `bin/get_cluster_cmd.py` | Extract the `cluster_cmd` sbatch template from a config YAML (used internally by all entry scripts) |
+
+---
+
 ## Troubleshooting
 
 ### Check logs
@@ -559,24 +575,25 @@ cat results/logs/{rule}_{wildcards}.err
 | `No space left on device` | `TMPDIR` is on tmpfs or quota exceeded — set `TMPDIR` to project storage |
 | `Segmentation fault` | Often caused by tmpfs exhaustion — set `TMPDIR` to disk-backed storage |
 | File not found (Singularity) | Path not bound in container — add to `SINGULARITY_BIND` |
+| Singularity bind error | Ensure paths are within working directory or use `SINGULARITY_BIND` |
 | `Permission denied` in container | Check directory permissions, ensure path is bound |
 | SLURM account error | Use `account` (billing account), not username |
+| `cluster_cmd` not found | Ensure `__default__.cluster_cmd` exists in your config YAML |
 | LFS files not downloaded | Run `git lfs pull`; verify with `ls -la toydata/` (files should be > 200 bytes) |
 | Augustus training fails | Needs minimum ~500 training genes; use `augustus_start_from` with a close species |
 | Job timeout | Increase `time` in `config_annotate.yml` for the rule |
 | Variables not in SLURM job | Add `#SBATCH --export=ALL` or explicitly export in submit script |
+| Filter `chrom_regex` error | Ensure `chrom_regex` in `config_filter.yml` matches your chromosome naming convention |
 
 ### Memory Guidelines
 
-- General recommendation: **4GB per thread**
-- Example: 48 threads = 192g memory
+- General recommendation: **4 GB per thread**
+- Example: 48 threads = 192 GB memory
 - `ncpus` and `threads` should match in `config_annotate.yml`
-- Some rules need more: `mergeSTAR` may require ~18GB per thread for large datasets
+- Some rules need more: `mergeSTAR` may require ~18 GB per thread for large datasets
 - Check `df -h $TMPDIR` to ensure temp storage is on real disk, not tmpfs
 
-## No HPC?
-
-Deploy a SLURM cluster on Google Cloud: [Cloud Cluster Toolkit](https://docs.cloud.google.com/cluster-toolkit/docs/quickstarts/slurm-cluster)
+---
 
 ## Citation
 
