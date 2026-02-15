@@ -5,18 +5,22 @@ This tutorial walks you through running Sylvan on the included toy dataset (*A. 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
+- [Toy Data Experiment Overview](#toy-data-experiment-overview)
 - [Step 1: Environment Setup](#step-1-environment-setup)
 - [Step 2: Download Containers](#step-2-download-containers)
 - [Step 3: Prepare Repeat Library (EDTA)](#step-3-prepare-repeat-library-edta)
 - [Step 4: Run Annotation Pipeline](#step-4-run-annotation-pipeline)
 - [Step 5: Run Filter Pipeline](#step-5-run-filter-pipeline)
 - [Step 5b: Alternative Score-based Filter](#step-5b-alternative-score-based-filter)
+- [Step 5c: Feature Importance Analysis](#step-5c-feature-importance-analysis)
 - [Step 6: Format Output (TidyGFF)](#step-6-format-output-tidygff)
 - [Step 7: Cleanup Intermediate Files](#step-7-cleanup-intermediate-files)
 - [Advanced Configuration](#advanced-configuration)
 - [Monitoring and Debugging](#monitoring-and-debugging)
 - [Toy Data Details](#toy-data-details)
+- [Utility Scripts](#utility-scripts)
 - [Runtime Benchmark](#runtime-benchmark)
+- [Getting Help](#getting-help)
 
 ---
 
@@ -27,21 +31,31 @@ This tutorial walks you through running Sylvan on the included toy dataset (*A. 
 - Conda/Mamba
 - Git LFS
 
-### Host Dependencies
+For host dependency details, see [README — Dependencies](README.md#dependencies).
 
-Most bioinformatics tools run inside the Singularity container. The host environment needs:
+---
 
-| Package | Purpose |
-|---------|---------|
-| Python 3.10+ | Pipeline orchestration and filter scripts |
-| Snakemake 7 | Workflow engine |
-| pandas | Data manipulation in Snakemake and filter scripts |
-| scikit-learn | Random forest classifier (`Filter.py`, `score_filter.py`) |
-| NumPy | Numerical operations |
-| PyYAML | Config file parsing |
-| rich | Logging format (optional) |
+## Toy Data Experiment Overview
 
-Perl (`fillingEndsOfGeneModels.pl`) and R (`filter_distributions.R`) scripts run inside the container and do not need host installation.
+The toy data experiment uses the following configuration choices. These are pre-set in `toydata/config/config_annotate.yml` and `toydata/config/config_filter.yml`:
+
+| Parameter | Choice for this experiment | Alternatives |
+|-----------|---------------------------|--------------|
+| **Genome** | *A. thaliana* Chr4, 18.6 Mb, 3 segments | Any FASTA assembly |
+| **Repeat masking** | RepeatMasker with `Embryophyta` library + custom EDTA library | Any RepeatMasker species; RepeatModeler for de novo |
+| **RNA-seq** | 12 paired-end samples (leaf, rosette, whole plant) | Any number of paired-end samples |
+| **RNA-seq alignment** | STAR pathway with StringTie + PsiCLASS | HiSat2 is also available |
+| **Protein homology** | Combined neighbor-species proteins (`neighbor.aa`) | UniProt, OrthoDB, or any protein FASTA |
+| **Neighbor species** | 3 species: *A. lyrata*, *C. rubella*, *C. hirsuta* | One or more annotated relatives |
+| **Ab initio (Helixer)** | `land_plant` model, subsequence length 64152 | `vertebrate`, `invertebrate`, `fungi` |
+| **Ab initio (Augustus)** | Start from `arabidopsis` model, train on target data | Any existing Augustus species; or skip training |
+| **EVM weights** | PASA=10, Augustus=7, GETA=5, Helixer=3 | Adjust to evidence quality |
+| **Filter cutoffs** | TPM=3, coverage=0.5, BLAST identity=0.6 | Adjust per organism |
+| **BUSCO lineage** | `eudicots_odb10` | Any BUSCO lineage |
+
+These choices are experiment-specific. The pipeline supports all the alternatives listed above — see the [README](README.md#pipeline-design) for the full set of configurable modules.
+
+---
 
 ## Step 1: Environment Setup
 
@@ -108,26 +122,6 @@ sbatch -c 16 --mem=68g --wrap="singularity exec --cleanenv --env PYTHONNOUSERSIT
 | Filtering & annotation | ~8 min |
 | **Total** | **~1.5 hours** |
 
-## Experiment Setup (Toy Data)
-
-The toy data experiment uses the following configuration choices. These are pre-set in `toydata/config/config_annotate.yml` and `toydata/config/config_filter.yml`:
-
-| Parameter | Choice for this experiment | Alternatives |
-|-----------|---------------------------|--------------|
-| **Genome** | *A. thaliana* Chr4, 18.6 Mb, 3 segments | Any FASTA assembly |
-| **Repeat masking** | RepeatMasker with `Embryophyta` library + custom EDTA library | Any RepeatMasker species; RepeatModeler for de novo |
-| **RNA-seq** | 12 paired-end samples (leaf, rosette, whole plant) | Any number of paired-end samples |
-| **RNA-seq alignment** | STAR pathway with StringTie + PsiCLASS | HiSat2 is also available |
-| **Protein homology** | Combined neighbor-species proteins (`neighbor.aa`) | UniProt, OrthoDB, or any protein FASTA |
-| **Neighbor species** | 3 species: *A. lyrata*, *C. rubella*, *C. hirsuta* | One or more annotated relatives |
-| **Ab initio (Helixer)** | `land_plant` model, subsequence length 64152 | `vertebrate`, `invertebrate`, `fungi` |
-| **Ab initio (Augustus)** | Start from `arabidopsis` model, train on target data | Any existing Augustus species; or skip training |
-| **EVM weights** | PASA=10, Augustus=7, GETA=5, Helixer=3 | Adjust to evidence quality |
-| **Filter cutoffs** | TPM=3, coverage=0.5, BLAST identity=0.6 | Adjust per organism |
-| **BUSCO lineage** | `eudicots_odb10` | Any BUSCO lineage |
-
-These choices are experiment-specific. The pipeline supports all the alternatives listed above — see the [README](README.md#pipeline-design) for the full set of configurable modules.
-
 ---
 
 ## Step 4: Run Annotation Pipeline
@@ -152,7 +146,7 @@ Setting `TMPDIR` explicitly is **critical** on many HPC systems:
 
 1. **Memory-backed `/tmp` (tmpfs)**: Some HPC nodes have no local disk storage. The default `/tmp` is mounted as `tmpfs`, which stores files **in RAM**. Large temporary files from tools like STAR, RepeatMasker, or Augustus can quickly exhaust memory and crash your jobs with cryptic "out of memory", "no space left on device", or even **segmentation fault** errors—since the OS may kill processes or corrupt memory when tmpfs fills up.
 
-2. **Quota limits**: Shared `/tmp` partitions often have strict per-user quotas (e.g., 1-10 GB). Genome annotation tools easily exceed this.
+2. **Quota limits**: Shared `/tmp` partitions often have strict per-user quotas (e.g., 1–10 GB). Genome annotation tools easily exceed this.
 
 3. **Job isolation**: When `TMPDIR` points to your project directory, temp files persist after job completion for debugging. Cleanup is also straightforward with `rm -rf results/TMP/*`.
 
@@ -311,25 +305,14 @@ sbatch -A [account] -p [partition] -c 1 --mem=1g \
   --wrap="./bin/annotate_toydata.sh"
 ```
 
-**Output locations**  
-- All intermediate/final results are written under the repo root `results/`.  
-- RepeatMasker/RepeatModeler run inside `results/GETA/RepeatMasker/...`, so `.RepeatMaskerCache` and `RM_*` temp folders also stay there.  
+**Output locations**
+- All intermediate/final results are written under the repo root `results/`.
+- RepeatMasker/RepeatModeler run inside `results/GETA/RepeatMasker/...`, so `.RepeatMaskerCache` and `RM_*` temp folders also stay there.
 - EVM commands and outputs live in `results/EVM/`; no `EVM -> results/EVM` symlink is needed.
-- For the filter pipeline, set `RexDB` to a RepeatExplorer protein DB (e.g., Viridiplantae_v4.0.fasta from https://github.com/repeatexplorer/rexdb). You can download directly via:  
+- For the filter pipeline, set `RexDB` to a RepeatExplorer protein DB (e.g., Viridiplantae_v4.0.fasta from https://github.com/repeatexplorer/rexdb). You can download directly via:
   `wget -O toydata/misc/Viridiplantae_v4.0.fasta https://raw.githubusercontent.com/repeatexplorer/rexdb/refs/heads/main/Viridiplantae_v4.0.fasta`
 
-### Expected Runtime (Toy Data)
-
-| Stage | Time |
-|-------|------|
-| RepeatMasking | 15-30 min |
-| RNA-seq alignment | 30-60 min |
-| Transcript assembly | 20-40 min |
-| Homology search | 30-60 min |
-| Augustus training | 1-2 hours |
-| Gene model combination | 30-60 min |
-| EvidenceModeler | 30-60 min |
-| **Total** | **4-8 hours** |
+**Expected runtime (toy data):** 4–8 hours wall-clock on the [test environment](#test-environment). See [Runtime Benchmark](#runtime-benchmark) for per-step details.
 
 ### Force Rerun
 
@@ -401,7 +384,7 @@ Set via `Filter.py` arguments (configured in `Snakefile_filter`):
 | `--max-iter` | Maximum re-training iterations | 10 |
 | `--seed` | Random seed for reproducibility | 123 |
 
-The filter typically converges within 3-5 iterations. Each iteration adds high-confidence predictions back into the training set and retrains. The process stops when no new observations exceed the `--recycle` threshold or `--max-iter` is reached.
+The filter typically converges within 3–5 iterations. Each iteration adds high-confidence predictions back into the training set and retrains. The process stops when no new observations exceed the `--recycle` threshold or `--max-iter` is reached.
 
 ### Important: `chrom_regex`
 
@@ -443,6 +426,45 @@ export SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml"
 - `results/FILTER/scores.metrics.txt` — AUC, precision-recall, F1, and chosen thresholds
 
 This approach is simpler and faster but may be less accurate than the semi-supervised method for organisms with limited prior annotation data.
+
+## Step 5c: Feature Importance Analysis
+
+After finishing the filter phase you will have `FILTER/data.tsv` (the feature
+matrix used by `Filter.py`) and a BUSCO run directory such as
+`results/busco/eudicots_odb10`. Reviewers often ask for a feature ablation
+study, so we provide an automated helper:
+
+```bash
+python bin/filter_feature_importance.py FILTER/data.tsv results/busco/<lineage>/full_table.tsv \
+  --output-table FILTER/feature_importance.tsv
+```
+
+- **What is the BUSCO full table?** Every BUSCO run writes a
+  `full_table.tsv` inside its lineage-specific run folder. Each non-Missing
+  BUSCO row lists the BUSCO ID, status (Complete/Duplicated/Fragmented), and the
+  transcript/gene ID it matched. The feature-importance script reuses this file
+  to count how many BUSCOs remain in the "keep" set during each iteration—no new
+  BUSCO analysis is required.
+- **Outputs**: `FILTER/feature_importance.tsv` (table) plus
+  `FILTER/feature_importance.json` (machine-readable). Both include the baseline
+  run (all features) and each leave-one-feature-out run, along with final
+  out-of-bag (OOB) error, BUSCO counts, and iteration counts.
+- **Optional flags**:
+  - `--features TPM COVERAGE PFAM ...` restricts the analysis to specific
+    columns from `FILTER/data.tsv`.
+  - `--ignore TPM_missing singleExon` removes metadata columns so the script
+    automatically uses every other feature column.
+
+Workflow summary:
+
+1. Run `Filter.py` as usual to create `FILTER/data.tsv`.
+2. Identify the BUSCO `full_table.tsv` path you already used for filter
+   monitoring (e.g., `results/busco/eudicots_odb10/full_table.tsv`).
+3. Execute the command above. Inspect `FILTER/feature_importance.tsv` to see how
+   dropping each feature affects OOB error (positive delta ⇒ feature is
+   important).
+4. Incorporate the results (table/plot) into your manuscript or reviewer
+   response.
 
 ## Step 6: Format Output (TidyGFF)
 
@@ -486,25 +508,7 @@ After **both** annotation and filter phases have completed successfully, run the
 
 ### EVM Weights (`evm_weights.txt`)
 
-Controls how EvidenceModeler prioritizes evidence sources. Higher weights give more influence:
-
-```
-ABINITIO_PREDICTION  AUGUSTUS     7
-ABINITIO_PREDICTION  Helixer     3
-OTHER_PREDICTION     Liftoff     2
-OTHER_PREDICTION     GETA        5
-OTHER_PREDICTION     Genewise    2
-TRANSCRIPT           assembler-pasa.sqlite  10
-TRANSCRIPT           StringTie   1
-TRANSCRIPT           PsiClass    1
-PROTEIN              GeneWise    2
-PROTEIN              miniprot    2
-```
-
-- **PASA transcripts** (weight 10) have the highest weight as direct transcript evidence
-- **Augustus** (weight 7) is weighted higher than **Helixer** (weight 3) as the primary ab initio predictor
-- **GETA** combined models (weight 5) reflect the integrated GETA pipeline evidence
-- Adjust weights based on evidence quality for your organism
+Controls how EvidenceModeler prioritizes evidence sources. See [README — EVM Weights](README.md#evm-weights-evm_weightstxt) for the weight table and tuning guidance.
 
 ### EVM Partitioning (`num_evm_files`)
 
@@ -513,7 +517,7 @@ The `num_evm_files` parameter in `config_annotate.yml` controls how many paralle
 - **Higher values** = more parallel SLURM jobs = faster wall-clock time, but more job scheduling overhead
 - **Lower values** = fewer jobs = less cluster burden, but slower
 - Default: `126` (works well for genomes up to ~500 Mb)
-- For very large genomes (>1 Gb), consider increasing to 200-500
+- For very large genomes (>1 Gb), consider increasing to 200–500
 
 ### Mikado Scoring (`config/plant.yaml`)
 
@@ -547,6 +551,26 @@ helixer:
   account: your-gpu-account
   partition: your-gpu-partition
 ```
+
+### Customizing the Cluster Submit Command
+
+The `cluster_cmd` field in the `__default__` section of your config YAML defines the `sbatch` template used by Snakemake's `--cluster` option. All entry scripts read this template via `bin/get_cluster_cmd.py`, so you only need to edit the config:
+
+```yaml
+__default__:
+  cluster_cmd: >-
+    sbatch -N {cluster.nodes} --mem={cluster.memory} --cpus-per-task={cluster.ncpus}
+    -J {cluster.name} --parsable
+    -A {cluster.account} -p {cluster.partition}
+    -t {cluster.time} -o {cluster.output} -e {cluster.error}
+```
+
+Common customizations:
+- Remove `-A {cluster.account}` if your HPC doesn't require a billing account
+- Add `--gres=gpu:1` for GPU rules
+- Add `--export=ALL` to pass environment variables
+
+See [README — Customizing the Cluster Submit Command](README.md#customizing-the-cluster-submit-command) for more details.
 
 ### RNA-seq File Naming
 
@@ -606,17 +630,7 @@ cat results/logs/geneRegion2Genewise_seqid=group17400.err
 
 ### Common Issues
 
-| Issue | Solution |
-|-------|----------|
-| Out of memory | Increase `memory` in the per-rule overrides section of `config_annotate.yml` for the failing rule |
-| `No space left on device` | `TMPDIR` is on tmpfs or quota exceeded — set `TMPDIR` to project storage |
-| `Segmentation fault` | Often caused by tmpfs exhaustion — set `TMPDIR` to disk-backed storage |
-| LFS files are pointers | Run `git lfs pull`; verify with `ls -la toydata/` (files should be > 200 bytes) |
-| Singularity bind error | Ensure paths are within working directory or use `SINGULARITY_BIND` |
-| Augustus training fails | Needs ~500 training genes minimum; use `augustus_start_from` with a close species or `use_augustus` to skip training |
-| Job timeout | Increase `time` in the per-rule overrides section of `config_annotate.yml` for the rule |
-| Variables not in SLURM job | Add `#SBATCH --export=ALL` or explicitly export in submit script |
-| Filter `chrom_regex` error | Ensure `chrom_regex` in `config_filter.yml` matches your chromosome naming convention |
+For the full troubleshooting table, see [README — Common Issues](README.md#common-issues).
 
 ---
 
@@ -768,44 +782,6 @@ STAR --genomeDir star_index --readFilesIn sample_1.fq.gz sample_2.fq.gz
 samtools view -b -F 4 Aligned.bam | samtools fastq -1 out_1.fq -2 out_2.fq -
 ```
 
-### Test Environment
-
-The toy data was tested on:
-
-| Specification | Value |
-|---------------|-------|
-| Nodes | 4 |
-| Total CPUs | 256 |
-| CPU | Intel Xeon E5-2683 v4 @ 2.10GHz |
-| Cores per node | 64 (2 sockets × 16 cores × 2 threads) |
-| Memory per node | 256 GB |
-| Storage | GPFS |
-
-### Runtime Statistics
-
-The following summarizes the runtime distribution across all pipeline rules when running on the toy dataset.
-
-**Key observations:**
-- **Most time-consuming steps**: `aggregate_CombineGeneModels` (~50,000s), `geneRegion2Genewise` (~1,000s), and `Sam2Transfrag` (~100-200s) are the bottlenecks
-- **Fast steps**: Most preprocessing and formatting rules complete in under 10 seconds
-- **Parallelizable rules**: Rules like `geneRegion2Genewise`, `gmapExon`, and `STAR_paired` run as multiple parallel jobs (shown as multiple dots), significantly reducing wall-clock time
-- **GPU-accelerated**: `helixer` benefits from GPU acceleration when available
-
-**Runtime variability:**
-
-Actual runtime will vary significantly depending on your hardware and cluster configuration:
-
-| Factor | Impact |
-|--------|--------|
-| **CPU speed** | Faster clock speeds reduce single-threaded bottlenecks |
-| **Available nodes** | More nodes = more parallel jobs = faster wall-clock time |
-| **Memory per node** | Insufficient memory causes job failures or swapping |
-| **Storage I/O** | GPFS/Lustre faster than NFS; SSD faster than HDD |
-| **Queue wait time** | Busy clusters add significant delays between jobs |
-| **GPU availability** | Helixer runs ~10x faster with GPU acceleration |
-
-With the test environment above (4 nodes, 256 CPUs, 256 GB/node), the toy dataset completes in **4-8 hours** wall-clock time. On smaller clusters or shared resources, expect longer runtimes.
-
 ---
 
 ## Utility Scripts
@@ -845,13 +821,14 @@ python bin/generate_cluster_from_config.py \
 | `clusterGeneWiseRegions.py` | Cluster GeneWise alignment regions |
 | `miniprot2Genewise.py` | Convert Miniprot output to GeneWise format |
 | `splitBam.py` | Split BAM files for parallel processing |
+| `get_cluster_cmd.py` | Extract `cluster_cmd` sbatch template from config YAML |
 | `MonitorFilter.py` | Visualize filter iteration progress (matplotlib) |
 
 ---
 
 ## Runtime Benchmark
 
-The following benchmarks were measured on the toy dataset (*A. thaliana* chromosome 4, 18.6 Mb) using the test environment described in [Toy Data Details](#test-environment).
+The following benchmarks were measured on the toy dataset (*A. thaliana* chromosome 4, 18.6 Mb) using the test environment described below.
 
 ### Test Environment
 
@@ -864,6 +841,26 @@ The following benchmarks were measured on the toy dataset (*A. thaliana* chromos
 | Memory per node | 256 GB |
 | Storage | GPFS |
 | GPU | NVIDIA V100 (Helixer only) |
+
+### Key Observations
+
+- **Most time-consuming steps**: `aggregate_CombineGeneModels` (~50,000 s), `geneRegion2Genewise` (~1,000 s), and `Sam2Transfrag` (~100–200 s) are the bottlenecks
+- **Fast steps**: Most preprocessing and formatting rules complete in under 10 seconds
+- **Parallelizable rules**: Rules like `geneRegion2Genewise`, `gmapExon`, and `STAR_paired` run as multiple parallel jobs, significantly reducing wall-clock time
+- **GPU-accelerated**: `helixer` benefits from GPU acceleration when available
+
+### Runtime Variability
+
+Actual runtime will vary significantly depending on your hardware and cluster configuration:
+
+| Factor | Impact |
+|--------|--------|
+| **CPU speed** | Faster clock speeds reduce single-threaded bottlenecks |
+| **Available nodes** | More nodes = more parallel jobs = faster wall-clock time |
+| **Memory per node** | Insufficient memory causes job failures or swapping |
+| **Storage I/O** | GPFS/Lustre faster than NFS; SSD faster than HDD |
+| **Queue wait time** | Busy clusters add significant delays between jobs |
+| **GPU availability** | Helixer runs ~10x faster with GPU acceleration |
 
 ### Phase 1 — Annotate
 
@@ -902,6 +899,8 @@ The following benchmarks were measured on the toy dataset (*A. thaliana* chromos
 | Phase 1 — Annotate | 4–8 h |
 | Phase 2 — Filter | ~1 h |
 | **Total** | **~7–11 h** |
+
+With the test environment above (4 nodes, 256 CPUs, 256 GB/node), the toy dataset completes in **4–8 hours** wall-clock time for Phase 1 alone. On smaller clusters or shared resources, expect longer runtimes.
 
 ### Helixer GPU vs CPU
 
@@ -943,42 +942,3 @@ These estimates assume continuous job scheduling. In practice, SLURM queue wait 
 
 - Issues: https://github.com/plantgenomicslab/Sylvan/issues
 - See also: [README.md](README.md) for configuration reference
-
-## Feature Importance Analysis
-
-After finishing the filter phase you will have `FILTER/data.tsv` (the feature
-matrix used by `Filter.py`) and a BUSCO run directory such as
-`results/busco/eudicots_odb10`. Reviewers often ask for a feature ablation
-study, so we provide an automated helper:
-
-```bash
-python bin/filter_feature_importance.py FILTER/data.tsv results/busco/<lineage>/full_table.tsv \
-  --output-table FILTER/feature_importance.tsv
-```
-
-- **What is the BUSCO full table?** Every BUSCO run writes a
-  `full_table.tsv` inside its lineage-specific run folder. Each non-Missing
-  BUSCO row lists the BUSCO ID, status (Complete/Duplicated/Fragmented), and the
-  transcript/gene ID it matched. The feature-importance script reuses this file
-  to count how many BUSCOs remain in the “keep” set during each iteration—no new
-  BUSCO analysis is required.
-- **Outputs**: `FILTER/feature_importance.tsv` (table) plus
-  `FILTER/feature_importance.json` (machine-readable). Both include the baseline
-  run (all features) and each leave-one-feature-out run, along with final
-  out-of-bag (OOB) error, BUSCO counts, and iteration counts.
-- **Optional flags**:
-  - `--features TPM COVERAGE PFAM ...` restricts the analysis to specific
-    columns from `FILTER/data.tsv`.
-  - `--ignore TPM_missing singleExon` removes metadata columns so the script
-    automatically uses every other feature column.
-
-Workflow summary:
-
-1. Run `Filter.py` as usual to create `FILTER/data.tsv`.
-2. Identify the BUSCO `full_table.tsv` path you already used for filter
-   monitoring (e.g., `results/busco/eudicots_odb10/full_table.tsv`).
-3. Execute the command above. Inspect `FILTER/feature_importance.tsv` to see how
-   dropping each feature affects OOB error (positive delta ⇒ feature is
-   important).
-4. Incorporate the results (table/plot) into your manuscript or reviewer
-   response.
