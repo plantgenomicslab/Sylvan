@@ -6,15 +6,18 @@
 
 Input:
   prefix: ath4_toydata                   # [!!!!REQUIRED!!!!:name] output files will be prefixed with this name
-  genome: toydata/genome_input/genome.fasta.gz  # [!!!!REQUIRED!!!!:file] genome assembly fasta file (.fa, .fasta, .fa.gz, or .fasta.gz)
+  genome: toydata/genome_input/genome.fasta.gz  # [!!!!REQUIRED!!!!:file] genome assembly fasta file (.fa, .fasta, .fna, .fa.gz, .fasta.gz, or .fna.gz)
   rna_seq: toydata/RNASeq          # [!!!!REQUIRED!!!!:directory] folder containing RNA-seq data. Files should be gzipped
                                 # fastq (i.e. fastq.gz)
   proteins: toydata/cds_aa/neighbor.aa         # [!!!!REQUIRED!!!!:file] Comma separated list of protein fasta files for homology search
   singularity: /data/gpfs/assoc/pgl/data/Sylvan/Sylvan/sylvan.sif      # [!!!!REQUIRED!!!!:file] the singularity image or sandbox
   liftoff:
     neighbor_gff: toydata/neighbor_gff3     # [!!!!REQUIRED!!!!:directory] folder containing neighbor species annotations (supported: .gff, .gff3)
-    neighbor_fasta: toydata/neighbor_genome   # [!!!!REQUIRED!!!!:directory] folder containing neighbor species genome assemblies (supported: .fa, .fasta)
-  helixer_model: land_plant        # [!!!!REQUIRED!!!!:value] appropriate helixer lineage (land_plant, vertebrate, invertebrate, fungi)
+    neighbor_fasta: toydata/neighbor_genome   # [!!!!REQUIRED!!!!:directory] folder containing neighbor species genome assemblies (supported: .fa, .fasta, .fna, .fas, .fsa, .seq)
+  helixer_model: land_plant        # [!!!!REQUIRED!!!!:value] appropriate helixer lineage (land_plant, vertebrate, fungi)
+  helixer_model_dir: models/helixer   # [optional] custom directory for Helixer .h5 model files
+                                     # Leave empty to use container default (/usr/local/src/Helixer/models/)
+                                     # Current: land_plant_v0.3_a_0080.h5 from https://zenodo.org/records/10836346
   helixer_subseq: 64152           # [!!!!REQUIRED!!!!:value] helixer subsequence length (21384:fungi, 64152:plants, or 213840:vertebrates)
   geta:
     RM_species: Embryophyta       # [!!!!REQUIRED!!!!:value] chose a Repeat Modeler species (i.e. Embryophyta)
@@ -37,12 +40,19 @@ Input:
 
 ###############################################################################################
 #
-# SLURM cluster configuration
+# Per-rule resource allocation (threads used by Snakefiles)
 #
-# This section doubles as Snakemake's --cluster-config (no separate cluster file needed).
-# The __default__ values apply to every rule; per-rule overrides follow below.
+# SLURM submission settings (account, partition, resources) are in a separate file:
+#   cluster_annotate.yml  (used by annotate_toydata.sh as --cluster-config)
 #
-# [Required] Configure cluster with account information
+# The per-rule 'threads' values below are read directly by Snakefile rules.
+# The per-rule 'ncpus'/'memory' values are kept in sync with cluster_annotate.yml
+# for reference, but only cluster_annotate.yml is passed to --cluster-config.
+#
+# WARNING: When using a separate cluster config file (e.g., annotate_toydata.sh),
+#          the account/partition/time values below are IGNORED for SLURM submission.
+#          Edit cluster_annotate.yml (or set SYLVAN_CLUSTER_CONFIG) instead.
+#
 # [Optional] modify resource allocation and threading for specific processes
 #
 ###############################################################################################
@@ -53,22 +63,16 @@ Input:
 # - memory: Recommend 4g per thread (e.g., 48 threads = 192g)
 
 __default__:
-  account: cpu-s1-pgl-0                  # SLURM account
-  partition: cpu-s1-pgl-0                # SLURM partition
+  account: cpu-s1-pgl-0                  # SLURM account (e.g., cpu-s1-pgl-0). Set to "" if not required.
+  partition: cpu-s1-pgl-0                # SLURM partition (e.g., cpu-s1-pgl-0). Set to "" if not required.
   memory: 4g
   name: "{rule}.{wildcards}"
   ncpus: 1
   nodes: 1
-  time: "3-00:00:00"
+  time: "3-00:00:00"                    # Always quote time values (YAML 1.1 treats unquoted HH:MM:SS as numbers)
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
-  # Customize the sbatch template below. For example, remove '-A {cluster.account}'
-  # if your HPC doesn't require a SLURM account, or add flags like '--gres=gpu:1'.
-  cluster_cmd: >-
-    sbatch -N {cluster.nodes} --mem={cluster.memory} --cpus-per-task={cluster.ncpus}
-    -J {cluster.name} --parsable
-    -A {cluster.account} -p {cluster.partition}
-    -t {cluster.time} -o {cluster.output} -e {cluster.error}
+  extra_args: ""                          # Extra sbatch flags (e.g., "--export=ALL")
 helixer:
   #account: placeholder                # SLURM gpu account
   #partition: placeholder              # SLURM gpu parition

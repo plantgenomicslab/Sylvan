@@ -41,8 +41,14 @@ Cutoff:
 
 ###############################################################################################
 #
-# Cluster Configuration
-# [Required] Configure cluster
+# SLURM cluster configuration
+#
+# By default, this file doubles as Snakemake's --cluster-config (no separate cluster file needed).
+# The __default__ values apply to every rule; per-rule overrides follow below.
+# To use a separate cluster file instead, set SYLVAN_FILTER_CLUSTER_CONFIG before running.
+#
+# [Required] Configure cluster with account information
+# [Optional] modify resource allocation and threading for specific processes
 #
 ###############################################################################################
  
@@ -61,8 +67,8 @@ Threads:
 
 
 __default__:
-  account: placeholder     # Provide your slurm account
-  partition: placeholder   # provide your slurm partition
+  account: placeholder     # SLURM account (e.g., cpu-s1-pgl-0). Set to "" if not required.
+  partition: placeholder   # SLURM partition (e.g., cpu-s1-pgl-0). Set to "" if not required.
   memory: 16g
   name: "{rule}.{wildcards}"
   ncpus: 4
@@ -70,13 +76,7 @@ __default__:
   time: "7-00:00:00"
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
-  # Customize the sbatch template below. For example, remove '-A {cluster.account}'
-  # if your HPC doesn't require a SLURM account, or add flags like '--gres=gpu:1'.
-  cluster_cmd: >-
-    sbatch -N {cluster.nodes} --mem={cluster.memory} --cpus-per-task={cluster.ncpus}
-    -J {cluster.name} --parsable
-    -A {cluster.account} -p {cluster.partition}
-    -t {cluster.time} -o {cluster.output} -e {cluster.error}
+  extra_args: ""                          # Extra sbatch flags (e.g., "--export=ALL")
 PfamScan:
   ncpus: 48
   memory: 192g

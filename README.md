@@ -115,7 +115,7 @@ The annotation phase generates gene models by integrating multiple configurable 
   - GMAP provides exonerate-style exon-level alignments
 
 - **Ab Initio Prediction**
-  - Helixer: deep learning–based gene prediction (optionally GPU-accelerated; model selected via `helixer_model` — `land_plant`, `vertebrate`, `invertebrate`, or `fungi`)
+  - Helixer: deep learning–based gene prediction (optionally GPU-accelerated; model selected via `helixer_model` — `land_plant`, `vertebrate`, or `fungi`)
   - Augustus: HMM-based prediction, either trained de novo on the target genome or initialized from an existing species model (via `augustus_start_from`), or skipped entirely if a pre-trained model is supplied (via `use_augustus`)
 
 - **Liftover**
@@ -195,10 +195,10 @@ This section describes the inputs, configuration, and commands needed to run the
 
 | Input | Description | Config Field |
 |-------|-------------|--------------|
-| Genome assembly | FASTA file (`.fa`, `.fasta`, `.fa.gz`, `.fasta.gz`) | `genome` |
+| Genome assembly | FASTA file (`.fa`, `.fasta`, `.fna`, `.fa.gz`, `.fasta.gz`, `.fna.gz`) | `genome` |
 | RNA-seq data | Paired-end gzipped FASTQ files (`*_1.fastq.gz`/`*_2.fastq.gz` or `*_R1.fastq.gz`/`*_R2.fastq.gz`) in a folder | `rna_seq` |
 | Protein sequences | FASTA from UniProt, OrthoDB, etc. (comma-separated for multiple files) | `proteins` |
-| Neighbor species | Directories containing GFF3 and genome FASTA (`.fa`, `.fasta`, `.fna`) files, one per species | `liftoff.neighbor_gff`, `liftoff.neighbor_fasta` |
+| Neighbor species | Directories containing GFF3 and genome FASTA (`.fa`, `.fasta`, `.fna`, `.fas`, `.fsa`, `.seq`) files, one per species | `liftoff.neighbor_gff`, `liftoff.neighbor_fasta` |
 | Repeat library | EDTA output (`.TElib.fa`) | `geta.RM_lib` |
 | Singularity image | Path to `sylvan.sif` | `singularity` |
 
@@ -290,14 +290,18 @@ See the [Wiki](Wiki.md#step-5c-feature-importance-analysis) for detailed usage, 
 
 ## Configuration
 
-Sylvan uses several configuration files. Each config YAML serves as **both** the pipeline config and the Snakemake `--cluster-config`, so no separate cluster file is needed.
+Sylvan separates **pipeline configuration** (inputs, tool parameters, thread counts) from **cluster configuration** (SLURM account, partition, resources).
 
 | File | Purpose |
 |------|---------|
-| `config_annotate.yml` | **Pipeline options and SLURM resources**: input paths, species parameters, tool settings, plus per-rule CPU/memory/partition allocation and `cluster_cmd` template |
-| `config_filter.yml` | **Filter options**: input paths, cutoff thresholds, thread allocation, and `cluster_cmd` template |
+| `config_annotate.yml` | **Pipeline options**: input paths, species parameters, tool settings, per-rule thread counts |
+| `config_filter.yml` | **Filter options**: input paths, cutoff thresholds, thread counts |
+| `cluster_annotate.yml` | **SLURM resources for annotate**: account, partition, per-rule ncpus/memory, extra sbatch flags |
+| `cluster_filter.yml` | **SLURM resources for filter**: account, partition, per-rule ncpus/memory, extra sbatch flags |
 | `evm_weights.txt` | **EVM evidence weights**: priority of each evidence source |
 | `config/plant.yaml` | **Mikado scoring**: transcript selection parameters (plant-specific defaults provided) |
+
+> **Single-file mode:** By default, `config_annotate.yml` can also serve as `--cluster-config` (it includes a `__default__` section with SLURM settings). To use a separate cluster file, set `SYLVAN_CLUSTER_CONFIG` (or `SYLVAN_FILTER_CLUSTER_CONFIG` for filter). Generate a standalone cluster YAML with `bin/generate_cluster_from_config.py`.
 
 ### Pipeline Config (`config_annotate.yml`)
 
@@ -306,7 +310,14 @@ Contains:
 - Species-specific settings (Helixer model, Augustus species)
 - Tool parameters (max intron length, EVM weights)
 - Output prefix and directories
-- SLURM resource allocation (`__default__` section with account, partition, memory, ncpus, time, `cluster_cmd`, plus per-rule overrides)
+- Per-rule thread counts (read by Snakefiles)
+
+### Cluster Config (`cluster_annotate.yml`)
+
+Contains:
+- SLURM account and partition (`__default__` section) — **both are optional**; leave empty or set to `placeholder` on systems that don't require them
+- Per-rule CPU/memory/time overrides
+- `extra_args` for additional sbatch flags (e.g., `--gres=gpu:1`, `--export=ALL`)
 
 ### EVM Weights (`evm_weights.txt`)
 
@@ -369,7 +380,7 @@ snakemake --unlock --snakefile bin/Snakefile_annotate  # unlock
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `prefix` | Output file prefix | `my_species` |
-| `helixer_model` | `land_plant`, `vertebrate`, `invertebrate`, `fungi` | `land_plant` |
+| `helixer_model` | `land_plant`, `vertebrate`, `fungi` | `land_plant` |
 | `helixer_subseq` | 64152 (plants), 21384 (fungi), 213840 (vertebrates) | `64152` |
 | `augustus_species` | Augustus species name for training | `arabidopsis` |
 | `augustus_start_from` | Start Augustus training from an existing species model (skips de novo training if close match available) | `arabidopsis` |
@@ -389,47 +400,143 @@ helixer:
   partition: your-gpu-partition   # GPU partition name
 ```
 
-### SLURM Configuration
+### Custom Helixer Models
 
-Find your SLURM account and partition:
+To use custom Helixer `.h5` model files instead of the container defaults:
+
+1. Set `helixer_model_dir` in your config to the host directory containing the model files:
+   ```yaml
+   helixer_model_dir: "/path/to/custom/models"
+   ```
+
+2. Bind the directory into the container via `SINGULARITY_BIND`:
+   ```bash
+   export SINGULARITY_BIND="/path/to/custom/models"
+   ```
+
+The pipeline will look for `{helixer_model_dir}/{helixer_model}.h5` (e.g., `/path/to/custom/models/land_plant.h5`).
+
+### SLURM Configuration: Step-by-Step Setup
+
+Follow these steps to configure Sylvan for your HPC cluster. This only needs to be done once per cluster.
+
+#### Step 1: Find your SLURM account and partition
+
 ```bash
 # Show your accounts and partitions
 sacctmgr show user "$USER" withassoc format=Account,Partition -nP
 
-# List all available partitions
-sinfo -s
-
-# Show partition details (time limits, nodes, etc.)
+# List all available partitions with time limits, node counts, and memory
 sinfo -o "%P %l %D %c %m"
 ```
 
-Set in `config_annotate.yml` under the `__default__` section:
+Example output:
+```
+PARTITION      TIMELIMIT  NODES  CPUS  MEMORY
+cpu-s1-pgl-0   14-00:00:00  4    64   256000
+gpu-s2-core-0  14-00:00:00  10   64   256000
+cpu-s3-test-0  8:00:00      2    64   191000
+```
+
+Note your **account name** (e.g., `cpu-s1-pgl-0`) and **partition name** (e.g., `cpu-s1-pgl-0`). On some clusters these are different; on others they are the same. If your cluster does not require an account or partition, you can leave them empty or set to `placeholder`.
+
+#### Step 2: Generate a cluster config file
+
+Use `generate_cluster_from_config.py` to create a cluster config tailored to your cluster. The script reads per-rule resource requirements from `config_annotate.yml` and adds your SLURM account/partition.
+
+```bash
+python3 bin/generate_cluster_from_config.py \
+  --config config/config_annotate.yml \
+  --out config/cluster_annotate.yml \
+  --account your-account \
+  --partition your-partition
+```
+
+**What this does:**
+- Extracts per-rule CPU/memory/time settings from `config_annotate.yml`
+- Sets `__default__.account` and `__default__.partition` to your values
+- **Auto-detects walltime**: queries `sinfo` for your partition's max time limit and sets `time = max - 1 day` (e.g., if max is 14 days, sets 13 days). Falls back to 9 days if `sinfo` is unavailable.
+- Writes a standalone `cluster_annotate.yml` ready for Snakemake's `--cluster-config`
+
+To override the auto-detected time, use `--time`:
+```bash
+python3 bin/generate_cluster_from_config.py \
+  --config config/config_annotate.yml \
+  --out config/cluster_annotate.yml \
+  --account your-account --partition your-partition \
+  --time "5-00:00:00"
+```
+
+For the toy data:
+```bash
+python3 bin/generate_cluster_from_config.py \
+  --config toydata/config/config_annotate.yml \
+  --out toydata/config/cluster_annotate.yml \
+  --account your-account --partition your-partition
+```
+
+#### Step 3: Verify the generated config
+
+Open the generated file and check that `__default__` looks correct:
+
 ```yaml
 __default__:
   account: your-account
   partition: your-partition
-  time: "3-00:00:00"
-  memory: 8g
+  memory: 4g
   ncpus: 1
+  nodes: 1
+  time: "13-00:00:00"          # Auto-detected: partition max (14d) minus 1 day
+  name: '{rule}.{wildcards}'
+  output: results/logs/{rule}_{wildcards}.out
+  error: results/logs/{rule}_{wildcards}.err
+  extra_args: ''
 ```
 
-### Customizing the Cluster Submit Command
+> **Important:** Always quote time values in YAML (e.g., `time: "3-00:00:00"`). Unquoted values like `72:00:00` are silently parsed as integers by YAML 1.1, resulting in incorrect SLURM walltimes. The generator handles this automatically.
 
-The `cluster_cmd` field in the `__default__` section defines the `sbatch` template used by Snakemake's `--cluster` option. All entry scripts (`annotate.sh`, `filter.sh`, etc.) read this template via `bin/get_cluster_cmd.py`, so you only need to edit the config YAML:
+#### Step 4: Do a dry run
 
+```bash
+export SYLVAN_CONFIG="config/config_annotate.yml"
+snakemake -n --snakefile bin/Snakefile_annotate
+```
+
+If this completes without errors, your configuration is valid.
+
+#### Step 5: Run the pipeline
+
+```bash
+# Submit as a SLURM head job (recommended)
+sbatch -A your-account -p your-partition -c 1 --mem=1g \
+  -J annotate -o annotate.out -e annotate.err \
+  --wrap="./bin/annotate.sh"
+
+# Or run directly (if already on a compute node)
+./bin/annotate.sh
+```
+
+#### Reconfiguring for a different cluster
+
+If you move to a new HPC system, re-run Step 2 with the new account/partition. The generator will auto-detect the new partition's time limit. All other settings (per-rule resources) are preserved from `config_annotate.yml`.
+
+#### Single-file mode (alternative)
+
+If you prefer not to use a separate cluster file, you can edit the `__default__` section directly in `config_annotate.yml`. The entry scripts default to using the pipeline config as `--cluster-config` when `SYLVAN_CLUSTER_CONFIG` is not set.
+
+### Customizing SLURM Submission
+
+Job submission is handled by `bin/cluster_submit.py`, which dynamically builds the `sbatch` command. **Account (`-A`) and partition (`-p`) flags are automatically skipped** when their values are empty or set to `placeholder` — no need to edit any script.
+
+For per-rule customization (e.g., GPU for Helixer), add overrides to the rule's section in `cluster_annotate.yml` or `config_annotate.yml`:
 ```yaml
-__default__:
-  cluster_cmd: >-
-    sbatch -N {cluster.nodes} --mem={cluster.memory} --cpus-per-task={cluster.ncpus}
-    -J {cluster.name} --parsable
-    -A {cluster.account} -p {cluster.partition}
-    -t {cluster.time} -o {cluster.output} -e {cluster.error}
+helixer:
+  ncpus: 4
+  memory: 32g
+  account: your-gpu-account
+  partition: your-gpu-partition
+  extra_args: "--gres=gpu:1"
 ```
-
-Common customizations:
-- Remove `-A {cluster.account}` if your HPC doesn't require a billing account
-- Add `--gres=gpu:1` for GPU rules
-- Add `--export=ALL` to pass environment variables
 
 ---
 
@@ -549,8 +656,8 @@ Run this only after both annotation and filter phases have completed successfull
 
 | Script | Purpose |
 |--------|---------|
-| `bin/generate_cluster_from_config.py` | Regenerate per-rule SLURM defaults within `config_annotate.yml` — keeps resource requests in sync with the pipeline's threads/memory |
-| `bin/get_cluster_cmd.py` | Extract the `cluster_cmd` sbatch template from a config YAML (used internally by all entry scripts) |
+| `bin/generate_cluster_from_config.py` | Generate a standalone cluster-only YAML from `config_annotate.yml` |
+| `bin/cluster_submit.py` | SLURM job submission wrapper — dynamically builds `sbatch` command, skips `-A`/`-p` when account/partition are empty |
 
 ---
 
@@ -578,7 +685,7 @@ cat results/logs/{rule}_{wildcards}.err
 | Singularity bind error | Ensure paths are within working directory or use `SINGULARITY_BIND` |
 | `Permission denied` in container | Check directory permissions, ensure path is bound |
 | SLURM account error | Use `account` (billing account), not username |
-| `cluster_cmd` not found | Ensure `__default__.cluster_cmd` exists in your config YAML |
+| SLURM account error | Set `account` to empty string (`""`) or `placeholder` in the cluster config if your HPC doesn't require one |
 | LFS files not downloaded | Run `git lfs pull`; verify with `ls -la toydata/` (files should be > 200 bytes) |
 | Augustus training fails | Needs minimum ~500 training genes; use `augustus_start_from` with a close species |
 | Job timeout | Increase `time` in `config_annotate.yml` for the rule |

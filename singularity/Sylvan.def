@@ -288,7 +288,7 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 	# Install helixer models
 	mkdir /usr/local/src/Helixer/models
 	wget -O /usr/local/src/Helixer/models/land_plant.h5 \
-          https://raw.githubusercontent.com/wyim-pgl/genome_annotation_installations/main/Helixer_models/land_plant_v0.3_a_0400.h5
+          https://zenodo.org/records/10836346/files/land_plant_v0.3_a_0080.h5?download=1
 	wget -O /usr/local/src/Helixer/models/fungi.h5 \
           https://raw.githubusercontent.com/wyim-pgl/genome_annotation_installations/main/Helixer_models/fungi_v0.3_a_0400.h5
 	wget -O /usr/local/src/Helixer/models/vertebrate.h5 \
