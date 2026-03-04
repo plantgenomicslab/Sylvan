@@ -41,13 +41,13 @@ The toy data experiment uses the following configuration choices. These are pre-
 
 | Parameter | Choice for this experiment | Alternatives |
 |-----------|---------------------------|--------------|
-| **Genome** | *A. thaliana* Chr4, 18.6 Mb, 3 segments | Any FASTA assembly |
+| **Genome** | *A. thaliana* Chr4, 18.6 Mb, 3 segments | Any FASTA assembly (`.fa`, `.fasta`, `.fna`, `.fas`, `.fsa`, `.seq`) |
 | **Repeat masking** | RepeatMasker with `Embryophyta` library + custom EDTA library | Any RepeatMasker species; RepeatModeler for de novo |
 | **RNA-seq** | 12 paired-end samples (leaf, rosette, whole plant) | Any number of paired-end samples |
 | **RNA-seq alignment** | STAR pathway with StringTie + PsiCLASS | HiSat2 is also available |
 | **Protein homology** | Combined neighbor-species proteins (`neighbor.aa`) | UniProt, OrthoDB, or any protein FASTA |
 | **Neighbor species** | 3 species: *A. lyrata*, *C. rubella*, *C. hirsuta* | One or more annotated relatives |
-| **Ab initio (Helixer)** | `land_plant` model, subsequence length 64152 | `vertebrate`, `invertebrate`, `fungi` |
+| **Ab initio (Helixer)** | `land_plant` model, subsequence length 64152 | `vertebrate`, `fungi` |
 | **Ab initio (Augustus)** | Start from `arabidopsis` model, train on target data | Any existing Augustus species; or skip training |
 | **EVM weights** | PASA=10, Augustus=7, GETA=5, Helixer=3 | Adjust to evidence quality |
 | **Filter cutoffs** | TPM=3, coverage=0.5, BLAST identity=0.6 | Adjust per organism |
@@ -134,8 +134,10 @@ The pipeline uses several environment variables for configuration:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `SYLVAN_CONFIG` | Path to pipeline config file (also used as `--cluster-config` for SLURM settings) | `toydata/config/config_annotate.yml` |
-| `SYLVAN_FILTER_CONFIG` | Path to filter config file | `toydata/config/config_filter.yml` |
+| `SYLVAN_CONFIG` | Path to annotate pipeline config (inputs, tool params, threads) | `toydata/config/config_annotate.yml` |
+| `SYLVAN_CLUSTER_CONFIG` | Path to annotate cluster config (SLURM account, partition, resources). Defaults to `SYLVAN_CONFIG` if not set (single-file mode) | `toydata/config/cluster_annotate.yml` |
+| `SYLVAN_FILTER_CONFIG` | Path to filter pipeline config | `toydata/config/config_filter.yml` |
+| `SYLVAN_FILTER_CLUSTER_CONFIG` | Path to filter cluster config. Defaults to `SYLVAN_FILTER_CONFIG` if not set | `toydata/config/cluster_filter.yml` |
 | `SYLVAN_RESULTS_DIR` | Override results output directory (default: `$(pwd)/results/`). Useful on HPC systems with separate storage. | `/scratch/$USER/sylvan_results` |
 | `TMPDIR` | Temporary directory for intermediate files | `$(pwd)/results/TMP` |
 | `SLURM_TMPDIR` | SLURM job temporary directory (should match `TMPDIR`) | `$TMPDIR` |
@@ -552,25 +554,46 @@ helixer:
   partition: your-gpu-partition
 ```
 
-### Customizing the Cluster Submit Command
+### Custom Helixer Models
 
-The `cluster_cmd` field in the `__default__` section of your config YAML defines the `sbatch` template used by Snakemake's `--cluster` option. All entry scripts read this template via `bin/get_cluster_cmd.py`, so you only need to edit the config:
+To use custom Helixer `.h5` model files instead of the container defaults:
+
+1. Set `helixer_model_dir` in your config to the host directory containing the model files:
+   ```yaml
+   helixer_model_dir: "/path/to/custom/models"
+   ```
+
+2. Bind the directory into the container via `SINGULARITY_BIND`:
+   ```bash
+   export SINGULARITY_BIND="/path/to/custom/models"
+   ```
+
+The pipeline will look for `{helixer_model_dir}/{helixer_model}.h5` (e.g., `/path/to/custom/models/land_plant.h5`). Leave `helixer_model_dir` empty (default) to use the container's built-in models at `/usr/local/src/Helixer/models/`.
+
+### Customizing SLURM Submission
+
+> **Tip:** SLURM settings can live in a separate cluster YAML (`cluster_annotate.yml` / `cluster_filter.yml`) or in the pipeline config's `__default__` section (single-file mode). Set `SYLVAN_CLUSTER_CONFIG` to point to a separate cluster file, or leave it unset to use the pipeline config.
+
+Job submission is handled by `bin/cluster_submit.py`, which dynamically builds the `sbatch` command from the `__default__` section of your cluster config. **Account (`-A`) and partition (`-p`) are automatically skipped** when set to empty or `placeholder`.
 
 ```yaml
 __default__:
-  cluster_cmd: >-
-    sbatch -N {cluster.nodes} --mem={cluster.memory} --cpus-per-task={cluster.ncpus}
-    -J {cluster.name} --parsable
-    -A {cluster.account} -p {cluster.partition}
-    -t {cluster.time} -o {cluster.output} -e {cluster.error}
+  account: your-account       # Leave empty or "placeholder" if not required
+  partition: your-partition    # Leave empty or "placeholder" if not required
+  time: "3-00:00:00"           # Always quote time values (YAML 1.1 treats unquoted HH:MM:SS as numbers)
+  memory: 8g
+  extra_args: ""              # Extra sbatch flags (e.g., "--export=ALL")
 ```
 
-Common customizations:
-- Remove `-A {cluster.account}` if your HPC doesn't require a billing account
-- Add `--gres=gpu:1` for GPU rules
-- Add `--export=ALL` to pass environment variables
+> **Warning:** Always quote YAML time values (e.g., `time: "3-00:00:00"`). Unquoted values like `72:00:00` are silently parsed as sexagesimal integers by YAML 1.1, resulting in incorrect SLURM walltimes.
 
-See [README — Customizing the Cluster Submit Command](README.md#customizing-the-cluster-submit-command) for more details.
+For per-rule customization (e.g., GPU for Helixer), use `extra_args` in the rule section:
+```yaml
+helixer:
+  extra_args: "--gres=gpu:1"
+```
+
+See [README — Customizing SLURM Submission](README.md#customizing-slurm-submission) for more details.
 
 ### RNA-seq File Naming
 
@@ -792,17 +815,21 @@ samtools view -b -F 4 Aligned.bam | samtools fastq -1 out_1.fq -2 out_2.fq -
 
 ```bash
 # Extract standalone cluster YAML from production config
+# Default: auto-detects partition max time from sinfo and sets time = max - 1 day
 python bin/generate_cluster_from_config.py \
   --config config/config_annotate.yml \
   --out config/cluster_annotate.yml \
   --account your-account --partition your-partition
 
-# Extract from toydata config
+# Extract from toydata config (explicit time override)
 python bin/generate_cluster_from_config.py \
   --config toydata/config/config_annotate.yml \
   --out toydata/config/cluster_annotate.yml \
-  --account your-account --partition your-partition
+  --account your-account --partition your-partition \
+  --time "5-00:00:00"
 ```
+
+**Auto time detection** (default): The script queries `sinfo` for the partition's maximum walltime and sets `time` to `max - 1 day`. If `sinfo` is unavailable or the partition is not found, it falls back to `9-00:00:00`. Override with `--time "D-HH:MM:SS"` to set a specific walltime.
 
 ### Key Python Scripts
 
@@ -821,7 +848,7 @@ python bin/generate_cluster_from_config.py \
 | `clusterGeneWiseRegions.py` | Cluster GeneWise alignment regions |
 | `miniprot2Genewise.py` | Convert Miniprot output to GeneWise format |
 | `splitBam.py` | Split BAM files for parallel processing |
-| `get_cluster_cmd.py` | Extract `cluster_cmd` sbatch template from config YAML |
+| `cluster_submit.py` | SLURM job submission wrapper — skips `-A`/`-p` when account/partition are empty |
 | `MonitorFilter.py` | Visualize filter iteration progress (matplotlib) |
 
 ---

@@ -84,30 +84,13 @@ for input in config_dict["Input"]:
 					if not os.path.exists(geta_config[key]):
 						logging.error(f"Could not find {geta_config[key]}! Check Input/geta/{key} in config.yml ...")
 						sys.exit()
-	elif (input == "prefix") | (input == "RM_species") | (input == "augustus_species") | (input == "use_augustus") | (input == "augustus_start_from"):
+	elif input in {"prefix", "RM_species", "augustus_species", "use_augustus",
+	               "augustus_start_from", "num_evm_files", "helixer_model_dir", "helixer_subseq"}:
 		continue
-	# TODO: Verify other geta configs
-	# NOTE: don't check pfamdb...should be installed in singularity
-	# Check config file for valid augustus set-up
-	#elif (config_dict[input]"augustus_species" == "") & (config_dict["use_augustus"] == ""):
-	#	logging.error(f"No value provided for augustus. Check config.yaml...")
-	#	sys.exit()
-	#elif config_dict[input]["use_augustus"] != "":
-	#	#TODO: check augustus install for species, error and quit if not present use config_dict["Input"]["AUGUSTUS_CONFIG_PATH"]
-	#	#      Set a variable for use augustus
-	#	#      Set variable to hold agustus species
-	#	continue
-	#elif input["augustus_species"] != "":
-	#	#TODO: Set augustus species variable
-	#	continue
 	elif input == "evm_weights":
 		if not os.path.exists(config_dict["Input"][input]):
 			logging.error(f"Could not find {config_dict['Input'][input]}! Check Input/{input} in config.yml ...")
 			sys.exit()
-	elif input == "num_evm_files":
-		continue
-	elif input == "helixer_subseq":
-		continue
 	elif input == "helixer_model":
 		if config_dict["Input"][input] not in ["land_plant", "fungi", "vertebrate"]:
 			logging.error(f"Invalid value for {input}! Check Input/{input} in config.yml ...")
@@ -149,6 +132,9 @@ if (config_dict["Input"]["geta"]["augustus_species"] != "placeholder") | (config
 genome = config_dict["Input"]["genome"]
 rna_seq = config_dict["Input"]["rna_seq"]
 helixer_model = config_dict["Input"]["helixer_model"]
+helixer_model_dir = config_dict["Input"].get("helixer_model_dir", "")
+if not helixer_model_dir or helixer_model_dir == "placeholder":
+	helixer_model_dir = "/usr/local/src/Helixer/models"
 neighbor_gff = config_dict["Input"]["liftoff"]["neighbor_gff"]
 neighbor_fasta = config_dict["Input"]["liftoff"]["neighbor_fasta"]
 augustus_species = config_dict["Input"]["geta"]["augustus_species"]
@@ -2295,21 +2281,20 @@ rule GETA_output:
 		"""
 ############# End GETA Snakemake ###############
 
-# TODO: fetch helixer lineage with fetch_helixer_model.py: file goes here os.path.join(appdirs.user_data_dir('Helixer'), 'models')
-# TODO: allow users to specifiy path and singularity binding
 rule helixer:
-	input: 
+	input:
 		g = genome
-	params: 
+	params:
 		s = image,
 		l = helixer_model,
+		model_dir = helixer_model_dir,
 		subseq=config_dict["Input"]["helixer_subseq"]
 	output: f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3"
 	shell: '''
 		singularity exec {params.s} conda run -n helixer \
 		Helixer.py \
 		  --fasta-path {input.g} \
-		  --model-filepath /usr/local/src/Helixer/models/{params.l}.h5 \
+		  --model-filepath {params.model_dir}/{params.l}.h5 \
 		  --subsequence-length {params.subseq} \
 		  --gff-output-path {output}
 		'''
@@ -2331,7 +2316,7 @@ rule prepare_liftoff:
 
 		# Uniquify chromosome names and combine everything
 		shell("if test -f {params.results_dir}LIFTOVER/LiftOff/combined.fasta; then rm {params.results_dir}LIFTOVER/LiftOff/combined.fasta;fi")
-		shell('for fasta in $(find {params.neighbor_fasta} \\( -name "*.fa" -o -name "*.fasta" -o -name "*.fna" \\)); do \
+		shell('for fasta in $(find {params.neighbor_fasta} -regextype sed -regex ".*\\.\\(fa\\|fasta\\|fna\\|fas\\|fsa\\|seq\\)$"); do \
 			bn=$(basename $fasta); \
 			tri=${{bn:0:3}}; \
 			cat $fasta | sed "s/^>/>${{tri}}/" >> {params.results_dir}LIFTOVER/LiftOff/combined.fasta; \

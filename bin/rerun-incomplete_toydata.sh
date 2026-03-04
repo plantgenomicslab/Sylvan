@@ -7,8 +7,14 @@ mkdir -p results/TMP
 export TMPDIR="$(pwd)/results/TMP"
 export SLURM_TMPDIR="$TMPDIR"
 
-# Set config path for Snakefile
+# Pipeline config: input paths, tool parameters, thread counts (read by Snakefiles)
 export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
+
+# Cluster config: SLURM account, partition, per-rule resources (read by Snakemake --cluster-config)
+export SYLVAN_CLUSTER_CONFIG="toydata/config/cluster_annotate.yml"
+
+# Cluster submit command — account and partition are optional (skipped when empty or 'placeholder')
+CLUSTER_CMD="python3 bin/cluster_submit.py {cluster.nodes} {cluster.memory} {cluster.ncpus} {cluster.name} {cluster.account} {cluster.partition} {cluster.time} {cluster.output} {cluster.error} {cluster.extra_args}"
 
 # Rerun incomplete jobs with mtime trigger to detect changed files
 snakemake -p \
@@ -19,14 +25,14 @@ snakemake -p \
 	--keep-going \
 	--keep-incomplete \
 	--stats annotation_runtime_stats.json \
-	--cluster-config "$SYLVAN_CONFIG" \
+	--cluster-config "$SYLVAN_CLUSTER_CONFIG" \
 	--snakefile bin/Snakefile_annotate \
 	--groups Sam2Transfrag=group0 --group-components group0=100 \
 	--max-jobs-per-second 50 \
 	--max-status-checks-per-second 50 \
 	--jobs 150 \
 	--latency-wait 30 \
-	--cluster "$(python3 bin/get_cluster_cmd.py "$SYLVAN_CONFIG")" \
+	--cluster "$CLUSTER_CMD" \
 	--singularity-args "--cleanenv --env PYTHONNOUSERSITE=1" \
 		"$@"
 

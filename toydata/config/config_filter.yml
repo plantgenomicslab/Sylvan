@@ -42,8 +42,12 @@ Cutoff:
 
 ###############################################################################################
 #
-# Cluster Configuration
-# [Required] Configure cluster
+# Per-rule resource allocation (threads used by Snakefiles)
+#
+# SLURM submission settings (account, partition, resources) are in a separate file:
+#   cluster_filter.yml  (used by filter_toydata.sh as --cluster-config)
+#
+# [Optional] modify resource allocation and threading for specific processes
 #
 ###############################################################################################
  
@@ -62,8 +66,8 @@ Threads:
 
 
 __default__:
-  account: cpu-s1-pgl-0    # Provide your slurm account
-  partition: cpu-s1-pgl-0  # provide your slurm partition
+  account: cpu-s1-pgl-0    # SLURM account (e.g., cpu-s1-pgl-0). Set to "" if not required.
+  partition: cpu-s1-pgl-0  # SLURM partition (e.g., cpu-s1-pgl-0). Set to "" if not required.
   memory: 16g
   name: "{rule}.{wildcards}"
   ncpus: 4
@@ -71,13 +75,7 @@ __default__:
   time: "7-00:00:00"
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
-  # Customize the sbatch template below. For example, remove '-A {cluster.account}'
-  # if your HPC doesn't require a SLURM account, or add flags like '--gres=gpu:1'.
-  cluster_cmd: >-
-    sbatch -N {cluster.nodes} --mem={cluster.memory} --cpus-per-task={cluster.ncpus}
-    -J {cluster.name} --parsable
-    -A {cluster.account} -p {cluster.partition}
-    -t {cluster.time} -o {cluster.output} -e {cluster.error}
+  extra_args: ""                          # Extra sbatch flags (e.g., "--export=ALL")
 PfamScan:
   ncpus: 48
   memory: 192g

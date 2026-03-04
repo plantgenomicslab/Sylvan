@@ -1,0 +1,84 @@
+################################################################################
+#                           SLURM CLUSTER CONFIGURATION
+#                    Sylvan Filter Pipeline
+#
+# This standalone cluster file is used by filter entry scripts as
+# --cluster-config for Snakemake. Pipeline settings (Input, Cutoff, Threads)
+# are read separately from config_filter.yml via SYLVAN_FILTER_CONFIG.
+#
+# Regenerate from config_filter.yml:
+#   python bin/generate_cluster_from_config.py \
+#     --config toydata/config/config_filter.yml \
+#     --out toydata/config/cluster_filter.yml \
+#     --account <your-account> --partition <your-partition>
+################################################################################
+
+__default__:
+  account: cpu-s1-pgl-0                  # SLURM account
+  partition: cpu-s1-pgl-0                # SLURM partition
+  memory: 16g
+  name: "{rule}.{wildcards}"
+  ncpus: 4
+  nodes: 1
+  time: "7-00:00:00"
+  output: results/logs/{rule}_{wildcards}.out
+  error: results/logs/{rule}_{wildcards}.err
+  extra_args: ""                          # Extra sbatch flags (e.g., "--export=ALL")
+
+PfamScan:
+  ncpus: 48
+  memory: 192g
+RSEM:
+  ncpus: 32
+  memory: 128g
+sortSTAR:
+  ncpus: 16
+  memory: 64g
+blast:
+  ncpus: 16
+  memory: 64g
+coverage:
+  ncpus: 16
+  memory: 64g
+indexRef:
+  ncpus: 4
+  memory: 16g
+blastDB:
+  ncpus: 4
+  memory: 16g
+blastRexDB:
+  ncpus: 4
+  memory: 16g
+splitPep:
+  ncpus: 4
+  memory: 16g
+combineBlast:
+  ncpus: 4
+  memory: 16g
+abInitioCoverage:
+  ncpus: 1
+  memory: 4g
+STAR_generate:
+  ncpus: 12
+  memory: 48g
+fastp_PAIRED:
+  ncpus: 16
+  memory: 64g
+STAR_paired:
+  ncpus: 12
+  memory: 48g
+mergeSTAR:
+  ncpus: 16
+  memory: 64g
+calculateRSEMExpression:
+  ncpus: 16
+  memory: 64g
+prepRSEM:
+  ncpus: 16
+  memory: 64g
+lncRNA_pred:
+  ncpus: 24
+  memory: 96g
+STAR_index:
+  ncpus: 12
+  memory: 48g
