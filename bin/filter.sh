@@ -32,7 +32,7 @@ snakemake -p --rerun-incomplete --cluster-config "$SYLVAN_FILTER_CLUSTER_CONFIG"
 		--rerun-triggers mtime \
 		--snakefile bin/Snakefile_filter \
 		--use-singularity \
-		--use-conda \
+		--singularity-args "--nv -B /data/gpfs" \
 		--keep-going \
 		--keep-incomplete \
 		--stats filter_runtime_stats.json \
@@ -41,5 +41,4 @@ snakemake -p --rerun-incomplete --cluster-config "$SYLVAN_FILTER_CLUSTER_CONFIG"
 		--jobs 150 \
 		--latency-wait 30 \
 		--cluster "$CLUSTER_CMD" \
-		--singularity-args "--cleanenv --env PYTHONNOUSERSITE=1" \
 		"$@"

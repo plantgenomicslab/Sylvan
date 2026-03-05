@@ -22,14 +22,21 @@ for input in config_dict["Input"]:
 	if input == "busco_lin":
 		continue
 	if input == "HmmDB":
-		if config_dict["Input"][input] == "/usr/local/src/Pfam-A.hmm":
-			continue
-		elif not os.path.exists(config_dict["Input"][input]):
-			sys.exit(f"Could not find {config_dict['Input'][input]}! Check {input} in config.yaml ...")
+		hmm_path = config_dict["Input"][input]
+		if hmm_path.startswith("/usr/local/") or hmm_path == "placeholder":
+			continue  # Will use conda env default
+		elif not os.path.exists(hmm_path):
+			sys.exit(f"Could not find {hmm_path}! Check {input} in config.yaml ...")
+		continue
 	if not os.path.exists(config_dict["Input"][input]):
 		sys.exit(f"Could not find {config_dict['Input'][input]}! Check {input} in config.yaml ...")
 
-image = config_dict["Singularity"]
+
+# Singularity container with pre-built micromamba environments
+singularity: config_dict.get("Input", {}).get("singularity", "") or config_dict.get("Singularity", "")
+
+# Set up micromamba shell hook for all shell commands
+shell.prefix("set +u; eval \"$(/usr/local/bin/micromamba shell hook -s bash)\"; set -u; ")
 
 # Get rnaseq run wildcards
 rna_seq = config_dict["Input"]["rna_seq"]
@@ -109,8 +116,8 @@ rule makeCDSPep:
 	params:
 		genome = config_dict["Input"]["genome"],
 		gff =  config_dict["Input"]["anot_gff"]
-	singularity: image
 	shell:"""
+		micromamba activate filter
 		gff3_file_to_proteins.pl {params.gff} {params.genome} cDNA > {output.cdna}
 
 		gff3_file_to_proteins.pl {params.gff} {params.genome} prot > {output.pep}
@@ -121,10 +128,9 @@ rule PfamScan:
 	output: f"{RESULTS_DIR}FILTER/pfam.out"
 	threads: config_dict["Threads"]["PfamScan"]
 	params:
-		hmm = config_dict['Input']['HmmDB'],
-		singularity = image
+		hmm = config_dict['Input']['HmmDB']
 	shell:"""
-		singularity exec {params.singularity} \
+		micromamba activate filter
 		pfam_scan.pl \
 			-fasta {input} \
 			-dir {params.hmm} \
@@ -136,10 +142,10 @@ rule PfamScan:
 rule prepRSEM:
 	input: anot_cdna
 	output: f"{anot_cdna}.seq"
-	singularity: image
 	threads: config_dict["Threads"]["prepRSEM"]
 	params: cdna = anot_cdna
 	shell: """
+		micromamba activate filter
 		rsem-prepare-reference \
 		-p {threads} \
 		{input} \
@@ -153,11 +159,11 @@ rule fastp_PAIRED:
 	output:
 		fwd = f"{RESULTS_DIR}GETA/fastp/paired/{{run}}_1.fq.gz",
 		rev = f"{RESULTS_DIR}GETA/fastp/paired/{{run}}_2.fq.gz"
-	singularity: image
 	threads: config_dict["Threads"]["fastp_PAIRED"]
 	params:
 		results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate alignment
 		fastp --detect_adapter_for_pe \
 			--overrepresentation_analysis \
 			--cut_right \
@@ -171,12 +177,12 @@ rule fastp_PAIRED:
 rule STAR_index:
 	output: temp(f"{RESULTS_DIR}FILTER/STAR/SA")
 	threads: config_dict["Threads"]["STAR_index"]
-	singularity: image
 	params:
 		g = config_dict["Input"]["genome"],
 		gff = config_dict["Input"]["anot_gff"],
 		results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate alignment
 		STAR \
 		--runThreadN {threads} \
 		--runMode genomeGenerate \
@@ -195,10 +201,10 @@ rule STAR_paired:
 		two = f"{RESULTS_DIR}GETA/fastp/paired/{{run}}_2.fq.gz",
 	output: temp(f"{RESULTS_DIR}FILTER/STAR/{{run}}.STAR_pairedend.bamAligned.toTranscriptome.out.bam")
 	threads: config_dict["Threads"]["STAR"]
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR
 	shell: """
+			micromamba activate alignment
 			STAR --runMode alignReads \
 			--runThreadN {threads} \
 			--outFilterMultimapNmax 10 \
@@ -225,11 +231,11 @@ rule calculateRSEMExpression_PAIRED:
 		bam = f"{RESULTS_DIR}FILTER/STAR/{{run}}.STAR_pairedend.bamAligned.toTranscriptome.out.bam"
 	output: f"{RESULTS_DIR}FILTER/rsem_outdir/{{run}}.isoforms.results"
 	threads: config_dict["Threads"]["calculateRSEMExpression"]
-	singularity: image
 	params:
 		cdna = anot_cdna,
 		results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate filter
 		rsem-calculate-expression \
 		--no-bam-output -p {threads} \
 		--alignments \
@@ -257,9 +263,9 @@ rule mergeRSEM:
 rule mergeSTAR:
 	input: bams
 	output: temp(f"{RESULTS_DIR}FILTER/STAR/merged.bam")
-	singularity: image
 	threads: config_dict["Threads"]["mergeSTAR"]
 	shell:"""
+			micromamba activate alignment
 			samtools merge -f \
 			--threads {threads} \
 			{output} \
@@ -270,10 +276,10 @@ rule sortSTAR:
 	input: f"{RESULTS_DIR}FILTER/STAR/merged.bam"
 	output: temp(f"{RESULTS_DIR}FILTER/STAR/sorted.bam")
 	threads: config_dict["Threads"]["sortSTAR"]
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate alignment
 		samtools sort \
 		-@ {threads} \
 		-o {params.results_dir}FILTER/STAR/sorted.bam \
@@ -283,10 +289,10 @@ rule sortSTAR:
 rule coverage:
 	input: f"{RESULTS_DIR}FILTER/STAR/sorted.bam"
 	output: f"{RESULTS_DIR}FILTER/cov.bed"
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate alignment
 		samtools view -H {input} | \
 		grep '@SQ' | \
 		cut -f2,3 | \
@@ -308,18 +314,16 @@ rule coverage:
 rule blastDB:
 	input: config_dict["Input"]["protein"]
 	output: f"{RESULTS_DIR}FILTER/homolog.pdb"
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR
-	shell: "makeblastdb -in {input} -dbtype prot -out {params.results_dir}FILTER/homolog"
+	shell: "micromamba activate genepred && makeblastdb -in {input} -dbtype prot -out {params.results_dir}FILTER/homolog"
 
 rule blastRexDB:
 	input: config_dict['Input']['RexDB']
 	output: f"{RESULTS_DIR}FILTER/rexdb.pdb"
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR
-	shell: "makeblastdb -in {input} -dbtype prot -out {params.results_dir}FILTER/rexdb"
+	shell: "micromamba activate genepred && makeblastdb -in {input} -dbtype prot -out {params.results_dir}FILTER/rexdb"
 
 num = []
 for i in range(1,21):
@@ -328,10 +332,9 @@ for i in range(1,21):
 rule splitPep:
 	input: anot_pep
 	output: expand(f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{number}.pep", number=num)
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR
-	shell: "seqkit split -p 20 -O {params.results_dir}FILTER/splitPep {input}"
+	shell: "micromamba activate genepred && seqkit split -p 20 -O {params.results_dir}FILTER/splitPep {input}"
 
 rule blast:
 	input:
@@ -340,10 +343,11 @@ rule blast:
 	output:
 		f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{part}.blast.tmp"
 	threads: config_dict["Threads"]["blast"]
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR
-	shell:"""blastp \
+	shell:"""
+		micromamba activate genepred
+		blastp \
 			-query {input.fa} \
 			-db {params.results_dir}FILTER/homolog \
 			-out {output} \
@@ -368,10 +372,11 @@ rule blastRex:
 	output:
 		f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{part}.blastRex.tmp"
 	threads: config_dict["Threads"]["blast"]
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR
-	shell:"""blastp \
+	shell:"""
+		micromamba activate genepred
+		blastp \
 			-query {input.fa} \
 			-db {params.results_dir}FILTER/rexdb \
 			-out {output} \
@@ -395,7 +400,6 @@ rule abInitioCoverage:
 		f"{RESULTS_DIR}FILTER/augustus_coverage.bed",
 		f"{RESULTS_DIR}FILTER/helixer_coverage.bed",
 		f"{RESULTS_DIR}FILTER/repeat_coverage.bed"
-	singularity: image
 	params:
 		augustus = config_dict["Input"]["augustus_gff"],
 		helixer = config_dict["Input"]["helixer_gff"],
@@ -403,6 +407,7 @@ rule abInitioCoverage:
 		gff = config_dict['Input']['anot_gff'],
 		results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate alignment
 		grep -P '\tmRNA\t' {params.augustus} | \
 		   cut -f1,4,5,7 > {params.results_dir}FILTER/augustus.bed
 
@@ -425,17 +430,17 @@ rule abInitioCoverage:
 rule lncRNA_pred:
 	input: anot_cdna
 	output: f"{RESULTS_DIR}FILTER/lncrna_predict.csv"
-	params: s = image
+	params:
+		lncdc_db = "$CONDA_PREFIX/share/lncdc_db"
 	threads: config_dict["Threads"]["lncRNA_pred"]
 	shell:'''
-		singularity exec {params.s} \
-		conda run -n lncdc \
-		python /usr/local/src/LncDC-1.3.5/bin/lncDC.py \
-		-x /usr/local/share/lncdc_db/plant_selected_nostructure_hexamer_table.csv \
-		-m /usr/local/share/lncdc_db/plant_selected_nostructure_xgb_model_SIF_PF.pkl \
-		-p /usr/local/share/lncdc_db/plant_selected_nostructure_imputer_SIF_PF.pkl \
-		-s /usr/local/share/lncdc_db/plant_selected_nostructure_scaler_SIF_PF.pkl \
-		-t 24 \
+		micromamba activate lncdc
+		lncDC.py \
+		-x {params.lncdc_db}/plant_selected_nostructure_hexamer_table.csv \
+		-m {params.lncdc_db}/plant_selected_nostructure_xgb_model_SIF_PF.pkl \
+		-p {params.lncdc_db}/plant_selected_nostructure_imputer_SIF_PF.pkl \
+		-s {params.lncdc_db}/plant_selected_nostructure_scaler_SIF_PF.pkl \
+		-t {threads} \
 		-i {input} \
 		-o {output}
 		'''
@@ -446,8 +451,8 @@ rule busco:
 	params:
 		busco_lin = config_dict["Input"]["busco_lin"],
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:"""
+		micromamba activate filter
 		busco -i {input} \
 		-l {params.busco_lin} \
 		-o {params.results_dir}FILTER/busco_{params.busco_lin} \
@@ -482,8 +487,8 @@ rule filter:
 		rex_qcovs = config_dict["Cutoff"]["rex_qcovs"],
 		regex = config_dict["Input"]["chrom_regex"],
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:"""
+		micromamba activate base
 		python bin/Filter.py \
 		{params.anot_gff} \
 		{input.busco} \

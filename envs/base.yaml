@@ -1,0 +1,11 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.10
+  - pandas
+  - scikit-learn
+  - python-duckdb
+  - matplotlib
+  - tqdm
+  - pyyaml

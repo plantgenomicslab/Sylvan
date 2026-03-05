@@ -1,0 +1,8 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - pfam_scan
+  - hmmer
+  - busco
+  - rsem

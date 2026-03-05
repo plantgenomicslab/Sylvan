@@ -1,0 +1,16 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - augustus
+  - blast
+  - diamond
+  - miniprot
+  - wise2
+  - mmseqs2
+  - liftoff
+  - transdecoder
+  - psiclass
+  - seqkit
+  - pblat
+  - ucsc-blat

@@ -22,7 +22,7 @@ trap 'echo ""; echo "=== Log files: results/logs/{rule}_{wildcards}.err ==="; ec
 snakemake -p \
 	--rerun-incomplete \
 	--use-singularity \
-	--use-conda \
+	--singularity-args "--nv -B /data/gpfs" \
 	--keep-going \
 	--keep-incomplete \
 	--stats filter_score_runtime_stats.json \
@@ -33,7 +33,6 @@ snakemake -p \
 	--jobs 150 \
 	--latency-wait 30 \
 	--cluster "$CLUSTER_CMD" \
-	--singularity-args "--cleanenv --env PYTHONNOUSERSITE=1" \
 		"$@"
 
 # Generate report after run

@@ -46,15 +46,6 @@ except yaml.YAMLError as e:
 	logging.error("Could not load config file! Check config.yml ... see error below")
 	sys.exit(e)
 
-# Resolve singularity image to absolute path to avoid relative-path failures after cd
-image_cfg = config_dict["Input"]["singularity"]
-image_path = Path(image_cfg).expanduser()
-if not image_path.is_absolute():
-	image_candidate = ROOT_DIR / image_path
-	if image_candidate.exists():
-		image_path = image_candidate
-image = str(image_path.resolve())
-
 # Check config inputs
 for input in config_dict["Input"]:
 	if input == "proteins":
@@ -85,7 +76,8 @@ for input in config_dict["Input"]:
 						logging.error(f"Could not find {geta_config[key]}! Check Input/geta/{key} in config.yml ...")
 						sys.exit()
 	elif input in {"prefix", "RM_species", "augustus_species", "use_augustus",
-	               "augustus_start_from", "num_evm_files", "helixer_model_dir", "helixer_subseq"}:
+	               "augustus_start_from", "num_evm_files", "helixer_model_dir", "helixer_subseq",
+	               "singularity", "geta_conf"}:
 		continue
 	elif input == "evm_weights":
 		if not os.path.exists(config_dict["Input"][input]):
@@ -128,19 +120,24 @@ os.makedirs(f"{RESULTS_DIR}GETA/CombineGeneModels", exist_ok=True)
 if (config_dict["Input"]["geta"]["augustus_species"] != "placeholder") | (config_dict["Input"]["geta"]["augustus_species"] != ""):
 	os.makedirs(f"{RESULTS_DIR}GETA/Augustus/training/", exist_ok=True)
 
+# Singularity container with pre-built micromamba environments
+singularity: config_dict.get("Input", {}).get("singularity", "")
+
+# Set up micromamba shell hook for all shell commands
+shell.prefix("set +u; eval \"$(/usr/local/bin/micromamba shell hook -s bash)\"; set -u; ")
+
 # Get inputs
 genome = config_dict["Input"]["genome"]
 rna_seq = config_dict["Input"]["rna_seq"]
 helixer_model = config_dict["Input"]["helixer_model"]
 helixer_model_dir = config_dict["Input"].get("helixer_model_dir", "")
 if not helixer_model_dir or helixer_model_dir == "placeholder":
-	helixer_model_dir = "/usr/local/src/Helixer/models"
+	helixer_model_dir = ""  # Helixer will use its default model directory
 neighbor_gff = config_dict["Input"]["liftoff"]["neighbor_gff"]
 neighbor_fasta = config_dict["Input"]["liftoff"]["neighbor_fasta"]
 augustus_species = config_dict["Input"]["geta"]["augustus_species"]
 geta_RMspecies = config_dict["Input"]["geta"]["RM_species"]
 geta_pfamdb = config_dict["Input"]["geta"]["pfamdb"]
-image = config_dict["Input"]["singularity"]
 num_evm_files = config_dict["Input"]["num_evm_files"] #TODO: update script to accept arg
 augustus_start_from = config_dict["Input"]["geta"]["augustus_start_from"]
 
@@ -160,13 +157,20 @@ if augustus_start_from == "placeholder":
 	augustus_start_from = ""
 temp_folder = f"./{RESULTS_DIR}TMP"
 
-# Set up Augustus configs
-# $AUGUSTUS_CONFIG_PATH set relative to cwd in singularity
+# PASA installation path (auto-detect from conda env or use config override)
+PASA_HOME = config_dict.get("Internal", {}).get("pasa_home", "")
+if not PASA_HOME or PASA_HOME == "auto":
+	PASA_HOME = "$(ls -d $CONDA_PREFIX/opt/pasa-*/)"
+
+# Augustus config is copied from conda env's $CONDA_PREFIX/config/ during the BGM2AT rule
 if not os.path.exists(f"{RESULTS_DIR}GETA/Augustus/config"):
 	os.makedirs(f"{RESULTS_DIR}GETA/Augustus/config/species")
-	os.system(f"singularity exec {image} cp -r /opt/miniconda3/config/extrinsic /opt/miniconda3/config/model /opt/miniconda3/config/profile {RESULTS_DIR}GETA/Augustus/config")
 
-geta_conf = "/usr/local/bin/geta/conf_for_big_genome.txt"
+geta_conf_mode = config_dict["Input"]["geta"].get("geta_conf", "big")
+if geta_conf_mode == "big":
+	geta_conf = "conf_for_big_genome.txt"
+else:
+	geta_conf = "conf_for_small_genome.txt"
 
 rna_seq = Path(rna_seq)
 paired_dir = Path(f"{RESULTS_DIR}GETA/fastp/paired")
@@ -307,8 +311,8 @@ rule RepeatMasker_species:
 		args = config_dict["Internal"]["RepeatMasker"],
 		species = geta_RMspecies,
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:"""
+		micromamba activate repeat
 		cd {params.results_dir}GETA/RepeatMasker/repeatMasker/ && \
 		RepeatMasker {params.args} \
 			-pa {threads} \
@@ -323,8 +327,8 @@ rule RepeatModeler:
 		f"{RESULTS_DIR}GETA/RepeatMasker/repeatModeler/species-families.stk"
 	threads: config_dict["RepeatModeler"]["threads"]
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	shell:"""
+		micromamba activate repeat
 		cd {params.results_dir}GETA/RepeatMasker/repeatModeler && \
 		if [ ! -e  BuildDatabase.ok ]; then
 		  BuildDatabase -name {params.results_dir}GETA/RepeatMasker/repeatModeler/species -engine ncbi {input.genome_fasta}
@@ -352,8 +356,8 @@ rule RepeatMasker_custom:
 	threads: config_dict["RepeatMasker_custom"]["threads"]
 	params: args = config_dict["Internal"]["RepeatMasker"],
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:"""
+		micromamba activate repeat
 		LIB_PATH=$(readlink -f {input.lib})
 		cd {params.results_dir}GETA/RepeatMasker/repeatModeler && \
 		RepeatMasker {params.args} \
@@ -371,9 +375,9 @@ rule RepeatMasker_merge:
 		f"{RESULTS_DIR}GETA/RepeatMasker/genome.masked.fasta",
 		f"{RESULTS_DIR}GETA/RepeatMasker/genome.repeat.gff3"
 	threads: config_dict["RepeatMasker_merge"]["threads"]
-	singularity: image
 	params: results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate repeat
 		merge_repeatMasker_out.pl \
 			{input.genome_fasta} \
 			{input.repeatmasker} \
@@ -399,10 +403,10 @@ rule fastp_PAIRED:
 	output:
 		fwd = f"{RESULTS_DIR}GETA/fastp/paired/{{run}}_1.fq.gz",
 		rev = f"{RESULTS_DIR}GETA/fastp/paired/{{run}}_2.fq.gz"
-	singularity: image
 	threads: config_dict["fastp_PAIRED"]["threads"]
 	params: results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate alignment
 		fastp --detect_adapter_for_pe \
 			--overrepresentation_analysis \
 			--cut_right \
@@ -415,10 +419,10 @@ rule fastp_PAIRED:
 rule fastp_SINGLE:
 	input: lambda wc: f"{RESULTS_DIR}GETA/fastp/single/{wc.run}.fastq.gz"
 	output: f"{RESULTS_DIR}GETA/fastp/single/{{run}}.fq.gz"
-	singularity: image
 	threads: config_dict["fastp_SINGLE"]["threads"]
 	params: results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate alignment
 		fastp --overrepresentation_analysis \
 			--cut_right \
 			--thread {threads} \
@@ -432,11 +436,11 @@ rule STAR_generate:
 	input: f"{RESULTS_DIR}GETA/RepeatMasker/genome.masked.fasta"
 	output: temp(f"{RESULTS_DIR}GETA/STAR/SA")
 	threads: config_dict["STAR_generate"]["threads"]
-	singularity: image
 	params:
 		genome =  config_dict["Input"]["genome"],
 		results_dir = RESULTS_DIR
 	shell: """
+			micromamba activate alignment
 			STAR  \
 			--runThreadN {threads} \
 			--runMode genomeGenerate \
@@ -455,8 +459,8 @@ rule STAR_paired:
 	params:
 		threads_half = config_dict["HiSat2_PAIRED"]["threads"] // 2,
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell: """ 
+			micromamba activate alignment
 			STAR --runMode alignReads \
   			--runThreadN {threads} \
   			--outFilterMultimapNmax 100 \
@@ -495,8 +499,8 @@ rule STAR_single:
 	params:
 		threads_half = config_dict["HiSat2_PAIRED"]["threads"] // 2,
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell: """
+		micromamba activate alignment
 		STAR --runMode alignReads \
 		--runThreadN {threads} \
 		--outFilterMultimapNmax 100 \
@@ -533,20 +537,17 @@ rule mergeSTAR:
 		threads_quarter = config_dict["mergeSTAR"]["threads"] // 4,
 		sort_mem = config_dict["mergeSTAR"]["sortmem"],
 		sort_threads = config_dict["mergeSTAR"]["sortthreads"],
-		singularity = image,
 		results_dir = RESULTS_DIR
 	resources:
 		mem_mb = parse_memory_to_mb(config_dict["mergeSTAR"]["memory"])
 	shell:'''
+		micromamba activate alignment
 		export TMPDIR={params.results_dir}TMP
 		export SLURM_TMPDIR={params.results_dir}TMP
 
-		# These commands get long and singularity has an OS defined command length limit
-		echo "samtools merge -f --threads {params.threads_full} {params.results_dir}GETA/STAR/STAR.merge.bam {input}" | \
-		singularity exec {params.singularity} bash -c "read -u 0 line; set -- \$line; exec \"\$@\""
-		
+		samtools merge -f --threads {params.threads_full} {params.results_dir}GETA/STAR/STAR.merge.bam {input}
+
 		mkdir -p {params.results_dir}GETA/STAR/sambamba_tmp/merge
-		singularity exec {params.singularity} \
 		samtools sort \
 		  -@ {params.sort_threads} \
 		  -T {params.results_dir}GETA/STAR/sambamba_tmp/merge/sort \
@@ -555,7 +556,6 @@ rule mergeSTAR:
 
 		rm {params.results_dir}GETA/STAR/STAR.merge.bam
 
-		singularity exec {params.singularity} \
 		sambamba markdup \
 		  --nthreads={params.threads_quarter} \
 		  --remove-duplicates \
@@ -565,25 +565,24 @@ rule mergeSTAR:
 
 		rm {params.results_dir}GETA/STAR/STAR.sort.bam
 
-		singularity exec {params.singularity} \
 		samtools sort \
 		  -@ {params.threads_quarter} \
 		  -O BAM \
 		  -o {output} \
 		  {params.results_dir}GETA/STAR/STAR.rmdup.bam
-		
+
 		rm {params.results_dir}GETA/STAR/STAR.rmdup.bam
 		rm -rf {params.results_dir}GETA/STAR/sambamba_tmp
 		'''
 checkpoint STAR_split:
 	input: f"{RESULTS_DIR}GETA/STAR/STAR.sorted.bam"
-	output: 
+	output:
 		f"{RESULTS_DIR}GETA/transcript/splited_sam_files.list",
 		temp(directory(f"{RESULTS_DIR}GETA/transcript/splited_sam_out"))
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	threads: config_dict["STAR_split"]["threads"]
 	shell:"""
+		micromamba activate alignment
 		samtools view \
 		  -h {params.results_dir}GETA/STAR/STAR.sorted.bam \
 		  > {params.results_dir}GETA/STAR/STAR.sorted.sam
@@ -610,9 +609,9 @@ rule Sam2Transfrag:
 	params:
 		args = config_dict["Internal"]["sam2transfrag"],
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate base
 		sam2transfrag \
 			--no_strand_specific \
 			{params.args} \
@@ -631,7 +630,6 @@ rule mergeTransfrag:
 		temp(f"{RESULTS_DIR}GETA/transcript/base_depth.txt"),
 		f"{RESULTS_DIR}GETA/transcript/transfrag.strand.fasta"
 	params:
-		singularity = image,
 		results_dir = RESULTS_DIR
 	run:
 		shell("if test -f {params.results_dir}GETA/transcript/transfrag.list; then rm {params.results_dir}GETA/transcript/transfrag.list;fi")
@@ -643,8 +641,7 @@ rule mergeTransfrag:
 			shell(f"if [ -f {item}.intron ]; then cat {item}.intron >> {params.results_dir}GETA/transcript/intron.txt; fi")
 			shell(f"if [ -f {item}.base_depth ]; then cat {item}.base_depth >> {params.results_dir}GETA/transcript/base_depth.txt; fi")
 
-		shell("singularity exec {params.singularity} \
-			transfragDump \
+		shell("micromamba activate base && transfragDump \
 			--out {params.results_dir}GETA/transcript/transfrag \
 			{params.results_dir}GETA/transcript/transfrag.gtf \
 			{input.genome_fasta}")
@@ -655,8 +652,8 @@ rule transDecoder_LongOrfs:
 	output: f"{RESULTS_DIR}GETA/transcript/longest_orfs.cds"
 	params: args = config_dict["Internal"]["TransDecoder.LongOrfs"],
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:"""
+		micromamba activate genepred
 		if [ -d {params.results_dir}GETA/transcript.__checkpoints_longorfs ]; then
 		  if [ -z "$(ls -A {params.results_dir}GETA/transcript.__checkpoints_longorfs)" ]; then 
 		    echo "No checkpoints...continuing"; 
@@ -674,9 +671,9 @@ rule transDecoder_Predict:
 	output: f"{RESULTS_DIR}GETA/transcript/transfrag.transdecoder.gff3"
 	params: args = config_dict["Internal"]["TransDecoder.Predict"],
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate genepred
 		if [ -d {params.results_dir}GETA/transcript.__checkpoints ]; then
 		  if [ -z "$(ls -A {params.results_dir}GETA/transcript.__checkpoints)" ]; then
 		    echo "No checkpoints...continuing";
@@ -701,9 +698,9 @@ rule transdecoder2ORF:
 		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
 	output: f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.gff3"
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate base
 		transdecoder2ORF \
 			--out_protein {params.results_dir}GETA/transcript/proteins.fasta \
 			{params.results_dir}GETA/transcript/transfrag.gtf \
@@ -715,9 +712,9 @@ rule GFF3Clear:
 		gff = f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.gff3",
 		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
 	output: f"{RESULTS_DIR}GETA/transcript/transfrag.genome.gff3"
-	singularity: image
 	shell:
 		"""
+		micromamba activate base
 		GFF3Clear \
 			--GFF3_source GETA \
 			--genome {input.genome_fasta} \
@@ -743,9 +740,9 @@ rule ORF2bestGeneModels:
 	output: f"{RESULTS_DIR}GETA/transcript/best_candidates.gff3"
 	params: args = config_dict["Internal"]["ORF2bestGeneModels"],
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate base
 		ORF2bestGeneModels {params.args} \
 			{input} > {output} 
 		"""
@@ -755,9 +752,9 @@ rule bestGeneModels2lowIdentity:
 	output: f"{RESULTS_DIR}GETA/transcript/best_candidates.lowIdentity.gff3"
 	threads: config_dict["bestGeneModels2lowIdentity"]["threads"]
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate genepred
 		bestGeneModels2lowIdentity \
 			{input} \
 			{params.results_dir}GETA/transcript/proteins.fasta \
@@ -817,10 +814,10 @@ rule mergeProteins:
 	output: 
 		m = f"{RESULTS_DIR}PROTEIN/merged_rmdup_proteins.fasta",
 		g = f"{RESULTS_DIR}GETA/homolog.fasta"
-	singularity: image
 	threads: config_dict["mergeProteins"]["threads"]
 	params: results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate genepred
 		seqkit rmdup -j {threads} -s < <(cat {input}) > {output.m}
 		ln -sf $(readlink -f {output.m}) {params.results_dir}GETA/homolog.fasta
 		"""
@@ -830,7 +827,6 @@ rule miniprot:
 		gff = f"{RESULTS_DIR}PROTEIN/merged_rmdup_proteins.fasta.miniprot.gff3",
 		clean =f"{RESULTS_DIR}PROTEIN/merged_rmdup_proteins.fasta.miniprot.clean.gff3"
 	threads: config_dict["miniprot"]["threads"]
-	singularity: image
 	params: genome = config_dict["Input"]["genome"]
 	shell:
 		"""
@@ -846,13 +842,13 @@ checkpoint miniprot2genewise:
 	params:
 		g = genome,
 		outdir = f"{RESULTS_DIR}GETA/homolog/geneRegion_genewise.tmp"
-	shell: "python bin/miniprot2Genewise.py {params.g} {input.p} {input.m} {params.outdir}"
+	shell: "micromamba activate genepred && python bin/miniprot2Genewise.py {params.g} {input.p} {input.m} {params.outdir}"
 
 # Genewise fails on sequences like Sevir.9G432000.2.v2.1 (Glycine rich cell wall structural proteins)
 rule geneRegion2Genewise:
 	input: prot = lambda wc: f"{RESULTS_DIR}GETA/homolog/geneRegion_genewise.tmp/{wc.seqid}.faa"
 	output: f"{RESULTS_DIR}GETA/homolog/geneRegion_genewise.tmp/{{seqid}}.gff"
-	params: singularity = image,
+	params:
 		results_dir = RESULTS_DIR
 	run:
 		faa = readFasta(input.prot)
@@ -871,13 +867,13 @@ rule geneRegion2Genewise:
 
 			try:
 				if re.search(r"plus", aa_seq):
-					shell(f"singularity exec {params.singularity} genewise \
+					shell(f"micromamba activate genepred && genewise \
 					{params.results_dir}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.aa \
 					{params.results_dir}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.na \
 					-tfor -gff -quiet -silent -sum >> {output}")
 
 				else:
-					shell(f"singularity exec {params.singularity} genewise \
+					shell(f"micromamba activate genepred && genewise \
 					{params.results_dir}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.aa \
 					{params.results_dir}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.na \
 					-trev -gff -quiet -silent -sum >> {output}")
@@ -957,9 +953,9 @@ rule genewiseGFF2GFF3:
 		args = config_dict['Internal']['homolog_genewiseGFF2GFF3'],
 		genome = genome,
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate genepred
 		homolog_genewiseGFF2GFF3 {params.args} \
 			--input_genewise_start_info {input.info} \
 			--output_start_and_stop_hints_of_augustus {output.hints} \
@@ -1087,8 +1083,8 @@ rule combineGeneModelsPlus:
 		one = f"{RESULTS_DIR}GETA/Augustus/training/combineGeneModels_tmp/{{chr}}_plus.1.gff3",
 		two = f"{RESULTS_DIR}GETA/Augustus/training/combineGeneModels_tmp/{{chr}}_plus.2.gff3"
 	params: args = config_dict["Internal"]["paraCombineGeneModels"]
-	singularity: image
 	shell:"""
+		micromamba activate base
 		combineGeneModels \
 		{params.args} \
 		{input.a} \
@@ -1109,8 +1105,8 @@ rule combineGeneModelsMinus:
 		one = f"{RESULTS_DIR}GETA/Augustus/training/combineGeneModels_tmp/{{chr}}_minus.1.gff3",
 		two = f"{RESULTS_DIR}GETA/Augustus/training/combineGeneModels_tmp/{{chr}}_minus.2.gff3"
 	params: args = config_dict["Internal"]["paraCombineGeneModels"]
-	singularity: image
 	shell:"""
+		micromamba activate base
 		combineGeneModels \
 		{params.args} \
 		{input.a} \
@@ -1149,9 +1145,9 @@ rule clearCombined:
 		gff = f"{RESULTS_DIR}GETA/Augustus/training/combine.1.gff3",
 		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
 	output: f"{RESULTS_DIR}GETA/Augustus/training/geneModels.gff3"
-	singularity: image
 	shell:
 		"""
+		micromamba activate base
 		GFF3Clear --genome {input.genome_fasta} \
 		{input.gff} > {output}
 		"""
@@ -1167,10 +1163,9 @@ rule geneModels2AugusutsTrainingInput:
 	threads: config_dict["geneModels2AugusutsTrainingInput"]["threads"] # Threads are for diamond
 	params:
 		args = config_dict["Internal"]["geneModels2AugusutsTrainingInput"],
-		singularity = image,
 		results_dir = RESULTS_DIR
 	run:
-		shell("singularity exec {params.singularity} geneModels2AugusutsTrainingInput \
+		shell("micromamba activate genepred && geneModels2AugusutsTrainingInput \
 		{params.args} \
 		--out_prefix ati \
 		--cpu {threads} \
@@ -1187,7 +1182,7 @@ rule geneModels2AugusutsTrainingInput:
 					break
 
 		if training_genes_number < 1000:
-			shell("singularity exec {params.singularity} geneModels2AugusutsTrainingInput \
+			shell("micromamba activate genepred && geneModels2AugusutsTrainingInput \
 			--min_evalue 1e-9 \
 			--min_identity 0.9 \
 			--min_coverage_ratio 0.9 \
@@ -1199,7 +1194,7 @@ rule geneModels2AugusutsTrainingInput:
 			--cpu {threads} \
 			{input.gff} \
 			{input.genome_fasta} 1> {params.results_dir}GETA/Augustus/training/geneModels2AugusutsTrainingInput.log.Loose_thresholds 2>&1")
-		
+
 		shell("mv ati.filter1.gff3 {params.results_dir}GETA/Augustus/training/ati.filter1.gff3") #TODO: Fix this in GETA
 		shell("mv ati.filter2.gff3 {params.results_dir}GETA/Augustus/training/ati.filter2.gff3") #TODO: Fix this in GETA
 
@@ -1218,8 +1213,6 @@ rule BGM2AT:
 	params: a_species = augustus_species,
 		a_start = None, # Augustus species start from
 		args = config_dict["Internal"]["BGM2AT"],
-		singularity = image,
-		singularity_abs = image,
 		results_dir = RESULTS_DIR
 	run:
 		print(f"BGM2AT is requesting mem_mb: {resources.mem_mb}")
@@ -1274,15 +1267,15 @@ rule BGM2AT:
 		if flanking_length == 0:
 			flanking_length = 200
 			
-		# Copy Augustus config from inside the Singularity image into the run directory
-		os.system(
+		# Copy Augustus config from genepred env into the run directory
+		shell(
+			f"micromamba activate genepred && "
 			f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training && "
 			f"rm -rf {params.results_dir}GETA/Augustus/config/* && "
-			f"singularity exec {params.singularity_abs} /bin/sh -c "
-			f"\"cp -rf /opt/miniconda3/config/. {params.results_dir}GETA/Augustus/config\" && "
+			f"cp -rf $CONDA_PREFIX/config/ {params.results_dir}GETA/Augustus/config && "
 			f"cd {params.results_dir}GETA/Augustus && "
-			f"export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
-			f"singularity exec {params.singularity_abs} BGM2AT "
+			f"export AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
+			f"BGM2AT "
 			f"{params.args} "
 			f"--flanking_length {flanking_length} "
 			f"--CPU {threads} "
@@ -1291,31 +1284,31 @@ rule BGM2AT:
 			f"{params.a_species}"
 		)
 
-		os.system(
+		shell(
 			f"cd {params.results_dir}GETA/Augustus && "
 			f'if [ "$(realpath firsttest.out)" != "$(realpath {params.results_dir}GETA/Augustus/firsttest.out)" ]; then '
 			f"mv -f firsttest.out {params.results_dir}GETA/Augustus/firsttest.out; fi")
-		os.system(
+		shell(
 			f"cd {params.results_dir}GETA/Augustus && "
 			f'if [ "$(realpath secondtest.out)" != "$(realpath {params.results_dir}GETA/Augustus/secondtest.out)" ]; then '
 			f"mv -f secondtest.out {params.results_dir}GETA/Augustus/secondtest.out; fi")
 		# Clean up intermediate files created by BGM2AT in this directory
-		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f ati.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f genes.*.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f gff2gbSmallDNA.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f etraining.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f badgenes.lst {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f new_species.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f optimize.out {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f training.gb.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"cd {params.results_dir}GETA/Augustus && mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"cd {params.results_dir}GETA/Augustus && rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && mv -f ati.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && mv -f genes.*.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && mv -f gff2gbSmallDNA.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && mv -f etraining.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && mv -f badgenes.lst {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && mv -f new_species.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && mv -f optimize.out {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && mv -f training.gb.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"cd {params.results_dir}GETA/Augustus && rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true")
 		# Also clean up files that may have been created in the project root directory
-		os.system(f"mv -f genes.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		os.system(f"mv -f cleaning_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"mv -f genes.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+		shell(f"mv -f cleaning_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
 
 rule prepareAugusutusHints:
 	input:
@@ -1325,9 +1318,9 @@ rule prepareAugusutusHints:
 		f"{RESULTS_DIR}GETA/homolog/genewise.start_stop_hints.gff"
 	output: f"{RESULTS_DIR}GETA/Augustus/hints.gff"
 	params: args = config_dict["Internal"]["prepareAugusutusHints"]
-	singularity: image
 	shell:
 		"""
+		micromamba activate base
 		prepareAugusutusHints \
 		{params.args} {input} > {output}
 		"""
@@ -1467,28 +1460,28 @@ rule augustusWithHints:
 		masked = lambda wc: f"{RESULTS_DIR}GETA/Augustus/temp_directory/{wc.seqid_start}.fasta",
 		segSize = lambda wc: f"{RESULTS_DIR}GETA/Augustus/temp_directory/{wc.seqid_start}.segSize"
 	output: f"{RESULTS_DIR}GETA/Augustus/temp_directory/{{seqid_start}}.out"
-	params: singularity = image,
+	params:
 		species = augustus_species,
 		results_dir = RESULTS_DIR
 	run:
 		args = config_dict["Internal"]["paraAugusutusWithHints"].split(" ")
 		if "--alternatives_from_evidence" in args:
 			alt_from_evidence = "true"
-		else: 
+		else:
 			alt_from_evidence = "false"
-		
+
 		mil = args[args.index("--min_intron_len") + 1]
 
 		with open(input.segSize) as f:
 			line = f.readline().strip('\n').split(" ")
 			segSize = line[0]
 			seqLength = line[1]
-		
+
 		if seqLength > segSize:
-			shell(f"mkdir -p {params.results_dir}GETA/Augustus/config/species && \
+			shell(f"micromamba activate genepred && mkdir -p {params.results_dir}GETA/Augustus/config/species && \
 			CONFIG_PATH=$(readlink -f {params.results_dir}GETA/Augustus/config) && \
-			export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$CONFIG_PATH && \
-			singularity exec {params.singularity} augustus \
+			export AUGUSTUS_CONFIG_PATH=$CONFIG_PATH && \
+			augustus \
 			--gff3=on \
 			--species={params.species} \
 			--hintsfile={input.hints} \
@@ -1498,10 +1491,10 @@ rule augustusWithHints:
 			--min_intron_len={mil} \
 			--softmasking=1 {input.masked} > {output}")
 		else:
-			shell(f"mkdir -p {params.results_dir}GETA/Augustus/config/species && \
+			shell(f"micromamba activate genepred && mkdir -p {params.results_dir}GETA/Augustus/config/species && \
 			CONFIG_PATH=$(readlink -f {params.results_dir}GETA/Augustus/config) && \
-			export SINGULARITYENV_AUGUSTUS_CONFIG_PATH=$CONFIG_PATH && \
-			singularity exec {params.singularity} augustus \
+			export AUGUSTUS_CONFIG_PATH=$CONFIG_PATH && \
+			augustus \
 			--gff3=on \
 			--species={params.species} \
 			--hintsfile={input.hints} \
@@ -1823,9 +1816,9 @@ rule combineGeneModelsPlus_step6:
 		one = f"{RESULTS_DIR}GETA/CombineGeneModels/combineGeneModels_tmp/{{chr}}_plus.1.gff3",
 		two = f"{RESULTS_DIR}GETA/CombineGeneModels/combineGeneModels_tmp/{{chr}}_plus.2.gff3"
 	params: args = config_dict["Internal"]["paraCombineGeneModels"]
-	singularity: image
 	shell:
 		"""
+		micromamba activate base
 		combineGeneModels \
 		{params.args} \
 		{input.a} \
@@ -1846,9 +1839,9 @@ rule combineGeneModelsMinus_step6:
 		one = f"{RESULTS_DIR}GETA/CombineGeneModels/combineGeneModels_tmp/{{chr}}_minus.1.gff3",
 		two = f"{RESULTS_DIR}GETA/CombineGeneModels/combineGeneModels_tmp/{{chr}}_minus.2.gff3"
 	params: args = config_dict["Internal"]["paraCombineGeneModels"]
-	singularity: image
 	shell:
 		"""
+		micromamba activate base
 		combineGeneModels \
 		{params.args} \
 		{input.a} \
@@ -1892,8 +1885,8 @@ rule clearCombined_step6:
 		b = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.b.gff3"
 	params:
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:'''
+		micromamba activate base
 		GFF3Clear \
 		--genome {input.genome_fasta} \
 		--no_attr_add \
@@ -1919,8 +1912,8 @@ rule pickBetterModels:
 		args = config_dict["Internal"]['pickout_better_geneModels_from_evidence'],
 		g = genome,
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:"""
+		micromamba activate annotation
 		perl -p -e 's/(=[^;]+)\\.t1/\\$1.t01/g;' {input.geneModels} > {output.c}
 
 		agat_convert_sp_gxf2gxf.pl \
@@ -1958,9 +1951,9 @@ rule fillingEndsOfGeneModels_ef:
 		g = genome,
 		args  = config_dict["Internal"]["fillingEndsOfGeneModels"],
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate base
 		perl $(pwd)/bin/fillingEndsOfGeneModels.pl \
 		{params.args} \
 		--filling_need_transcriptID {params.results_dir}GETA/CombineGeneModels/filling_need_transcriptID.txt \
@@ -1983,8 +1976,8 @@ rule extractTranscriptsForFilter:
 		args = config_dict["Internal"]["GFF3_extract_TranscriptID_for_filtering"],
 		g = genome,
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:'''
+		micromamba activate base
 		GFF3_extract_TranscriptID_for_filtering \
 		{params.args} \
 		{input.repeat} \
@@ -2020,9 +2013,9 @@ rule splitFilterProteins:
 	input: f"{RESULTS_DIR}GETA/CombineGeneModels/proteins_for_filtering.fasta"
 	output: expand(f"{RESULTS_DIR}GETA/CombineGeneModels/hmmscan.temp/proteins_for_filtering.part_{{number}}.fasta", number=getHMMscanNumbers())
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate genepred
 		seqkit split -p 20 --force -O {params.results_dir}GETA/CombineGeneModels/hmmscan.temp {input}
 		"""
 #TODO: All the parts need to be checkpointed or added to rule all...?
@@ -2033,10 +2026,11 @@ rule filterHMMScan:
 		tbl = f"{RESULTS_DIR}GETA/CombineGeneModels/hmmscan.temp/proteins_for_filtering.part_{{number}}.tbl",
 		dom = f"{RESULTS_DIR}GETA/CombineGeneModels/hmmscan.temp/proteins_for_filtering.part_{{number}}.domtbl",
 		pfam = f"{RESULTS_DIR}GETA/CombineGeneModels/hmmscan.temp/proteins_for_filtering.part_{{number}}.pfamtbl"
-	singularity: image
 	threads: config_dict["filterHMMScan"]["threads"]
+	params: pfamdb = geta_pfamdb
 	shell:
 		"""
+		micromamba activate genepred
 		# Check if file has valid FASTA content (at least one sequence line after header)
 		if [ -s {input} ] && grep -q '^[^>]' {input}; then
 			hmmscan \
@@ -2047,7 +2041,7 @@ rule filterHMMScan:
 			--tblout {output.tbl} \
 			--domtblout {output.dom} \
 			--pfamtblout {output.pfam} \
-			/usr/local/src/Pfam-A.hmm \
+			{params.pfamdb} \
 			{input}
 		else
 			touch {output.out} {output.tbl} {output.dom} {output.pfam}
@@ -2135,9 +2129,9 @@ rule combineHMMScan:
 rule makeFilterBlastDB:
 	input: rules.mergeProteins.output.m
 	output: f"{RESULTS_DIR}GETA/CombineGeneModels/diamond.temp/homolog.dmnd"
-	singularity: image
 	params: results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate genepred
 		diamond makedb --db {params.results_dir}GETA/CombineGeneModels/diamond.temp/homolog --in {input}
 		"""
 rule filterBlastP:
@@ -2146,9 +2140,9 @@ rule filterBlastP:
 		prots = f"{RESULTS_DIR}GETA/CombineGeneModels/proteins_for_filtering.fasta"
 	output: f"{RESULTS_DIR}GETA/CombineGeneModels/diamond.temp/proteins_for_filtering.blastp.xml"
 	threads: config_dict["filterBlastP"]["threads"]
-	singularity: image
 	params: args = config_dict["Internal"]["diamond"]
 	shell:"""
+		micromamba activate genepred
 		diamond \
 		blastp \
 		{params.args} \
@@ -2162,10 +2156,10 @@ rule filterBlastP:
 rule parseBlastResult:
 	input: f"{RESULTS_DIR}GETA/CombineGeneModels/diamond.temp/proteins_for_filtering.blastp.xml"
 	output: f"{RESULTS_DIR}GETA/CombineGeneModels/validation_blastp.tab"
-	singularity: image
 	params: args = config_dict["Internal"]["parsing_blast_result"]
 	shell:
 		"""
+		micromamba activate genepred
 		parsing_blast_result.pl \
 		{params.args} \
 		--out-hit-confidence \
@@ -2181,15 +2175,15 @@ rule validateTranscripts:
 		b = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.b.gff3",
 		e = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.e.gff3",
 		f = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.f.gff3"
-	output: 
+	output:
 		coding = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.h.coding.gff3",
 		lnc = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.h.lncRNA.gff3"
-	singularity: image
 	params: 
 		args_gm = config_dict["Internal"]["get_valid_geneModels"],
 		args_tr = config_dict["Internal"]["get_valid_transcriptID"],
 		results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate base
 		get_valid_transcriptID \
 		{params.args_tr} \
 		{input.hmm} \
@@ -2210,12 +2204,12 @@ rule validateTranscripts:
 rule fillingEndsOfGeneModels_final:
 	input: f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.h.coding.gff3"
 	output: f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.i.coding.gff3"
-	singularity: image
-	params: 
+	params:
 		args = config_dict["Internal"]["fillingEndsOfGeneModels"],
 		g = genome,
 		results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate base
 		perl $(pwd)/bin/fillingEndsOfGeneModels.pl \
 		{params.args} \
 		{params.g} \
@@ -2235,9 +2229,9 @@ rule GETA_output:
 		g = genome,
 		prefix = "geta",
 		results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate base
 		GFF3Clear \
 		  --GFF3_source GETA \
 		  --gene_prefix GETA \
@@ -2285,16 +2279,20 @@ rule helixer:
 	input:
 		g = genome
 	params:
-		s = image,
 		l = helixer_model,
 		model_dir = helixer_model_dir,
 		subseq=config_dict["Input"]["helixer_subseq"]
 	output: f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3"
 	shell: '''
-		singularity exec {params.s} conda run -n helixer \
+		micromamba activate helixer
+		if [ -n "{params.model_dir}" ]; then
+		    MODEL_ARG="--model-filepath {params.model_dir}/{params.l}.h5"
+		else
+		    MODEL_ARG="--lineage {params.l}"
+		fi
 		Helixer.py \
 		  --fasta-path {input.g} \
-		  --model-filepath {params.model_dir}/{params.l}.h5 \
+		  $MODEL_ARG \
 		  --subsequence-length {params.subseq} \
 		  --gff-output-path {output}
 		'''
@@ -2335,10 +2333,9 @@ rule liftoff:
 		combined_gff = f"{RESULTS_DIR}LIFTOVER/LiftOff/combined.gff3"
 	output: f"{RESULTS_DIR}LIFTOVER/LiftOff/liftoff.gff3"
 	threads: config_dict["liftoff"]["threads"]
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR
-	shell: "liftoff \
+	shell: "micromamba activate genepred && liftoff \
 				{input.genome_fasta} {input.combined_fasta} -g {input.combined_gff}  \
 				-p {threads} \
 				-flank 0.4 \
@@ -2358,11 +2355,11 @@ rule gmapPrep:
 	output:
 		f"{RESULTS_DIR}TRANSCRIPT/Gmap/liftoffExon.fasta",
 		f"{RESULTS_DIR}TRANSCRIPT/Gmap/DB/DB.chromosome"
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR
 	shell:
 		"""
+		micromamba activate annotation
 		mkdir -p {params.results_dir}TRANSCRIPT/Gmap
 		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || touch {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3
 		bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || touch {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta
@@ -2374,9 +2371,9 @@ rule gmapExon:
 	output: f"{RESULTS_DIR}TRANSCRIPT/Gmap/gmapExon.gff3"
 	threads: config_dict["gmapExon"]["threads"]
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate annotation
 		gmap -D {params.results_dir}TRANSCRIPT/Gmap -d DB -t {threads}  --min-identity=0.7 \
 		--min-trimmed-coverage=0.85 --cross-species \
 		--max-intronlength-middle=0  \
@@ -2389,8 +2386,8 @@ rule bam2Fasta:
 	input: f"{RESULTS_DIR}GETA/STAR/STAR.sorted.bam"
 	output: f"{RESULTS_DIR}TRANSCRIPT/STAR/STAR.sorted.rmdup.fasta"
 	threads: config_dict["bam2Fasta"]["threads"]
-	singularity: image
-	shell:""" 
+	shell:"""
+		micromamba activate alignment
 		samtools fasta \
 		  -f 0x40 \
 		  -F 0x904 \
@@ -2402,9 +2399,9 @@ rule spades:
 	input: f"{RESULTS_DIR}TRANSCRIPT/STAR/STAR.sorted.rmdup.fasta"
 	output: f"{RESULTS_DIR}TRANSCRIPT/spades/hard_filtered_transcripts.fasta"
 	threads: config_dict["spades"]["threads"]
-	singularity: image
 	params: results_dir = RESULTS_DIR
 	shell:"""
+		micromamba activate annotation
 		spades.py \
 		-t {threads} \
 		-s {input} \
@@ -2417,9 +2414,9 @@ rule evigene:
 	output: f"{RESULTS_DIR}TRANSCRIPT/spades/okayset/spades.okay.tr"
 	threads: config_dict["evigene"]["threads"]
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	shell:
 		"""
+		micromamba activate annotation
 		mkdir -p {params.results_dir}TRANSCRIPT/evigene
 		cd {params.results_dir}TRANSCRIPT/evigene
 
@@ -2470,11 +2467,12 @@ rule pasaPrep:
 	output:
 		f"{RESULTS_DIR}TRANSCRIPT/PASA/transcripts_for_pasa.fasta.clean",
 		f"{RESULTS_DIR}TRANSCRIPT/PASA/transcripts_for_pasa.fasta"
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR,
-		results_dir_abs = RESULTS_DIR_ABS
+		results_dir_abs = RESULTS_DIR_ABS,
+		pasa_home = PASA_HOME
 	shell:"""
+		micromamba activate annotation
 		ln -sf $(readlink -f {input.genome_fasta}) {params.results_dir}TRANSCRIPT/PASA/genome.fasta
 
 		minimap2 -ax splice \
@@ -2483,11 +2481,11 @@ rule pasaPrep:
 		-a \
 		-o {params.results_dir}TRANSCRIPT/PASA/evigene.sam
 
-		/opt/miniconda3/opt/pasa-2.5.2/misc_utilities/SAM_to_gtf.pl {params.results_dir}TRANSCRIPT/PASA/evigene.sam > {params.results_dir}TRANSCRIPT/PASA/evigene.gtf
+		{params.pasa_home}/misc_utilities/SAM_to_gtf.pl {params.results_dir}TRANSCRIPT/PASA/evigene.sam > {params.results_dir}TRANSCRIPT/PASA/evigene.gtf
 
 		sed -i 's/\\ .*//g' {input.spades}
 
-		/opt/miniconda3/opt/pasa-2.5.2/misc_utilities/gff3_file_to_proteins.pl \
+		{params.pasa_home}/misc_utilities/gff3_file_to_proteins.pl \
 		{input.helixer} {input.genome_fasta} cDNA > {params.results_dir}AB_INITIO/Helixer/helixer.cdna.fasta
 
 		cat {params.results_dir}AB_INITIO/Helixer/helixer.cdna.fasta {input.spades} > {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta
@@ -2511,8 +2509,8 @@ rule pasa:
 	threads: config_dict["pasa"]["threads"]
 	params:
 		results_dir = RESULTS_DIR,
-		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA"
-	singularity: image
+		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA",
+		pasa_home = PASA_HOME
 	shell:
 		"""
 		WORKDIR=$(pwd)
@@ -2531,7 +2529,7 @@ rule pasa:
 		export TMPDIR={params.results_dir}TMP
 		export SLURM_TMPDIR={params.results_dir}TMP
 
-		/opt/miniconda3/opt/pasa-2.5.2/Launch_PASA_pipeline.pl \
+		{params.pasa_home}/Launch_PASA_pipeline.pl \
 		-c {params.results_dir}config/alignAssembly.config \
 		--trans_gtf evigene.gtf \
 		-C -r -R \
@@ -2557,8 +2555,8 @@ checkpoint prepPsiClass_STAR:
 	input: f"{RESULTS_DIR}GETA/STAR/STAR.sorted.bam"
 	output: directory(f"{RESULTS_DIR}TRANSCRIPT/PsiClass/splitBam")
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	shell: """
+		micromamba activate alignment
 		mkdir -p {output}
 		python bin/splitBam.py {input} {params.results_dir}TRANSCRIPT/PsiClass/splitBam
 	"""
@@ -2567,9 +2565,9 @@ rule stringtie_STAR:
 	input: f"{RESULTS_DIR}GETA/STAR/STAR.sorted.bam"
 	output: f"{RESULTS_DIR}TRANSCRIPT/StringTie/stringtie.star.gff"
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	threads: config_dict["stringtie_STAR"]["threads"]
 	shell: """
+		micromamba activate alignment
 		stringtie {input} \
 			-o {params.results_dir}TRANSCRIPT/StringTie/stringtie.star.gtf \
 			-l stringtie \
@@ -2588,8 +2586,8 @@ rule psiClass_STAR:
 	output: f"{RESULTS_DIR}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gff"
 	threads: config_dict["psiClass_STAR"]["threads"]
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	shell: """
+			micromamba activate alignment
 			samtools view -bq 10 {input} > {input}.filtered.bam
 
 			psiclass -b {input}.filtered.bam \
@@ -2617,8 +2615,8 @@ rule convertToEvmFormat:
 		liftoff = f"{RESULTS_DIR}EVM/liftoff_evm.gff3",
 		miniprot = f"{RESULTS_DIR}EVM/miniprot_proteinAln_evm.gff",
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	shell: """
+		micromamba activate annotation
 		bin/gff_to_evm.py \
 		{params.results_dir}GETA/homolog/genewise.gff \
 		--source GeneWise \
@@ -2670,13 +2668,13 @@ rule combineEVMInputs:
 		geta_gff3 = f"{RESULTS_DIR}GETA/geta.geneModels.gff3",
 		helixer_gff3 = f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3",
 	params: results_dir = RESULTS_DIR
-	singularity: image
 	output:
 		f"{RESULTS_DIR}EVM/gene_predictions_checkCoords.gff3",
 		f"{RESULTS_DIR}EVM/transcript_alignments_checkCoords.gff3",
 		f"{RESULTS_DIR}EVM/protein_alignments_checkCoords.gff3"
 	# Other sources of evidence 
 	shell: """
+		micromamba activate annotation
 		cat {input.helixer_gff3} \
 			{input.augustus_gff3} \
 			{input.geta_gff3} \
@@ -2723,8 +2721,8 @@ rule partitionEVM:
 		genome = config_dict["Input"]["genome"],
 		results_dir = RESULTS_DIR,
 		results_dir_abs = EVM_DIR_ABS
-	singularity: image
 	shell: """
+			micromamba activate annotation
 			rm {params.results_dir}EVM/*.ok || echo 'No partition.ok files to remove...continuing'
 			rm {params.results_dir}EVM/*/*/*.ok || echo 'No chunk.ok files to remove...continuing'
 			rm {params.results_dir}EVM/*/*checkCoords.gff3 || echo 'No old evidence files to remove ...continuing'
@@ -2740,7 +2738,7 @@ rule partitionEVM:
 				GENOME_FILE="{params.results_dir}EVM/genome_temp.fasta"
 			fi
 
-			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/partition_EVM_inputs.pl \
+			partition_EVM_inputs.pl \
 				--genome "$GENOME_FILE" \
 				--gene_predictions {params.results_dir_abs}/gene_predictions_checkCoords.gff3 \
 				--protein_alignments {params.results_dir_abs}/protein_alignments_checkCoords.gff3 \
@@ -2763,7 +2761,6 @@ rule writeEVMCommands:
 		f"{RESULTS_DIR}EVM/partitions_list.out"
 	output:
 		partitionEVM_Output
-	singularity: image
 	params:
 		results_dir = RESULTS_DIR,
 		results_dir_abs = EVM_DIR_ABS,
@@ -2771,6 +2768,7 @@ rule writeEVMCommands:
 		weight = config_dict["Input"]["evm_weights"],
 		split_evm = num_evm_files
 	shell: """
+			micromamba activate annotation
 			export TMPDIR=./{params.results_dir}TMP
 			export SLURM_TMPDIR=./{params.results_dir}TMP
 
@@ -2785,7 +2783,7 @@ rule writeEVMCommands:
 			fi
 			GENOME_FILE="{params.results_dir_abs}/genome.fasta"
 
-			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/write_EVM_commands.pl \
+			write_EVM_commands.pl \
 			--genome "$GENOME_FILE" \
 			--weights $(pwd)/{params.weight} \
 			--gene_predictions {params.results_dir_abs}/gene_predictions_checkCoords.gff3 \
@@ -2806,15 +2804,15 @@ rule runEVM:
 		mem_mb = lambda wildcards, attempt: parse_memory_to_mb(config_dict["runEVM"]["memory"]) + (attempt - 1) * 40960
 	params:
 		results_dir_abs = EVM_DIR_ABS
-	singularity: image
 	shell: """
+		micromamba activate annotation
 		cd {params.results_dir_abs}
-		
+
 		CMD_FILE="commands.{wildcards.evm_num}.list"
 
 		if [ -s "$CMD_FILE" ]; then
 			# Execute the script, and if it fails, print an error and exit with a non-zero status
-			/bin/bash "$CMD_FILE" || (echo "Error executing $CMD_FILE from within singularity." && exit 1)
+			/bin/bash "$CMD_FILE" || (echo "Error executing $CMD_FILE." && exit 1)
 		fi
 		
 		touch "{output}"
@@ -2825,12 +2823,12 @@ runEVM_Output = [f"{RESULTS_DIR}EVM/ok/commands.{evm_num}.ok" for evm_num in ran
 rule recombineEVM:
 	input: runEVM_Output
 	output: f"{RESULTS_DIR}EVM.all.gff3"
-	singularity: image
 	params:
 		genome = config_dict["Input"]["genome"],
 		results_dir = RESULTS_DIR,
 		results_dir_abs = EVM_DIR_ABS
 	shell: """
+			micromamba activate annotation
 			export TMPDIR=./{params.results_dir}TMP
 			export SLURM_TMPDIR=./{params.results_dir}TMP
 
@@ -2843,11 +2841,11 @@ rule recombineEVM:
 				GENOME_FILE="{params.results_dir_abs}/genome.fasta"
 			fi
 
-			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/recombine_EVM_partial_outputs.pl \
+			recombine_EVM_partial_outputs.pl \
 			--partitions {params.results_dir_abs}/partitions_list.out \
 			--output_file_name {params.results_dir_abs}/evm.out
 
-			/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/convert_EVM_outputs_to_GFF3.pl \
+			convert_EVM_outputs_to_GFF3.pl \
 			--partitions {params.results_dir_abs}/partitions_list.out \
 			--output {params.results_dir_abs}/evm.out \
 			--genome $GENOME_FILE
@@ -2868,9 +2866,10 @@ rule pasaPost:
 	threads: config_dict["pasaPost"]["threads"]
 	params:
 		results_dir = RESULTS_DIR,
-		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA"
-	singularity: image
+		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA",
+		pasa_home = PASA_HOME
 	shell: """
+			micromamba activate annotation
 			WORKDIR=$(pwd)
 
 			cd {params.pasa_dir}
@@ -2878,12 +2877,12 @@ rule pasaPost:
 			export TMPDIR={params.results_dir}TMP
 			export SLURM_TMPDIR={params.results_dir}TMP
 
-			/opt/miniconda3/opt/pasa-2.5.2/scripts/Load_Current_Gene_Annotations.dbi \
+			{params.pasa_home}/scripts/Load_Current_Gene_Annotations.dbi \
 			-c {params.results_dir}config/alignAssembly.config \
 			-g genome.fasta \
 			-P {input.evm}
 
-			/opt/miniconda3/opt/pasa-2.5.2/Launch_PASA_pipeline.pl \
+			{params.pasa_home}/Launch_PASA_pipeline.pl \
 			-c {params.results_dir}config/annotCompare.config \
 			--CPU {threads} \
 			-A \
@@ -2899,8 +2898,8 @@ rule agat_clean_final:
 	params:
 		results_dir = RESULTS_DIR,
 		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA"
-	singularity: image
 	shell: """
+		micromamba activate annotation
 		export pasa=$(ls -t {params.pasa_dir}/pasa.sqlite.gene_structures_post_PASA_updates.*.gff3 | head -n 1)
 		agat_convert_sp_gxf2gxf.pl -gff ${{pasa}} -o {params.results_dir}complete_draft.gff3
 

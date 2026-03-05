@@ -12,7 +12,12 @@ try:
 except yaml.YAMLError as e:
 	sys.exit("Could not load configs! Check config_filter.yml ...")
 
-image = config_dict["Singularity"]
+
+# Singularity container with pre-built micromamba environments
+singularity: config_dict.get("Input", {}).get("singularity", "") or config_dict.get("Singularity", "")
+
+# Set up micromamba shell hook for all shell commands
+shell.prefix("set +u; eval \"$(/usr/local/bin/micromamba shell hook -s bash)\"; set -u; ")
 
 # Derive prefix from anot_gff
 pep_string = re.sub(r"\.fa.*$", "", config_dict["Input"]["anot_gff"] + ".fa")
@@ -39,8 +44,8 @@ rule scoreModels:
 	output:
 		csv = f"{RESULTS_DIR}FILTER/scores.csv",
 		metrics = f"{RESULTS_DIR}FILTER/scores.metrics.txt"
-	singularity: image
 	shell: """
+		micromamba activate base
 		python bin/score_filter.py \
 			--pfam {input.pfam} \
 			--blast {input.blast} \
