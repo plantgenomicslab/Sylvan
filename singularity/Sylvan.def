@@ -48,8 +48,8 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 	unset _CE_CONDA _CE_M
 	rm -f /root/.condarc /root/.mambarc
 
-	# Download and install micromamba 1.5.10 (2.x has strict root-prefix that breaks container builds)
-	curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/1.5.10 | tar -xvj -C /usr/local bin/micromamba
+	# Download and install micromamba (2.x works with explicit -r flag)
+	curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/2.0.5 | tar -xvj -C /usr/local bin/micromamba
 
 	# Dedicated root prefix (separate from env install paths to avoid conflicts)
 	export MAMBA_ROOT_PREFIX=/opt/mamba
@@ -114,9 +114,24 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - repeatmasker
-  - repeatmodeler
   - bedtools
+  - h5py
+  - hmmer
+  - rmblast
+  - trf
+  - perl
+  - perl-text-soundex
+  - perl-uri
+  - perl-lwp-simple
+  - perl-file-which
+  - perl-json
+  - cd-hit
+  - recon
+  - repeatscout
+  - ltr_retriever
+  - genometools-genometools
+  - mafft
+  - ninja-nj
 YAMLEOF
 
 	cat > /tmp/envs/annotation.yaml << 'YAMLEOF'
@@ -153,8 +168,8 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - python>=3.10
-  - tensorflow
+  - python=3.10
+  - tensorflow=2.15
   - h5py
 YAMLEOF
 
@@ -183,7 +198,7 @@ YAMLEOF
 			exit 1
 		fi
 		echo "Creating environment: $env"
-		env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
+		env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
 			/usr/local/bin/micromamba create -y \
 			-r /opt/mamba \
 			-p /opt/envs/$env \
@@ -191,10 +206,10 @@ YAMLEOF
 			-c conda-forge -c bioconda
 	done
 
-	# Install Helixer from GitHub (not on PyPI)
-	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
+	# Install Helixer from GitHub (not on PyPI; HelixerPost binary is built separately below)
+	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
 		/usr/local/bin/micromamba run -r /opt/mamba -p /opt/envs/helixer \
-		pip install git+https://github.com/weberlab-hhu/Helixer.git git+https://github.com/nextgenusfs/helixerlite.git
+		pip install git+https://github.com/weberlab-hhu/Helixer.git
 
 	# Create symlinks so micromamba can find envs by name (for `micromamba activate {name}`)
 	mkdir -p /opt/mamba/envs
@@ -290,7 +305,7 @@ YAMLEOF
 	wget https://github.com/lim74/LncDC/archive/refs/tags/v1.3.5.zip \
 		-P /usr/local/src
 	unzip -qq /usr/local/src/v1.3.5.zip -d "/usr/local/src/"
-	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
+	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
 		/usr/local/bin/micromamba run -r /opt/mamba -p /opt/envs/lncdc pip install /usr/local/src/LncDC-1.3.5/
 
 	# ---- LncDC DB download ---- #
@@ -327,7 +342,7 @@ YAMLEOF
 	zcat /usr/local/src/Pfam-A.hmm.dat.gz > /usr/local/src/Pfam-A.hmm.dat
 
 	# Press the HMM database for use with HMMER tools (using filter env's hmmpress)
-	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
+	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
 		/usr/local/bin/micromamba run -r /opt/mamba -p /opt/envs/filter hmmpress /usr/local/src/Pfam-A.hmm
 
 	# Remove the compressed Pfam database files
@@ -335,28 +350,52 @@ YAMLEOF
 	cd
 
 
-	# ---- Configure RepeatMasker (installed in repeat env) ---- #
+	# ---- Install RepeatMasker manually (avoids bioconda post-link interactive configure) ---- #
 
 	REPEAT_PREFIX=/opt/envs/repeat
+	export PATH=$REPEAT_PREFIX/bin:$PATH
 
-	# Navigate to the RepeatMasker directory
+	# Download and extract RepeatMasker (remove any version pulled in as transitive dep)
+	cd /usr/local/src
+	wget https://www.repeatmasker.org/RepeatMasker/RepeatMasker-4.1.7-p1.tar.gz
+	tar xzf RepeatMasker-4.1.7-p1.tar.gz
+	rm -rf $REPEAT_PREFIX/share/RepeatMasker
+	mv RepeatMasker $REPEAT_PREFIX/share/RepeatMasker
+	rm RepeatMasker-4.1.7-p1.tar.gz
+
+	# Configure RepeatMasker by directly editing RepeatMaskerConfig.pm
 	cd $REPEAT_PREFIX/share/RepeatMasker
+	chmod 644 *.pm configure
+	perl -0777 -i -pe "
+		s|('TRF_PRGM'.*?'value' => )''|\$1'$REPEAT_PREFIX/bin/trf'|s;
+		s|('HMMER_DIR'.*?'value' => )''|\$1'$REPEAT_PREFIX/bin'|s;
+		s|('RMBLAST_DIR'.*?'value' => )''|\$1'$REPEAT_PREFIX/bin'|s;
+		s|('LIBDIR'.*?'value' => )''|\$1'$REPEAT_PREFIX/share/RepeatMasker/Libraries'|s;
+		s|('DEFAULT_SEARCH_ENGINE'.*?'value' => )''|\$1'rmblast'|s;
+	" RepeatMaskerConfig.pm
 
-	# Change permissions for Perl modules and the configure script
+	# Make RepeatMasker scripts accessible
+	ln -sf $REPEAT_PREFIX/share/RepeatMasker/RepeatMasker $REPEAT_PREFIX/bin/RepeatMasker
+	ln -sf $REPEAT_PREFIX/share/RepeatMasker/ProcessRepeats $REPEAT_PREFIX/bin/ProcessRepeats
+	ln -sf $REPEAT_PREFIX/share/RepeatMasker/rmOutToGFF3.pl $REPEAT_PREFIX/bin/rmOutToGFF3.pl
+
+	# Create Libraries directory
+	mkdir -p $REPEAT_PREFIX/share/RepeatMasker/Libraries
+
+	# ---- Install RepeatModeler manually (from GitHub) ---- #
+	cd /usr/local/src
+	wget https://github.com/Dfam-consortium/RepeatModeler/archive/refs/tags/2.0.5.tar.gz \
+		-O RepeatModeler-2.0.5.tar.gz
+	tar xzf RepeatModeler-2.0.5.tar.gz
+	rm -rf $REPEAT_PREFIX/share/RepeatModeler
+	mv RepeatModeler-2.0.5 $REPEAT_PREFIX/share/RepeatModeler
+	rm RepeatModeler-2.0.5.tar.gz
+
+	# Configure RepeatModeler
+	cd $REPEAT_PREFIX/share/RepeatModeler
 	chmod 644 *.pm configure
 
-	# Run the configuration script for RepeatMasker
-	printf "$REPEAT_PREFIX/bin/trf\n2\n$REPEAT_PREFIX/bin\nY\n5" | perl ./configure
-
-	# ---- Configure RepeatModeler ---- #
-	# Navigate to the RepeatModeler directory
-	cd $REPEAT_PREFIX/share/RepeatModeler/
-
-	# Change permissions for Perl modules and the configure script
-	chmod 644 *.pm configure
-
-	# Run the configuration script for RepeatModeler with additional options specified
-	printf "\n$REPEAT_PREFIX/bin/perl\ny\n" | perl ./configure \
+	perl ./configure \
 		--repeatmasker_dir $REPEAT_PREFIX/share/RepeatMasker \
 		--recon_dir $REPEAT_PREFIX/bin \
 		--rscout_dir $REPEAT_PREFIX/bin \
@@ -368,8 +407,9 @@ YAMLEOF
 		--mafft_dir $REPEAT_PREFIX/bin \
 		--ninja_dir $REPEAT_PREFIX/bin
 
-	# Navigate to the RepeatMasker's Libraries directory
-	cd $REPEAT_PREFIX/share/RepeatMasker/ && mkdir -p Libraries && cd Libraries
+	# Make RepeatModeler scripts accessible
+	ln -sf $REPEAT_PREFIX/share/RepeatModeler/RepeatModeler $REPEAT_PREFIX/bin/RepeatModeler
+	ln -sf $REPEAT_PREFIX/share/RepeatModeler/BuildDatabase $REPEAT_PREFIX/bin/BuildDatabase
 
 
 	# ---- Install Java ---- #
@@ -439,8 +479,8 @@ YAMLEOF
 
 
 	# ---- Cleanup ---- #
-	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
-		/usr/local/bin/micromamba clean -r /opt/mamba --all -f --yes
+	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
+		/usr/local/bin/micromamba clean --all -f --yes
 	rm -rf /tmp/envs/
 
 %startscript
