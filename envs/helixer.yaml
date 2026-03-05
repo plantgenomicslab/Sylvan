@@ -5,6 +5,3 @@ dependencies:
   - python>=3.10
   - tensorflow
   - h5py
-  - pip:
-    - helixer
-    - helixerlite
