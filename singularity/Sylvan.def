@@ -48,8 +48,8 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 	unset _CE_CONDA _CE_M
 	rm -f /root/.condarc /root/.mambarc
 
-	# Download and install micromamba binary
-	curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local bin/micromamba
+	# Download and install micromamba 1.5.10 (2.x has strict root-prefix that breaks container builds)
+	curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/1.5.10 | tar -xvj -C /usr/local bin/micromamba
 
 	# Set micromamba root prefix
 	export MAMBA_ROOT_PREFIX=/opt/micromamba
