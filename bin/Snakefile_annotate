@@ -121,7 +121,7 @@ if (config_dict["Input"]["geta"]["augustus_species"] != "placeholder") | (config
 	os.makedirs(f"{RESULTS_DIR}GETA/Augustus/training/", exist_ok=True)
 
 # Singularity container with pre-built micromamba environments
-singularity: config_dict.get("Input", {}).get("singularity", "")
+singularity: config_dict.get("Input", {}).get("singularity", "") or config_dict.get("Singularity", "")
 
 # Set up micromamba shell hook for all shell commands
 shell.prefix("set +u; eval \"$(/usr/local/bin/micromamba shell hook -s bash)\"; set -u; ")
@@ -858,33 +858,31 @@ rule geneRegion2Genewise:
 		if os.path.exists(output[0]):
 			os.remove(output[0])
 
-		for aa_seq in faa.keys():
-			nt_seq = re.sub(r"\!.*", "", aa_seq)
-			with open(f"{RESULTS_DIR}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.aa", 'w') as out:
-				out.write(f">{aa_seq}\n{faa[aa_seq]}\n")
-			with open(f"{RESULTS_DIR}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.na", 'w') as out:
-				out.write(f">{nt_seq}\n{fna[nt_seq]}\n")
+		tmp_dir = f"{RESULTS_DIR}GETA/homolog/geneRegion_genewise.tmp"
+		tmp_script = f"{tmp_dir}/genewise_batch_{wildcards.seqid}.sh"
 
-			try:
-				if re.search(r"plus", aa_seq):
-					shell(f"micromamba activate genepred && genewise \
-					{params.results_dir}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.aa \
-					{params.results_dir}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.na \
-					-tfor -gff -quiet -silent -sum >> {output}")
+		# Write all sequence pairs to individual temp files and build a batch script
+		with open(tmp_script, 'w') as script:
+			for i, aa_seq in enumerate(faa.keys()):
+				nt_seq = re.sub(r"\!.*", "", aa_seq)
+				tmp_aa = f"{tmp_dir}/temp_{wildcards.seqid}_{i}.aa"
+				tmp_na = f"{tmp_dir}/temp_{wildcards.seqid}_{i}.na"
+				with open(tmp_aa, 'w') as out:
+					out.write(f">{aa_seq}\n{faa[aa_seq]}\n")
+				with open(tmp_na, 'w') as out:
+					out.write(f">{nt_seq}\n{fna[nt_seq]}\n")
 
-				else:
-					shell(f"micromamba activate genepred && genewise \
-					{params.results_dir}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.aa \
-					{params.results_dir}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.na \
-					-trev -gff -quiet -silent -sum >> {output}")
-			except:
-				with open(input.prot, 'r') as prot:
-					prot_line = prot.readline()
-				with open(f"{RESULTS_DIR}GETA/homolog/genewise_failed_commands.txt", 'a') as failed:
-					failed.write(f"{prot_line}\n")
+				strand_flag = "-tfor" if re.search(r"plus", aa_seq) else "-trev"
+				script.write(
+					f"genewise {tmp_aa} {tmp_na} {strand_flag} -gff -quiet -silent -sum >> {output} || "
+					f"echo '{aa_seq}' >> {RESULTS_DIR}GETA/homolog/genewise_failed_commands.txt\n"
+				)
+				script.write(f"rm -f {tmp_aa} {tmp_na}\n")
 
-		os.remove(f"{RESULTS_DIR}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.aa")
-		os.remove(f"{RESULTS_DIR}GETA/homolog/geneRegion_genewise.tmp/temp_{wildcards.seqid}.na")
+		# Run all genewise calls under a single micromamba activate
+		if faa:
+			shell(f"micromamba activate genepred && bash {tmp_script}")
+		os.remove(tmp_script)
 		
 
 def get_miniprot2genewise(wildcards):
@@ -1284,31 +1282,19 @@ rule BGM2AT:
 			f"{params.a_species}"
 		)
 
+		# Clean up intermediate files created by BGM2AT
+		aug_dir = f"{params.results_dir}GETA/Augustus"
 		shell(
-			f"cd {params.results_dir}GETA/Augustus && "
-			f'if [ "$(realpath firsttest.out)" != "$(realpath {params.results_dir}GETA/Augustus/firsttest.out)" ]; then '
-			f"mv -f firsttest.out {params.results_dir}GETA/Augustus/firsttest.out; fi")
-		shell(
-			f"cd {params.results_dir}GETA/Augustus && "
-			f'if [ "$(realpath secondtest.out)" != "$(realpath {params.results_dir}GETA/Augustus/secondtest.out)" ]; then '
-			f"mv -f secondtest.out {params.results_dir}GETA/Augustus/secondtest.out; fi")
-		# Clean up intermediate files created by BGM2AT in this directory
-		shell(f"cd {params.results_dir}GETA/Augustus && mv -f ati.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"cd {params.results_dir}GETA/Augustus && mv -f genes.*.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"cd {params.results_dir}GETA/Augustus && mv -f gff2gbSmallDNA.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"cd {params.results_dir}GETA/Augustus && mv -f etraining.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"cd {params.results_dir}GETA/Augustus && mv -f badgenes.lst {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"cd {params.results_dir}GETA/Augustus && mv -f new_species.*.log {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"cd {params.results_dir}GETA/Augustus && mv -f optimize.out {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"cd {params.results_dir}GETA/Augustus && mv -f training.gb.* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"cd {params.results_dir}GETA/Augustus && mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"cd {params.results_dir}GETA/Augustus && mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"cd {params.results_dir}GETA/Augustus && rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true")
-		# Also clean up files that may have been created in the project root directory
-		shell(f"mv -f genes.gb* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"mv -f hmm_files_bak* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"mv -f tmp_opt_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
-		shell(f"mv -f cleaning_* {params.results_dir}GETA/Augustus/training/ 2>/dev/null || true")
+			f'cd {aug_dir} && '
+			f'if [ "$(realpath firsttest.out)" != "$(realpath {aug_dir}/firsttest.out)" ]; then mv -f firsttest.out {aug_dir}/firsttest.out; fi ; '
+			f'if [ "$(realpath secondtest.out)" != "$(realpath {aug_dir}/secondtest.out)" ]; then mv -f secondtest.out {aug_dir}/secondtest.out; fi ; '
+			f'mv -f ati.* genes.*.gb* gff2gbSmallDNA.*.log etraining.* badgenes.lst '
+			f'new_species.*.log optimize.out training.gb.* hmm_files_bak* tmp_opt_* '
+			f'{aug_dir}/training/ 2>/dev/null || true ; '
+			f'rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true ; '
+			f'cd - > /dev/null ; '
+			f'mv -f genes.gb* hmm_files_bak* tmp_opt_* cleaning_* {aug_dir}/training/ 2>/dev/null || true'
+		)
 
 rule prepareAugusutusHints:
 	input:
