@@ -187,7 +187,11 @@ YAMLEOF
 			exit 1
 		fi
 		echo "Creating environment: $env"
-		/usr/local/bin/micromamba create -n $env -f /tmp/envs/${env}.yaml -y -c conda-forge -c bioconda
+		env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
+			/usr/local/bin/micromamba create \
+			--root-prefix /opt/micromamba \
+			-n $env -f /tmp/envs/${env}.yaml -y \
+			-c conda-forge -c bioconda
 	done
 
 
@@ -278,7 +282,8 @@ YAMLEOF
 	wget https://github.com/lim74/LncDC/archive/refs/tags/v1.3.5.zip \
 		-P /usr/local/src
 	unzip -qq /usr/local/src/v1.3.5.zip -d "/usr/local/src/"
-	/usr/local/bin/micromamba run -n lncdc pip install /usr/local/src/LncDC-1.3.5/
+	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
+		/usr/local/bin/micromamba run --root-prefix /opt/micromamba -n lncdc pip install /usr/local/src/LncDC-1.3.5/
 
 	# ---- LncDC DB download ---- #
 	mkdir -p /opt/micromamba/envs/lncdc/share/lncdc_db
@@ -314,7 +319,8 @@ YAMLEOF
 	zcat /usr/local/src/Pfam-A.hmm.dat.gz > /usr/local/src/Pfam-A.hmm.dat
 
 	# Press the HMM database for use with HMMER tools (using filter env's hmmpress)
-	/usr/local/bin/micromamba run -n filter hmmpress /usr/local/src/Pfam-A.hmm
+	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
+		/usr/local/bin/micromamba run --root-prefix /opt/micromamba -n filter hmmpress /usr/local/src/Pfam-A.hmm
 
 	# Remove the compressed Pfam database files
 	rm /usr/local/src/Pfam-A.hmm.gz /usr/local/src/Pfam-A.hmm.dat.gz
@@ -425,7 +431,8 @@ YAMLEOF
 
 
 	# ---- Cleanup ---- #
-	/usr/local/bin/micromamba clean --all -f --yes
+	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
+		/usr/local/bin/micromamba clean --root-prefix /opt/micromamba --all -f --yes
 	rm -rf /tmp/envs/
 
 %startscript
