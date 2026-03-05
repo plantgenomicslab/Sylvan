@@ -21,7 +21,7 @@ snakemake -p \
 	--rerun-incomplete \
 	--rerun-triggers mtime \
 	--use-singularity \
-	--use-conda \
+	--singularity-args "--nv -B /data/gpfs" \
 	--keep-going \
 	--keep-incomplete \
 	--stats annotation_runtime_stats.json \
@@ -33,7 +33,6 @@ snakemake -p \
 	--jobs 150 \
 	--latency-wait 30 \
 	--cluster "$CLUSTER_CMD" \
-	--singularity-args "--cleanenv --env PYTHONNOUSERSITE=1" \
 		"$@"
 
 # Generate report after run

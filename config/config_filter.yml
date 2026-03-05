@@ -5,7 +5,7 @@
 #
 ###############################################################################################
 
-Singularity: sylvan.sif
+Singularity: singularity/sylvan.sif      # Singularity image (pre-built micromamba environments inside)
 
 Input:
   genome: results/GETA/genome.fasta            # [path] genome fasta file (GETA/genome.fasta)

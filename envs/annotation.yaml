@@ -1,0 +1,15 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - pasa
+  - gmap
+  - agat
+  - gffread
+  - evidencemodeler
+  - evigene
+  - spades
+  - sqlite
+  - perl-parallel-forkmanager
+  - perl-db_file
+  - perl-dbd-sqlite

@@ -10,7 +10,7 @@ Input:
   rna_seq: placeholder          # [!!!!REQUIRED!!!!:directory] folder containing RNA-seq data. Files should be gzipped
                                 # fastq (i.e. fastq.gz)
   proteins: placeholder         # [!!!!REQUIRED!!!!:file] Comma separated list of protein fasta files for homology search
-  singularity: /data/gpfs/assoc/pgl/data/Sylvan/Sylvan/sylvan.sif      # [!!!!REQUIRED!!!!:file] the singularity image or sandbox
+  singularity: singularity/sylvan.sif     # Singularity image (pre-built micromamba environments inside)
   liftoff:
     neighbor_gff: placeholder     # [!!!!REQUIRED!!!!:directory] folder containing neighbor species annotations (supported: .gff, .gff3)
     neighbor_fasta: placeholder   # [!!!!REQUIRED!!!!:directory] folder containing neighbor species genome assemblies (supported: .fa, .fasta, .fna, .fas, .fsa, .seq)
@@ -23,7 +23,7 @@ Input:
     RM_lib: placeholder           # [!!!!REQUIRED!!!!:file] Repeat nucleotide FASTA file (e.g., from EDTA: genome.fa.mod.EDTA.TElib.fa)
     dfam_lib: placeholder         # [optional:file] the DFAM lib
     geta_conf: big                # [!!!!REQUIRED!!!!:value] chose a geta configuration mode (big/small)
-    pfamdb: /usr/local/src/Pfam-A.hmm  # [!!!!REQUIRED!!!!:file] pfam database file (included in container)
+    pfamdb: /usr/local/src/Pfam-A.hmm  # [!!!!REQUIRED!!!!:file] pfam database file (pre-installed in container)
     augustus_species: placeholder # [!!!!REQUIRED!!!!:name] chose an augustus species or use a custom name
     use_augustus: placeholder     # [optional:name] Species identifier for Augustus. This parameter conflicts with
                                   # augustus_species. When this parameter set, the augustus_species
@@ -442,3 +442,6 @@ Internal:
   fillingEndsOfGeneModels: --start_codon ATG --stop_codon TAG,TGA,TAA
   pickout_better_geneModels_from_evidence: --overlap_ratio 0.2 --ratio1 2 --ratio2 1.5 --ratio3 0.85 --ratio4 0.85
   parsing_blast_result: --evalue 1e-10 --identity 0.1 --CIP 0.5 --subject-coverage 0.5 --query-coverage 0.5
+  pasa_home: auto                    # [optional] PASA installation path. "auto" = detect from conda env ($CONDA_PREFIX/opt/pasa-*/)
+  geta_home: ""                      # [optional] Path to GETA clone (for non-conda GETA scripts)
+  augustus_config_src: auto           # [optional] Augustus config source. "auto" = detect from conda env ($CONDA_PREFIX/config/)
