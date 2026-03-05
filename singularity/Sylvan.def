@@ -51,13 +51,12 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 	# Download and install micromamba 1.5.10 (2.x has strict root-prefix that breaks container builds)
 	curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/1.5.10 | tar -xvj -C /usr/local bin/micromamba
 
-	# Set micromamba root prefix
-	export MAMBA_ROOT_PREFIX=/opt/micromamba
-	mkdir -p /opt/micromamba
+	# Dedicated root prefix (separate from env install paths to avoid conflicts)
+	export MAMBA_ROOT_PREFIX=/opt/mamba
+	mkdir -p /opt/mamba /opt/envs
 
 
 	# ---- Create Conda Environments from inline YAML ---- #
-	# Embedding YAML directly in %post avoids all %setup/%files file-copy issues
 
 	mkdir -p /tmp/envs
 
@@ -188,10 +187,17 @@ YAMLEOF
 		fi
 		echo "Creating environment: $env"
 		env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
-			/usr/local/bin/micromamba create \
-			--root-prefix /opt/micromamba \
-			-n $env -f /tmp/envs/${env}.yaml -y \
+			/usr/local/bin/micromamba create -y \
+			-r /opt/mamba \
+			-p /opt/envs/$env \
+			-f /tmp/envs/${env}.yaml \
 			-c conda-forge -c bioconda
+	done
+
+	# Create symlinks so micromamba can find envs by name (for `micromamba activate {name}`)
+	mkdir -p /opt/mamba/envs
+	for env in base alignment genepred repeat annotation filter helixer lncdc; do
+		ln -s /opt/envs/$env /opt/mamba/envs/$env
 	done
 
 
@@ -283,11 +289,11 @@ YAMLEOF
 		-P /usr/local/src
 	unzip -qq /usr/local/src/v1.3.5.zip -d "/usr/local/src/"
 	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
-		/usr/local/bin/micromamba run --root-prefix /opt/micromamba -n lncdc pip install /usr/local/src/LncDC-1.3.5/
+		/usr/local/bin/micromamba run -r /opt/mamba -p /opt/envs/lncdc pip install /usr/local/src/LncDC-1.3.5/
 
 	# ---- LncDC DB download ---- #
-	mkdir -p /opt/micromamba/envs/lncdc/share/lncdc_db
-	wget --directory-prefix /opt/micromamba/envs/lncdc/share/lncdc_db \
+	mkdir -p /opt/envs/lncdc/share/lncdc_db
+	wget --directory-prefix /opt/envs/lncdc/share/lncdc_db \
 		https://raw.githubusercontent.com/wyim-pgl/lncdc_db/main/LncDC_plant_db/plant_selected_nostructure_hexamer_table.csv \
 		https://raw.githubusercontent.com/wyim-pgl/lncdc_db/main/LncDC_plant_db/plant_selected_nostructure_imputer_SIF_PF.pkl \
 		https://raw.githubusercontent.com/wyim-pgl/lncdc_db/main/LncDC_plant_db/plant_selected_nostructure_scaler_SIF_PF.pkl \
@@ -320,7 +326,7 @@ YAMLEOF
 
 	# Press the HMM database for use with HMMER tools (using filter env's hmmpress)
 	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
-		/usr/local/bin/micromamba run --root-prefix /opt/micromamba -n filter hmmpress /usr/local/src/Pfam-A.hmm
+		/usr/local/bin/micromamba run -r /opt/mamba -p /opt/envs/filter hmmpress /usr/local/src/Pfam-A.hmm
 
 	# Remove the compressed Pfam database files
 	rm /usr/local/src/Pfam-A.hmm.gz /usr/local/src/Pfam-A.hmm.dat.gz
@@ -329,7 +335,7 @@ YAMLEOF
 
 	# ---- Configure RepeatMasker (installed in repeat env) ---- #
 
-	REPEAT_PREFIX=/opt/micromamba/envs/repeat
+	REPEAT_PREFIX=/opt/envs/repeat
 
 	# Navigate to the RepeatMasker directory
 	cd $REPEAT_PREFIX/share/RepeatMasker
@@ -432,7 +438,7 @@ YAMLEOF
 
 	# ---- Cleanup ---- #
 	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
-		/usr/local/bin/micromamba clean --root-prefix /opt/micromamba --all -f --yes
+		/usr/local/bin/micromamba clean -r /opt/mamba --all -f --yes
 	rm -rf /tmp/envs/
 
 %startscript
@@ -443,8 +449,8 @@ YAMLEOF
 	# Set the Locale to 'C' to ensure consistent behavior across different systems
 	export LC_ALL=C
 
-	# Micromamba root prefix
-	export MAMBA_ROOT_PREFIX=/opt/micromamba
+	# Micromamba root prefix (envs are at /opt/envs/, symlinked from /opt/mamba/envs/)
+	export MAMBA_ROOT_PREFIX=/opt/mamba
 	export PATH=/usr/local/bin:$PATH
 
 	# Add Java to PATH (required by EVM)
@@ -466,7 +472,7 @@ YAMLEOF
 	export evigene=/usr/local/bin/evigene
 
 	# Set the Wise2 configuration directory (required by genewise)
-	export WISECONFIGDIR=/opt/micromamba/envs/genepred/share/wise2/wisecfg
+	export WISECONFIGDIR=/opt/envs/genepred/share/wise2/wisecfg
 
 	# Micromamba shell hook (so `micromamba activate` works in shell commands)
 	# Note: %environment is sourced by bash at runtime, so eval works here
