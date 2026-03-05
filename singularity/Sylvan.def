@@ -45,10 +45,9 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 	# Download and install micromamba binary
 	curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /usr/local bin/micromamba
 
-	# Set micromamba root prefix and initialize shell integration
+	# Set micromamba root prefix (do NOT run shell init — it locks the prefix and blocks create)
 	export MAMBA_ROOT_PREFIX=/opt/micromamba
 	mkdir -p /opt/micromamba
-	/usr/local/bin/micromamba shell init -s bash --root-prefix /opt/micromamba
 
 
 	# ---- Create Conda Environments from inline YAML ---- #
@@ -182,7 +181,7 @@ YAMLEOF
 			exit 1
 		fi
 		echo "Creating environment: $env"
-		/usr/local/bin/micromamba create -n $env -f /tmp/envs/${env}.yaml -y -c conda-forge -c bioconda -r /opt/micromamba
+		/usr/local/bin/micromamba create -n $env -f /tmp/envs/${env}.yaml -y -c conda-forge -c bioconda
 	done
 
 
