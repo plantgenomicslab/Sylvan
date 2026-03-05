@@ -632,18 +632,23 @@ rule mergeTransfrag:
 	params:
 		results_dir = RESULTS_DIR
 	run:
-		shell("if test -f {params.results_dir}GETA/transcript/transfrag.list; then rm {params.results_dir}GETA/transcript/transfrag.list;fi")
-		shell("rm -f {params.results_dir}GETA/transcript/intron.txt; touch {params.results_dir}GETA/transcript/intron.txt")
-		shell("rm -f {params.results_dir}GETA/transcript/base_depth.txt; touch {params.results_dir}GETA/transcript/base_depth.txt")
+		rd = params.results_dir
+		shell(f"rm -f {rd}GETA/transcript/transfrag.list {rd}GETA/transcript/intron.txt {rd}GETA/transcript/base_depth.txt")
+		shell(f"touch {rd}GETA/transcript/intron.txt {rd}GETA/transcript/base_depth.txt")
+
+		# Build concatenation commands and execute in a single shell call
+		cmds = []
 		for item in input.gtf_files:
 			item = re.sub(r"\.[a-zA-Z]+$", "", item)
-			shell(f"cat {item}.gtf >> {params.results_dir}GETA/transcript/transfrag.gtf")
-			shell(f"if [ -f {item}.intron ]; then cat {item}.intron >> {params.results_dir}GETA/transcript/intron.txt; fi")
-			shell(f"if [ -f {item}.base_depth ]; then cat {item}.base_depth >> {params.results_dir}GETA/transcript/base_depth.txt; fi")
+			cmds.append(f"cat {item}.gtf >> {rd}GETA/transcript/transfrag.gtf")
+			cmds.append(f"[ -f {item}.intron ] && cat {item}.intron >> {rd}GETA/transcript/intron.txt || true")
+			cmds.append(f"[ -f {item}.base_depth ] && cat {item}.base_depth >> {rd}GETA/transcript/base_depth.txt || true")
+		if cmds:
+			shell(" ; ".join(cmds))
 
 		shell("micromamba activate base && transfragDump \
-			--out {params.results_dir}GETA/transcript/transfrag \
-			{params.results_dir}GETA/transcript/transfrag.gtf \
+			--out {rd}GETA/transcript/transfrag \
+			{rd}GETA/transcript/transfrag.gtf \
 			{input.genome_fasta}")
 
 #TODO: add threads?
@@ -830,6 +835,7 @@ rule miniprot:
 	params: genome = config_dict["Input"]["genome"]
 	shell:
 		"""
+		micromamba activate genepred
 		miniprot -t{threads} --outs=0.97 -Iut16 {params.genome} {input} --gff > {output.gff}
 		grep -v "#" {output.gff} > {output.clean}
 		"""
@@ -2499,6 +2505,7 @@ rule pasa:
 		pasa_home = PASA_HOME
 	shell:
 		"""
+		micromamba activate annotation
 		WORKDIR=$(pwd)
 
 		cd {params.pasa_dir}
