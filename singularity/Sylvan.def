@@ -5,13 +5,19 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 	# Create directories in the container filesystem
 	# Support both Singularity ($SINGULARITY_ROOTFS) and Apptainer ($APPTAINER_ROOTFS)
 	ROOTFS="${SINGULARITY_ROOTFS:-$APPTAINER_ROOTFS}"
-	mkdir -p $ROOTFS/root/.ssh
-	mkdir -p $ROOTFS/tmp/envs
+	mkdir -p "$ROOTFS/root/.ssh"
+	mkdir -p "$ROOTFS/tmp/envs"
 
-	# Copy env YAML files into container (more reliable than %files across build tools)
-	for f in envs/*.yaml; do
-		cp "$f" "$ROOTFS/tmp/envs/"
-	done
+	# Copy env YAML files into container
+	# Find the def file's directory to locate envs/ relative to it
+	DEFDIR="$(dirname "$APPTAINER_DEFFILE" 2>/dev/null || dirname "$SINGULARITY_DEFFILE" 2>/dev/null || echo ".")"
+	BASEDIR="$(cd "$DEFDIR/.." && pwd)"
+	echo "Setup: copying env YAMLs from $BASEDIR/envs/ into container"
+	ls "$BASEDIR/envs/"*.yaml 2>/dev/null && cp "$BASEDIR/envs/"*.yaml "$ROOTFS/tmp/envs/" || {
+		echo "ERROR: Could not find envs/*.yaml relative to def file at $BASEDIR"
+		echo "Make sure envs/ directory exists alongside singularity/ directory"
+		exit 1
+	}
 
 %runscript
 	echo "Container is managed externally by snakemake...use bin/Annotate.sh or bin/Filter.sh to run."
@@ -65,7 +71,15 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 
 	# ---- Create Conda Environments from YAML files ---- #
 
+	echo "Verifying env YAML files in /tmp/envs/:"
+	ls -la /tmp/envs/ || { echo "ERROR: /tmp/envs/ does not exist"; exit 1; }
+
 	for env in base alignment genepred repeat annotation filter helixer lncdc; do
+		if [ ! -f /tmp/envs/${env}.yaml ]; then
+			echo "ERROR: /tmp/envs/${env}.yaml not found!"
+			exit 1
+		fi
+		echo "Creating environment: $env"
 		/usr/local/bin/micromamba create -n $env -f /tmp/envs/${env}.yaml -y -c conda-forge -c bioconda -r /opt/micromamba
 	done
 
@@ -341,7 +355,9 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 	export WISECONFIGDIR=/opt/micromamba/envs/genepred/share/wise2/wisecfg
 
 	# Micromamba shell hook (so `micromamba activate` works in shell commands)
-	eval "$(/usr/local/bin/micromamba shell hook -s bash)"
+	# Note: %environment is sourced by bash at runtime, so eval works here
+	export MAMBA_EXE='/usr/local/bin/micromamba'
+	eval "$($MAMBA_EXE shell hook --shell bash --root-prefix $MAMBA_ROOT_PREFIX 2>/dev/null)" || alias micromamba="$MAMBA_EXE"
 
 %labels
 	Author Johnny Lomas (jlomas@nevada.unr.edu)
