@@ -9,15 +9,24 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 	mkdir -p "$ROOTFS/tmp/envs"
 
 	# Copy env YAML files into container
-	# Find the def file's directory to locate envs/ relative to it
-	DEFDIR="$(dirname "$APPTAINER_DEFFILE" 2>/dev/null || dirname "$SINGULARITY_DEFFILE" 2>/dev/null || echo ".")"
-	BASEDIR="$(cd "$DEFDIR/.." && pwd)"
-	echo "Setup: copying env YAMLs from $BASEDIR/envs/ into container"
-	ls "$BASEDIR/envs/"*.yaml 2>/dev/null && cp "$BASEDIR/envs/"*.yaml "$ROOTFS/tmp/envs/" || {
-		echo "ERROR: Could not find envs/*.yaml relative to def file at $BASEDIR"
-		echo "Make sure envs/ directory exists alongside singularity/ directory"
+	# Search order: cwd/envs/, def file parent/envs/, script dir/envs/
+	ENVDIR=""
+	for candidate in \
+		"$(pwd)/envs" \
+		"$(dirname "${APPTAINER_DEFFILE:-/dev/null}" 2>/dev/null)/../envs" \
+		"$(dirname "${SINGULARITY_DEFFILE:-/dev/null}" 2>/dev/null)/../envs"; do
+		if [ -d "$candidate" ] && ls "$candidate"/*.yaml >/dev/null 2>&1; then
+			ENVDIR="$(cd "$candidate" && pwd)"
+			break
+		fi
+	done
+	if [ -z "$ENVDIR" ]; then
+		echo "ERROR: Could not find envs/*.yaml"
+		echo "Run build from the project root: apptainer build singularity/sylvan.sif singularity/Sylvan.def"
 		exit 1
-	}
+	fi
+	echo "Setup: copying env YAMLs from $ENVDIR/"
+	cp "$ENVDIR"/*.yaml "$ROOTFS/tmp/envs/"
 
 %runscript
 	echo "Container is managed externally by snakemake...use bin/Annotate.sh or bin/Filter.sh to run."
