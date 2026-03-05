@@ -8,15 +8,10 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 	mkdir -p $ROOTFS/root/.ssh
 	mkdir -p $ROOTFS/tmp/envs
 
-%files
-	envs/base.yaml /tmp/envs/base.yaml
-	envs/alignment.yaml /tmp/envs/alignment.yaml
-	envs/genepred.yaml /tmp/envs/genepred.yaml
-	envs/repeat.yaml /tmp/envs/repeat.yaml
-	envs/annotation.yaml /tmp/envs/annotation.yaml
-	envs/filter.yaml /tmp/envs/filter.yaml
-	envs/helixer.yaml /tmp/envs/helixer.yaml
-	envs/lncdc.yaml /tmp/envs/lncdc.yaml
+	# Copy env YAML files into container (more reliable than %files across build tools)
+	for f in envs/*.yaml; do
+		cp "$f" "$ROOTFS/tmp/envs/"
+	done
 
 %runscript
 	echo "Container is managed externally by snakemake...use bin/Annotate.sh or bin/Filter.sh to run."
