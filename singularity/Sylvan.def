@@ -194,7 +194,7 @@ YAMLEOF
 	# Install Helixer from GitHub (not on PyPI)
 	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin \
 		/usr/local/bin/micromamba run -r /opt/mamba -p /opt/envs/helixer \
-		pip install git+https://github.com/weberlab-hhu/Helixer.git git+https://github.com/weberlab-hhu/HelixerLite.git
+		pip install git+https://github.com/weberlab-hhu/Helixer.git
 
 	# Create symlinks so micromamba can find envs by name (for `micromamba activate {name}`)
 	mkdir -p /opt/mamba/envs
