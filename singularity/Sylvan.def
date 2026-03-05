@@ -59,7 +59,7 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 
 	# Set micromamba root prefix and initialize shell integration
 	export MAMBA_ROOT_PREFIX=/opt/micromamba
-	/usr/local/bin/micromamba shell init -s bash -p /opt/micromamba
+	/usr/local/bin/micromamba shell init -s bash --root-prefix /opt/micromamba
 
 	# Source the activation script so micromamba commands work in this %post section
 	eval "$(/usr/local/bin/micromamba shell hook -s bash)"
