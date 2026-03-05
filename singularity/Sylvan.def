@@ -4,7 +4,8 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 %setup
 	# Create an .ssh directory within the root directory of the Singularity container's filesystem
 	# The environment variable $SINGULARITY_ROOTFS points to the root of the container's filesystem
-	mkdir $SINGULARITY_ROOTFS/root/.ssh
+	mkdir -p $SINGULARITY_ROOTFS/root/.ssh
+	mkdir -p $SINGULARITY_ROOTFS/tmp/envs
 
 %files
 	envs/base.yaml /tmp/envs/base.yaml
