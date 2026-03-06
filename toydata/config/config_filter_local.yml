@@ -4,13 +4,13 @@
 #
 ###############################################################################################
 
-Singularity: singularity/Sylvan_sandbox_v2
+Singularity: singularity/Sylvan_sandbox_v3
 
 Input:
   genome: results/GETA/genome.fasta
   rna_seq: toydata/RNASeq
   protein: results/PROTEIN/merged_rmdup_proteins.fasta
-  anot_gff: results/complete_draft.gff3
+  anot_gff: results/PREFILTER/Sylvan.gff3
   augustus_gff: results/GETA/Augustus/augustus.gff3
   helixer_gff: results/AB_INITIO/Helixer/helixer.gff3
   repeat_gff: results/GETA/RepeatMasker/genome.repeat.gff3
@@ -18,6 +18,28 @@ Input:
   RexDB: toydata/misc/Viridiplantae_v4.0.fasta
   busco_lin: eudicots_odb10
   chrom_regex: (^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)
+
+###############################################################################################
+#
+# Benchmark — GFF3 files to evaluate with BUSCO + OMArk
+# omark_db: path to OMAmer database (e.g., LUCA.h5). Leave empty to skip OMArk.
+# gff3_files: label → GFF3 path mapping
+#
+###############################################################################################
+
+Benchmark:
+  omark_db: /usr/local/src/omark_db/LUCA.h5
+  gff3_files:
+    tair10_chr4: toydata/backup/ath4.gff3
+    augustus: results/GETA/Augustus/augustus.gff3
+    helixer: results/AB_INITIO/Helixer/helixer.gff3
+    liftoff: results/LIFTOVER/LiftOff/liftoff.gff3
+    geta: results/GETA/geta.geneModels.gff3
+    geta_best: results/GETA/geta.bestGeneModels.gff3
+    miniprot: results/PROTEIN/merged_rmdup_proteins.fasta.miniprot.clean.gff3
+    evm: results/EVM/EVM.all.gff3
+    sylvan_prefilter: results/PREFILTER/Sylvan.gff3
+    sylvan_filtered: results/FILTER/filtered.gff3
 
 ###############################################################################################
 #

@@ -13,6 +13,7 @@ This tutorial walks you through running Sylvan on the included toy dataset (*A. 
 - [Step 5: Run Filter Pipeline](#step-5-run-filter-pipeline)
 - [Step 5b: Alternative Score-based Filter](#step-5b-alternative-score-based-filter)
 - [Step 5c: Feature Importance Analysis](#step-5c-feature-importance-analysis)
+- [Step 5d: Benchmark (BUSCO + OMArk)](#step-5d-benchmark-busco--omark)
 - [Step 6: Format Output (TidyGFF)](#step-6-format-output-tidygff)
 - [Step 7: Cleanup Intermediate Files](#step-7-cleanup-intermediate-files)
 - [Advanced Configuration](#advanced-configuration)
@@ -420,7 +421,7 @@ chrom_regex: (^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)
 
 | File | Description |
 |------|-------------|
-| `results/FILTER/filter.gff3` | Kept gene models |
+| `results/FILTER/filtered.gff3` | Kept gene models |
 | `results/FILTER/discard.gff3` | Discarded gene models |
 | `results/FILTER/data.tsv` | Feature matrix used by random forest |
 | `results/FILTER/keep_data.tsv` | Evidence data for kept genes |
@@ -487,11 +488,147 @@ Workflow summary:
 4. Incorporate the results (table/plot) into your manuscript or reviewer
    response.
 
+## Step 5d: Benchmark (BUSCO + OMArk)
+
+Sylvan includes a benchmarking workflow that evaluates multiple GFF3 annotations
+side-by-side using **BUSCO** (protein mode) and optionally **OMArk** (proteome
+quality). This helps compare the quality of individual evidence sources (Augustus,
+Helixer, LiftOff, GETA, EVM) against the final Sylvan output (pre-filter and
+post-filter).
+
+### Configuration
+
+The benchmark is configured in `config_filter.yml` (or its local equivalent):
+
+```yaml
+Benchmark:
+  omark_db: ""                          # Path to OMAmer database (e.g., LUCA.h5). Leave empty to skip OMArk.
+  gff3_files:
+    augustus: results/GETA/Augustus/augustus.gff3
+    helixer: results/AB_INITIO/Helixer/helixer.gff3
+    liftoff: results/LIFTOVER/LiftOff/liftoff.gff3
+    geta: results/GETA/geta.geneModels.gff3
+    evm: results/EVM/EVM.all.gff3
+    sylvan_prefilter: results/PREFILTER/Sylvan.gff3
+    sylvan_filtered: results/FILTER/filtered.gff3
+```
+
+Add or remove labels as needed. Each label maps to a GFF3 file that will be
+evaluated.
+
+### Running the benchmark
+
+**SLURM cluster:**
+```bash
+./bin/benchmark.sh
+```
+
+**Local execution (no SLURM):**
+```bash
+./bin/benchmark_local.sh
+```
+
+**Combined pipeline (annotate + filter + benchmark):**
+```bash
+./bin/run_local.sh          # runs all three phases
+```
+
+You can skip individual phases with environment variables:
+```bash
+SYLVAN_SKIP_ANNOTATE=1 SYLVAN_SKIP_FILTER=1 ./bin/run_local.sh   # benchmark only
+```
+
+### What the benchmark does
+
+1. **gff2pep** — Extracts protein sequences from each GFF3 using `gffread`,
+   cleans headers, and strips internal stop codons.
+2. **BUSCO** — Runs BUSCO in protein mode against the configured lineage
+   (e.g., `eudicots_odb10`).
+3. **OMArk** (optional) — Runs `omamer search` followed by `omark` for
+   proteome completeness and contamination assessment.
+4. **Summary** — Produces `results/BENCHMARK/benchmark_summary.tsv` with
+   gene counts, BUSCO scores (C/S/D/F/M), and OMArk metrics for all labels.
+
+### Output
+
+```
+results/BENCHMARK/
+  benchmark_summary.tsv          # Main comparison table
+  augustus.pep / .busco/          # Per-label protein and BUSCO results
+  helixer.pep / .busco/
+  ...
+  sylvan_filtered.pep / .busco/
+```
+
+### OMArk setup
+
+OMArk requires an OMAmer database file (e.g., `LUCA.h5`, ~6 GB). The pre-built
+Singularity image includes it at `/usr/local/src/omark_db/LUCA.h5`. If building
+your own container or running externally, download from the
+[OMAmer database page](https://omabrowser.org/oma/current/) and set
+`Benchmark.omark_db` in the config. If left empty, OMArk steps are skipped and
+only BUSCO is run.
+
+### Toydata benchmark results
+
+Running the benchmark on *A. thaliana* Chr4 toydata (eudicots_odb10, 16 cores, 62 GB RAM):
+
+**Runtime:**
+
+| Step | Wall-clock time | Notes |
+|------|----------------|-------|
+| gff2pep (9 labels) | < 1 s | Parallel protein extraction |
+| BUSCO (9 labels) | ~5 min | 4 parallel, protein mode |
+| omamer search (9 labels) | ~3 min | 4 parallel, LUCA.h5 database |
+| omark (9 labels) | ~10 min | Serialized (ete3 SQLite lock) |
+| **Total (BUSCO only)** | **~5 min** | |
+| **Total (BUSCO + OMArk)** | **~20 min** | |
+
+**BUSCO results:**
+
+| Label | Genes | C% | S% | D% | F% | M% | n |
+|-------|------:|---:|---:|---:|---:|---:|--:|
+| **TAIR10 (reference)** | **7,426** | **16.7** | **9.8** | **6.9** | **0.3** | **83.0** | **2,326** |
+| augustus | 4,444 | 16.6 | 15.3 | 1.3 | 0.3 | 83.1 | 2,326 |
+| helixer | 4,157 | 16.5 | 15.8 | 0.7 | 0.5 | 83.0 | 2,326 |
+| liftoff | 11,149 | 16.7 | 9.8 | 6.9 | 0.3 | 83.0 | 2,326 |
+| geta | 4,186 | 16.6 | 15.3 | 1.3 | 0.3 | 83.1 | 2,326 |
+| geta_best | 4,186 | 16.6 | 15.9 | 0.7 | 0.3 | 83.1 | 2,326 |
+| miniprot | 0 | 16.8 | 0.3 | 16.5 | 0.4 | 82.8 | 2,326 |
+| evm | 10,625 | 7.3 | 6.9 | 0.3 | 0.4 | 92.3 | 2,326 |
+| sylvan_prefilter | 5,392 | 8.0 | 7.2 | 0.8 | 0.5 | 91.6 | 2,326 |
+| sylvan_filtered | 2,256 | 8.0 | 7.2 | 0.8 | 0.4 | 91.6 | 2,326 |
+
+**OMArk results:**
+
+| Label | Consistent% | Inconsistent% | Contamination% | Unknown% |
+|-------|------------:|--------------:|---------------:|---------:|
+| **TAIR10 (reference)** | **95.82** | **0.50** | **0.00** | **3.68** |
+| augustus | 92.10 | 1.43 | 0.00 | 6.47 |
+| helixer | 95.02 | 0.48 | 0.00 | 4.50 |
+| liftoff | 94.35 | 0.57 | 0.00 | 5.08 |
+| geta | 94.58 | 0.83 | 0.00 | 4.59 |
+| geta_best | 94.51 | 0.84 | 0.00 | 4.66 |
+| miniprot | 95.78 | 1.23 | 0.00 | 2.99 |
+| evm | 45.77 | 2.67 | 0.00 | 51.56 |
+| sylvan_prefilter | 48.97 | 2.58 | 0.00 | 48.45 |
+| sylvan_filtered | 84.96 | 0.97 | 0.00 | 14.08 |
+
+> **Notes:**
+> - **TAIR10 (reference)** is the Araport11/TAIR10 annotation for Chr4 (7,426 protein-coding
+>   transcripts including TE genes). This serves as the ground truth for comparison.
+> - Low BUSCO C% is expected for single-chromosome data — only ~17% of eudicot BUSCOs
+>   map to Chr4. The reference TAIR10 itself shows 16.7% C, confirming this ceiling.
+> - High "Unknown" in EVM/prefilter OMArk reflects partial gene models that lack
+>   OMAmer hits. Filtering (sylvan_filtered) removes these, raising Consistent% from
+>   49% to 85%.
+> - 0% Contamination confirms all gene models map to *Arabidopsis thaliana*.
+
 ## Step 6: Format Output (TidyGFF)
 
 ```bash
 singularity exec sylvan.sif python bin/TidyGFF.py \
-  Ath4 results/FILTER/filter.gff3 \
+  Ath4 results/FILTER/filtered.gff3 \
   --out Ath4_v1.0 \
   --splice-name t \
   --justify 5 \
@@ -516,7 +653,7 @@ After **both** annotation and filter phases have completed successfully, run the
 - Temporary PASA and HMM files
 
 **What it preserves:**
-- Final outputs (`complete_draft.gff3`, `FILTER/`)
+- Final outputs (`PREFILTER/Sylvan.gff3`, `FILTER/`)
 - Log files (`results/logs/`)
 - Configuration files, Singularity images, and pipeline scripts
 - LncDC database files
@@ -747,14 +884,14 @@ For comparison, the official TAIR10 annotation of *Arabidopsis thaliana* (Col-0)
 
 Running the Sylvan pipeline on the Chr4 toy dataset produces the following results:
 
-**Annotation Phase (complete_draft.gff3):**
+**Annotation Phase (PREFILTER/Sylvan.gff3):**
 
 | Metric | Count |
 |--------|-------|
 | Total genes | 5,720 |
 | Total mRNA | 5,800 |
 
-**Filter Phase (filter.gff3):**
+**Filter Phase (filtered.gff3):**
 
 | Metric | Count |
 |--------|-------|
@@ -764,7 +901,7 @@ Running the Sylvan pipeline on the Chr4 toy dataset produces the following resul
 | mRNA discarded | 1,966 |
 
 **Output files:**
-- `results/FILTER/filter.gff3` - Kept gene models
+- `results/FILTER/filtered.gff3` - Kept gene models
 - `results/FILTER/discard.gff3` - Discarded gene models
 - `results/FILTER/data.tsv` - Feature matrix used by random forest (input to feature importance analysis)
 - `results/FILTER/keep_data.tsv` - Evidence data for kept genes
@@ -772,7 +909,7 @@ Running the Sylvan pipeline on the Chr4 toy dataset produces the following resul
 - `results/FILTER/{prefix}.cdna` - Extracted transcript sequences
 - `results/FILTER/{prefix}.pep` - Extracted peptide sequences
 - `results/FILTER/lncrna_predict.csv` - lncDC long non-coding RNA predictions
-- `results/complete_draft.gff3.map` - ID mapping between original and new IDs
+- `results/PREFILTER/Sylvan.gff3.map` - ID mapping between original and new IDs
 
 > **Comparison:** The 3,756 kept genes represents ~91% of TAIR10's 4,124 protein-coding genes on Chr4. The higher initial count (5,720) includes transposable elements (TAIR10 has 711 TE genes) and low-confidence predictions that are filtered out.
 
@@ -1059,24 +1196,26 @@ During local testing on the toy dataset, 17 issues were identified and fixed. Th
 
 ### Local Runtime Benchmark (Toy Data)
 
-Measured on the local test environment above (16 cores, 62 GB RAM, single machine):
+Measured on the local test environment above (16 cores, 62 GB RAM, single machine) with
+Sylvan container v3 (CUDA 12.2):
 
-| Phase | Wall-clock time | Notes |
-|-------|----------------|-------|
-| Phase 1 — Annotate | ~12 hours | 157 steps, 16 cores |
-| Helixer | skipped | CUDA mismatch (empty output) |
+| Phase | Wall-clock time | Steps | Notes |
+|-------|----------------|-------|-------|
+| Phase 1 — Annotate | ~8 hours | 228 | 16 cores, Helixer + Augustus + EVM |
+| Phase 2 — Filter | ~22 min | 94 | RF filtering, BUSCO, PfamScan |
+| Phase 3 — Benchmark (BUSCO only) | ~5 min | 28 | BUSCO protein mode, 9 GFF3 files |
+| Phase 3 — Benchmark (BUSCO + OMArk) | ~20 min | 46 | + omamer search + omark (serialized) |
+| **Total (BUSCO only)** | **~8.5 hours** | **350** | |
+| **Total (BUSCO + OMArk)** | **~8.7 hours** | **368** | |
 
-**Comparison with HPC:**
+> Helixer now produces real output with the CUDA 12.2 container (previously
+> produced 0 genes with CUDA 11.2). See [Step 5d](#step-5d-benchmark-busco--omark)
+> for full BUSCO and OMArk results.
 
-| Environment | Cores | Phase 1 time |
-|-------------|-------|-------------|
-| HPC (4 nodes, 256 CPUs, V100 GPU) | 256 | 4–8 h |
-| Local (single machine) | 16 | ~12 h |
-
-The local run takes longer due to limited parallelism (16 vs 256 cores) and sequential execution of rules that would run on separate nodes in SLURM mode. However, the pipeline completes successfully and produces identical results.
-
-**Output (local run):**
-- `results/complete_draft.gff3` — 5.8 MB, 61,588 lines, ~4,744 gene models
+**Key outputs (local run with v3 container):**
+- `results/PREFILTER/Sylvan.gff3` — 7.8 MB, 5,392 gene models
+- `results/FILTER/filtered.gff3` — 3.8 MB, 2,256 gene models
+- `results/BENCHMARK/benchmark_summary.tsv` — comparison table
 
 ---
 

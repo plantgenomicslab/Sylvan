@@ -93,7 +93,7 @@ def inputAll(wc):
 		f"{RESULTS_DIR}FILTER/augustus_coverage.bed",
 		f"{RESULTS_DIR}FILTER/helixer_coverage.bed",
 		f"{RESULTS_DIR}FILTER/repeat_coverage.bed",
-		f"{RESULTS_DIR}FILTER/filter.gff3",
+		f"{RESULTS_DIR}FILTER/filtered.gff3",
 		f"{RESULTS_DIR}FILTER/{pep_string}.cdna",
 		f"{RESULTS_DIR}FILTER/{pep_string}.pep"]
 		#f"{RESULTS_DIR}FILTER/busco_eudicots_odb10/run_eudicots_odb10/full_table.tsv"]
@@ -473,7 +473,7 @@ rule filter:
 		lncrna = f"{RESULTS_DIR}FILTER/lncrna_predict.csv",
 		busco = f"{RESULTS_DIR}FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv"
 	output:
-		f"{RESULTS_DIR}FILTER/filter.gff3"
+		f"{RESULTS_DIR}FILTER/filtered.gff3"
 	params:
 		anot_gff = config_dict["Input"]["anot_gff"],
 		tpm = config_dict["Cutoff"]["tpm"],

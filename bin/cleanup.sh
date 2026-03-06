@@ -16,7 +16,7 @@ snakemake --list-untracked -s bin/Snakefile_annotate 2>&1 | \
   grep -v README.md | \
   grep -v LICENSE | \
   grep -v FILTER | \
-  grep -v complete_draft | \
+  grep -v PREFILTER | \
   grep -v logs | \
   xargs -r rm -f
 
