@@ -102,6 +102,7 @@ Semi-supervised random forest filtering of draft gene models:
 | `SYLVAN_CONFIG` | Override annotate config path (default: `config/config_annotate.yml`) |
 | `SYLVAN_FILTER_CONFIG` | Override filter config path |
 | `SYLVAN_RESULTS_DIR` | Override results directory |
+| `SYLVAN_SINGULARITY_ARGS` | Override singularity args (default: `--nv -B /data/gpfs` or `--nv -B $(pwd) ...`) |
 | `TMPDIR` | Set automatically to `$(pwd)/results/TMP` by entry scripts |
 
 ### Execution Model

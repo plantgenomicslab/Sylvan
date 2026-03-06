@@ -56,8 +56,10 @@ Input:
 # - memory: Recommend 4g per thread (e.g., 48 threads = 192g)
 
 __default__:
-  account: placeholder                  # SLURM account (e.g., cpu-s1-pgl-0). Set to "" if not required.
-  partition: placeholder                # SLURM partition (e.g., cpu-s1-pgl-0). Set to "" if not required.
+  account: placeholder                  # SLURM account (e.g., cpu-s1-pgl-0).
+                                        # Set to "" or "placeholder" to skip -A flag (for clusters that don't require it).
+  partition: placeholder                # SLURM partition (e.g., cpu-s1-pgl-0).
+                                        # Set to "" or "placeholder" to skip -p flag (for clusters that don't require it).
   memory: 4g
   name: "{rule}.{wildcards}"
   ncpus: 1
@@ -66,10 +68,18 @@ __default__:
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
   extra_args: ""                          # Extra sbatch flags (e.g., "--export=ALL")
+
+# --- GPU rule: Helixer ---
+# Helixer uses TensorFlow and benefits greatly from GPU acceleration.
+# Without GPU, it falls back to CPU automatically (much slower).
+#
+# Option A: GPU available — uncomment account/partition/extra_args as needed
+# Option B: CPU only — leave extra_args as "" (Helixer runs on CPU, slower)
+# Option C: No SLURM account required — set account/partition to "" or omit them
 helixer:
-  #account: gpu-account                # Uncomment for GPU-specific SLURM account
-  #partition: gpu-partition            # Uncomment for GPU-specific SLURM partition
-  #extra_args: "--gres=gpu:1"         # Uncomment for GPU resources
+  #account: gpu-account                # GPU-specific SLURM account (if different from __default__)
+  #partition: gpu-partition             # GPU-specific SLURM partition (e.g., gpu-s1-pgl-0)
+  #extra_args: "--gres=gpu:1"          # Request 1 GPU from SLURM. Remove for CPU-only.
   ncpus: 12
   threads: 12
   memory: 48g

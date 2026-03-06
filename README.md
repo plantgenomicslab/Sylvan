@@ -41,10 +41,11 @@ The toy data experiment uses *A. thaliana* chromosome 4 with 12 paired-end RNA-s
 ### Requirements
 
 - Linux (tested on CentOS/RHEL, Ubuntu)
-- Singularity 3.x+
+- Singularity/Apptainer 3.x+
 - Conda/Mamba
 - SLURM for cluster execution (optional — see [Local Execution](#local-execution-without-slurm) for running without HPC)
 - Git LFS (for toy data)
+- **GPU (optional):** NVIDIA GPU with driver >= 525.60.13 for Helixer acceleration. See [GPU / CUDA Compatibility](#gpu--cuda-compatibility) for details.
 
 ### Dependencies
 
@@ -70,7 +71,7 @@ conda create -n sylvan -c conda-forge -c bioconda python=3.11 snakemake=7 -y
 conda activate sylvan
 
 # Download Singularity image
-singularity pull --arch amd64 library://plantgenomicslab/sylvan/sylvan.sif:latest
+singularity pull --arch amd64 sylvan.sif library://wyim/sylvan/sylvan:latest
 
 # Clone repository (with Git LFS for toy data)
 git lfs install
@@ -82,7 +83,65 @@ git clone https://github.com/plantgenomicslab/Sylvan.git
 ```bash
 cd Sylvan/singularity
 sudo singularity build sylvan.sif Sylvan.def
+# Or without root (requires user namespaces):
+singularity build --fakeroot sylvan.sif Sylvan.def
 ```
+
+### GPU / CUDA Compatibility
+
+Sylvan uses **Helixer** (TensorFlow-based deep learning gene predictor) which benefits significantly from GPU acceleration. The container is designed to work across different GPU hardware without CUDA version conflicts.
+
+**How it works:**
+
+The Singularity container bundles `tensorflow` with individual NVIDIA CUDA pip packages (`nvidia-cuda-runtime-cu12`, `nvidia-cudnn-cu12`, `nvidia-cublas-cu12`, etc.). This means:
+
+- **No host CUDA toolkit required** — only the NVIDIA driver is needed on the host
+- **No GPU-model-specific builds** — the same container works on V100, A100, H100, etc.
+- **Automatic CPU fallback** — if no GPU is detected, TensorFlow runs on CPU transparently (slower but functional)
+
+| Component | Location | Required |
+|-----------|----------|----------|
+| NVIDIA driver | Host (>= 525.60.13) | For GPU only |
+| CUDA runtime | Container (pip: nvidia-cuda-runtime-cu12) | Bundled |
+| cuDNN | Container (pip: nvidia-cudnn-cu12) | Bundled |
+| TensorFlow 2.15 | Container (helixer conda env) | Bundled |
+
+**Singularity `--nv` flag:**
+
+All entry scripts pass `--nv` to Singularity, which bind-mounts the host's NVIDIA driver libraries into the container. This is safe to include even on CPU-only nodes — Singularity silently skips `--nv` if no GPU is found.
+
+```bash
+# Default: GPU passthrough enabled (falls back to CPU if no GPU)
+./bin/annotate.sh
+
+# Override singularity args if needed (e.g., custom bind paths, no --nv)
+SYLVAN_SINGULARITY_ARGS="--nv -B /scratch" ./bin/annotate.sh
+```
+
+**SLURM GPU configuration:**
+
+For HPC clusters with separate CPU and GPU partitions, configure the `helixer` rule in `config_annotate.yml` to request GPU resources:
+
+```yaml
+helixer:
+  account: gpu-account          # GPU-specific SLURM account (if different)
+  partition: gpu-partition       # GPU partition (e.g., gpu-s1-pgl-0)
+  extra_args: "--gres=gpu:1"    # Request 1 GPU
+  ncpus: 12
+  memory: 48g
+```
+
+All other rules run on CPU nodes using the `__default__` account/partition. Only the `helixer` rule needs GPU access.
+
+**Compatibility matrix (tested):**
+
+| Host GPU | Host Driver | Container CUDA | Status |
+|----------|-------------|----------------|--------|
+| NVIDIA A100 | >= 525.60.13 | 12.x (bundled) | Supported |
+| NVIDIA V100 | >= 525.60.13 | 12.x (bundled) | Supported |
+| No GPU | N/A | N/A | CPU fallback (slower) |
+
+> **Note:** The minimum driver version 525.60.13 corresponds to CUDA 12.0 forward compatibility. Older drivers will trigger CPU fallback. Run `nvidia-smi` on the host to check your driver version.
 
 ---
 
@@ -623,7 +682,7 @@ results/
 ├── EVM/                         # EvidenceModeler output
 │
 ├── FILTER/
-│   ├── filter.gff3              # Kept gene models
+│   ├── filtered.gff3            # Kept gene models
 │   ├── discard.gff3             # Discarded gene models
 │   ├── data.tsv                 # Feature matrix (input to random forest)
 │   ├── keep_data.tsv            # Evidence data for kept genes

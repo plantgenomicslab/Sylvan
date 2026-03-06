@@ -26,12 +26,15 @@ for cfg in "$SYLVAN_FILTER_CONFIG" "$SYLVAN_FILTER_CLUSTER_CONFIG"; do
 	fi
 done
 
+# Singularity args: --nv enables NVIDIA GPU passthrough (safe to include even without GPU)
+SINGULARITY_ARGS="${SYLVAN_SINGULARITY_ARGS:---nv -B /data/gpfs}"
+
 trap 'echo ""; echo "=== Log files: results/logs/{rule}_{wildcards}.err ==="; echo "Recent: ls -lt results/logs/*.err | head"' EXIT
 
 snakemake -p \
 	--rerun-incomplete \
 	--use-singularity \
-	--singularity-args "--nv -B /data/gpfs" \
+	--singularity-args "$SINGULARITY_ARGS" \
 	--keep-going \
 	--keep-incomplete \
 	--stats benchmark_runtime_stats.json \
