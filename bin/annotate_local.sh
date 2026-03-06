@@ -18,10 +18,11 @@ export TMPDIR="$(pwd)/results/TMP"
 # Pipeline config: input paths, tool parameters, thread counts
 export SYLVAN_CONFIG="${SYLVAN_CONFIG:-toydata/config/config_annotate_local.yml}"
 
-# Singularity args for run: blocks that call shell() directly
+# Singularity args: --nv enables NVIDIA GPU passthrough (safe to include even without GPU)
 # Bind both symlink path and resolved real path for container access
 REAL_PWD="$(pwd -P)"
-export SNAKEMAKE_SINGULARITY_ARGS="--nv -B $(pwd) -B ${REAL_PWD} -B /tmp"
+SINGULARITY_ARGS="${SYLVAN_SINGULARITY_ARGS:---nv -B $(pwd) -B ${REAL_PWD} -B /tmp}"
+export SNAKEMAKE_SINGULARITY_ARGS="$SINGULARITY_ARGS"
 
 # Verify config file exists
 if [ ! -f "$SYLVAN_CONFIG" ]; then
@@ -37,7 +38,7 @@ trap 'echo ""; echo "=== Log files: results/logs/{rule}_{wildcards}.err ==="; ec
 snakemake -p \
 	--rerun-incomplete \
 	--use-singularity \
-	--singularity-args "--nv -B $(pwd) -B ${REAL_PWD} -B /tmp" \
+	--singularity-args "$SINGULARITY_ARGS" \
 	--keep-going \
 	--keep-incomplete \
 	--stats annotation_runtime_stats.json \

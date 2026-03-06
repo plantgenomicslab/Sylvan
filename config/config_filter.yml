@@ -89,8 +89,10 @@ Threads:
 
 
 __default__:
-  account: placeholder     # SLURM account (e.g., cpu-s1-pgl-0). Set to "" if not required.
-  partition: placeholder   # SLURM partition (e.g., cpu-s1-pgl-0). Set to "" if not required.
+  account: placeholder     # SLURM account (e.g., cpu-s1-pgl-0).
+                           # Set to "" or "placeholder" to skip -A flag (for clusters that don't require it).
+  partition: placeholder   # SLURM partition (e.g., cpu-s1-pgl-0).
+                           # Set to "" or "placeholder" to skip -p flag (for clusters that don't require it).
   memory: 16g
   name: "{rule}.{wildcards}"
   ncpus: 4

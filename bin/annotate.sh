@@ -14,6 +14,10 @@ export SYLVAN_CONFIG="${SYLVAN_CONFIG:-config/config_annotate.yml}"
 # Defaults to SYLVAN_CONFIG for single-file mode. Set to a separate cluster YAML to split concerns.
 export SYLVAN_CLUSTER_CONFIG="${SYLVAN_CLUSTER_CONFIG:-$SYLVAN_CONFIG}"
 
+# Singularity args: --nv enables NVIDIA GPU passthrough (safe to include even without GPU)
+# Override with SYLVAN_SINGULARITY_ARGS to change bind paths or remove --nv
+SINGULARITY_ARGS="${SYLVAN_SINGULARITY_ARGS:---nv -B /data/gpfs}"
+
 # Cluster submit command — account and partition are optional (skipped when empty or 'placeholder')
 CLUSTER_CMD="python3 bin/cluster_submit.py {cluster.nodes} {cluster.memory} {cluster.ncpus} {cluster.name} {cluster.account} {cluster.partition} {cluster.time} {cluster.output} {cluster.error} {cluster.extra_args}"
 
@@ -32,7 +36,7 @@ trap 'echo ""; echo "=== Log files: results/logs/{rule}_{wildcards}.err ==="; ec
 snakemake -p \
 	--rerun-incomplete \
 	--use-singularity \
-	--singularity-args "--nv -B /data/gpfs" \
+	--singularity-args "$SINGULARITY_ARGS" \
 	--keep-going \
 	--keep-incomplete \
 	--stats annotation_runtime_stats.json \

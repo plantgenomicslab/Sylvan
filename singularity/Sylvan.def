@@ -169,8 +169,15 @@ channels:
   - bioconda
 dependencies:
   - python=3.10
-  - tensorflow=2.15
   - h5py
+  - pip:
+    - tensorflow==2.15.0
+    - nvidia-cuda-runtime-cu12
+    - nvidia-cudnn-cu12
+    - nvidia-cublas-cu12
+    - nvidia-cufft-cu12
+    - nvidia-cusolver-cu12
+    - nvidia-cusparse-cu12
 YAMLEOF
 
 	cat > /tmp/envs/omark.yaml << 'YAMLEOF'

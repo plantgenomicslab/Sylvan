@@ -14,6 +14,9 @@ export SYLVAN_FILTER_CONFIG="${SYLVAN_FILTER_CONFIG:-config/config_filter.yml}"
 # Defaults to SYLVAN_FILTER_CONFIG for single-file mode. Set to a separate cluster YAML to split concerns.
 export SYLVAN_FILTER_CLUSTER_CONFIG="${SYLVAN_FILTER_CLUSTER_CONFIG:-$SYLVAN_FILTER_CONFIG}"
 
+# Singularity args: --nv enables NVIDIA GPU passthrough (safe to include even without GPU)
+SINGULARITY_ARGS="${SYLVAN_SINGULARITY_ARGS:---nv -B /data/gpfs}"
+
 # Cluster submit command — account and partition are optional (skipped when empty or 'placeholder')
 CLUSTER_CMD="python3 bin/cluster_submit.py {cluster.nodes} {cluster.memory} {cluster.ncpus} {cluster.name} {cluster.account} {cluster.partition} {cluster.time} {cluster.output} {cluster.error} {cluster.extra_args}"
 
@@ -32,7 +35,7 @@ snakemake -p --rerun-incomplete --cluster-config "$SYLVAN_FILTER_CLUSTER_CONFIG"
 		--rerun-triggers mtime \
 		--snakefile bin/Snakefile_filter \
 		--use-singularity \
-		--singularity-args "--nv -B /data/gpfs" \
+		--singularity-args "$SINGULARITY_ARGS" \
 		--keep-going \
 		--keep-incomplete \
 		--stats filter_runtime_stats.json \

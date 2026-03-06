@@ -502,12 +502,15 @@ The benchmark is configured in `config_filter.yml` (or its local equivalent):
 
 ```yaml
 Benchmark:
-  omark_db: ""                          # Path to OMAmer database (e.g., LUCA.h5). Leave empty to skip OMArk.
+  omark_db: /usr/local/src/omark_db/LUCA.h5   # OMAmer database. Leave empty to skip OMArk.
   gff3_files:
+    tair10_chr4: toydata/backup/ath4.gff3      # TAIR10 reference (ground truth)
     augustus: results/GETA/Augustus/augustus.gff3
     helixer: results/AB_INITIO/Helixer/helixer.gff3
     liftoff: results/LIFTOVER/LiftOff/liftoff.gff3
     geta: results/GETA/geta.geneModels.gff3
+    geta_best: results/GETA/geta.bestGeneModels.gff3
+    miniprot: results/PROTEIN/merged_rmdup_proteins.fasta.miniprot.clean.gff3
     evm: results/EVM/EVM.all.gff3
     sylvan_prefilter: results/PREFILTER/Sylvan.gff3
     sylvan_filtered: results/FILTER/filtered.gff3
@@ -577,10 +580,10 @@ Running the benchmark on *A. thaliana* Chr4 toydata (eudicots_odb10, 16 cores, 6
 
 | Step | Wall-clock time | Notes |
 |------|----------------|-------|
-| gff2pep (9 labels) | < 1 s | Parallel protein extraction |
-| BUSCO (9 labels) | ~5 min | 4 parallel, protein mode |
-| omamer search (9 labels) | ~3 min | 4 parallel, LUCA.h5 database |
-| omark (9 labels) | ~10 min | Serialized (ete3 SQLite lock) |
+| gff2pep (10 labels) | < 1 s | Parallel protein extraction |
+| BUSCO (10 labels) | ~5 min | 4 parallel, protein mode |
+| omamer search (10 labels) | ~3 min | 4 parallel, LUCA.h5 database |
+| omark (10 labels) | ~10 min | Serialized (ete3 SQLite lock) |
 | **Total (BUSCO only)** | **~5 min** | |
 | **Total (BUSCO + OMArk)** | **~20 min** | |
 
@@ -588,7 +591,7 @@ Running the benchmark on *A. thaliana* Chr4 toydata (eudicots_odb10, 16 cores, 6
 
 | Label | Genes | C% | S% | D% | F% | M% | n |
 |-------|------:|---:|---:|---:|---:|---:|--:|
-| **TAIR10 (reference)** | **7,426** | **16.7** | **9.8** | **6.9** | **0.3** | **83.0** | **2,326** |
+| **TAIR10 (reference)** | **10,878** | **16.7** | **9.8** | **6.9** | **0.3** | **83.0** | **2,326** |
 | augustus | 4,444 | 16.6 | 15.3 | 1.3 | 0.3 | 83.1 | 2,326 |
 | helixer | 4,157 | 16.5 | 15.8 | 0.7 | 0.5 | 83.0 | 2,326 |
 | liftoff | 11,149 | 16.7 | 9.8 | 6.9 | 0.3 | 83.0 | 2,326 |
@@ -615,8 +618,8 @@ Running the benchmark on *A. thaliana* Chr4 toydata (eudicots_odb10, 16 cores, 6
 | sylvan_filtered | 84.96 | 0.97 | 0.00 | 14.08 |
 
 > **Notes:**
-> - **TAIR10 (reference)** is the Araport11/TAIR10 annotation for Chr4 (7,426 protein-coding
->   transcripts including TE genes). This serves as the ground truth for comparison.
+> - **TAIR10 (reference)** is the Araport11/TAIR10 annotation for Chr4 (10,878 genes
+>   including TE genes; 7,425 proteins extracted by gffread). This serves as the ground truth.
 > - Low BUSCO C% is expected for single-chromosome data — only ~17% of eudicot BUSCOs
 >   map to Chr4. The reference TAIR10 itself shows 16.7% C, confirming this ceiling.
 > - High "Unknown" in EVM/prefilter OMArk reflects partial gene models that lack
@@ -1192,7 +1195,7 @@ During local testing on the toy dataset, 17 issues were identified and fixed. Th
 - `hmmscan` in `filter` env, not `genepred`
 
 **GPU/CUDA:**
-- Helixer requires matching CUDA versions between container and host. Container CUDA 11.2 vs host CUDA 12.6 caused TensorFlow to fail silently. The pipeline continues with empty Helixer output.
+- Container v4+ bundles TensorFlow with pip CUDA packages (`nvidia-cuda-runtime-cu12`, `nvidia-cudnn-cu12`), eliminating host CUDA dependency. Only the NVIDIA driver (>= 525.60.13) is needed on the host. The `--nv` flag is safe on CPU-only nodes (Singularity silently skips it).
 
 ### Local Runtime Benchmark (Toy Data)
 
@@ -1203,7 +1206,7 @@ Sylvan container v3 (CUDA 12.2):
 |-------|----------------|-------|-------|
 | Phase 1 — Annotate | ~8 hours | 228 | 16 cores, Helixer + Augustus + EVM |
 | Phase 2 — Filter | ~22 min | 94 | RF filtering, BUSCO, PfamScan |
-| Phase 3 — Benchmark (BUSCO only) | ~5 min | 28 | BUSCO protein mode, 9 GFF3 files |
+| Phase 3 — Benchmark (BUSCO only) | ~5 min | 28 | BUSCO protein mode, 10 GFF3 files |
 | Phase 3 — Benchmark (BUSCO + OMArk) | ~20 min | 46 | + omamer search + omark (serialized) |
 | **Total (BUSCO only)** | **~8.5 hours** | **350** | |
 | **Total (BUSCO + OMArk)** | **~8.7 hours** | **368** | |
