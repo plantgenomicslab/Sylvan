@@ -1,5 +1,5 @@
 BootStrap: docker
-From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
+From: nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
 
 %setup
 	ROOTFS="${SINGULARITY_ROOTFS:-$APPTAINER_ROOTFS}"
@@ -18,22 +18,22 @@ From: nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
 
 	# Install multiple software packages and their specific versions, including compilers, development libraries, and utilities
 	apt install -y \
-		make=4.2.1-1.2 \
-		g++=4:9.3.0-1ubuntu2 \
+		make \
+		g++ \
 		libbz2-dev \
 		liblzma-dev \
 		libparallel-forkmanager-perl \
-		genometools=1.6.1+ds-2 \
+		genometools \
 		wget \
 		vim \
 		unzip \
 		zlib1g \
 		zlib1g-dev \
 		curl \
-		python3-dev=3.8.2-0ubuntu2 \
+		python3-dev \
 		python3-pip \
 		git \
-		libhdf5-dev=1.10.4+repack-11ubuntu1 \
+		libhdf5-dev \
 		build-essential
 
 	# Remove unnecessary packages and dependencies that were automatically installed but are no longer needed
@@ -173,6 +173,15 @@ dependencies:
   - h5py
 YAMLEOF
 
+	cat > /tmp/envs/omark.yaml << 'YAMLEOF'
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - omark
+  - omamer
+YAMLEOF
+
 	cat > /tmp/envs/lncdc.yaml << 'YAMLEOF'
 channels:
   - conda-forge
@@ -192,7 +201,7 @@ YAMLEOF
 	echo "Verifying env YAML files in /tmp/envs/:"
 	ls -la /tmp/envs/
 
-	for env in base alignment genepred repeat annotation filter helixer lncdc; do
+	for env in base alignment genepred repeat annotation filter helixer omark lncdc; do
 		if [ ! -f /tmp/envs/${env}.yaml ]; then
 			echo "ERROR: /tmp/envs/${env}.yaml not found!"
 			exit 1
@@ -213,7 +222,7 @@ YAMLEOF
 
 	# Create symlinks so micromamba can find envs by name (for `micromamba activate {name}`)
 	mkdir -p /opt/mamba/envs
-	for env in base alignment genepred repeat annotation filter helixer lncdc; do
+	for env in base alignment genepred repeat annotation filter helixer omark lncdc; do
 		ln -s /opt/envs/$env /opt/mamba/envs/$env
 	done
 
@@ -241,6 +250,13 @@ YAMLEOF
 		https://raw.githubusercontent.com/wyim-pgl/genome_annotation_installations/main/Helixer_models/fungi_v0.3_a_0400.h5
 	wget -O /usr/local/src/Helixer/models/vertebrate.h5 \
 		https://raw.githubusercontent.com/wyim-pgl/genome_annotation_installations/main/Helixer_models/vertebrate_v0.3_a_0400.h5
+
+
+	# ---- Download OMAmer database (LUCA.h5) for OMArk ---- #
+	mkdir -p /usr/local/src/omark_db
+	wget --retry-connrefused --waitretry=1 --read-timeout=60 --timeout=30 --tries=5 \
+		-O /usr/local/src/omark_db/LUCA.h5 \
+		https://omabrowser.org/All/LUCA.h5
 
 
 	# ---- Install HelixerPost (Rust binary) ---- #

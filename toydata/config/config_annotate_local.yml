@@ -9,12 +9,12 @@ Input:
   genome: toydata/genome/ath4.fasta        # Use uncompressed fasta directly (LFS .gz not available)
   rna_seq: toydata/RNASeq
   proteins: toydata/cds_aa/neighbor.aa
-  singularity: singularity/Sylvan_sandbox_v2
+  singularity: singularity/Sylvan_sandbox_v3
   liftoff:
     neighbor_gff: toydata/neighbor_gff3
     neighbor_fasta: toydata/neighbor_genome
   helixer_model: land_plant
-  helixer_model_dir: ""                    # Use container default (/usr/local/src/Helixer/models/)
+  helixer_model_dir: ""                    # Empty = container default (/usr/local/src/Helixer/models/)
   helixer_subseq: 64152
   geta:
     RM_species: Embryophyta

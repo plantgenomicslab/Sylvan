@@ -70,7 +70,7 @@ conda create -n sylvan -c conda-forge -c bioconda python=3.11 snakemake=7 -y
 conda activate sylvan
 
 # Download Singularity image
-singularity pull --arch amd64 sylvan.sif library://wyim/sylvan/sylvan:latest
+singularity pull --arch amd64 library://plantgenomicslab/sylvan/sylvan.sif:latest
 
 # Clone repository (with Git LFS for toy data)
 git lfs install
@@ -142,7 +142,7 @@ The annotation phase generates gene models by integrating multiple configurable 
 - **AGAT**
   - Final GFF3 format cleaning and validation
 
-**Output:** `results/complete_draft.gff3`
+**Output:** `results/PREFILTER/Sylvan.gff3`
 
 ### Phase 2: Semi-Supervised Random Forest Filter
 
@@ -167,7 +167,7 @@ The following features are computed for every gene model in the draft annotation
 3. **Iterative refinement**: High-confidence predictions (above the `--recycle` threshold, default 0.95) are added back to the training set, and the model is retrained. This repeats for up to `--max-iter` iterations (default 5) or until convergence
 
 **Output files:**
-- `results/FILTER/filter.gff3` — Kept gene models
+- `results/FILTER/filtered.gff3` — Kept gene models
 - `results/FILTER/discard.gff3` — Discarded gene models
 - `results/FILTER/data.tsv` — Feature matrix used by random forest
 - `results/FILTER/keep_data.tsv` — Evidence data for kept genes
@@ -238,7 +238,7 @@ snakemake -n --snakefile bin/Snakefile_annotate
 
 See [Local Execution](#local-execution-without-slurm) for details.
 
-**Output:** `results/complete_draft.gff3`
+**Output:** `results/PREFILTER/Sylvan.gff3`
 
 ---
 
@@ -250,7 +250,7 @@ This section describes the inputs and commands for the filter pipeline. All inpu
 
 | Input | Description | Config Field |
 |-------|-------------|--------------|
-| Annotated GFF | Output from Annotate phase (`results/complete_draft.gff3`) | `anot_gff` |
+| Annotated GFF | Output from Annotate phase (`results/PREFILTER/Sylvan.gff3`) | `anot_gff` |
 | Genome | Same as Annotate phase | `genome` |
 | RNA-seq data | Same as Annotate phase | `rna_seq` |
 | Protein sequences | Same as Annotate phase | `protein` |
@@ -291,7 +291,40 @@ sbatch -A [account] -p [partition] -c 1 --mem=4g \
 ./bin/filter_toydata.sh
 ```
 
-**Output:** `results/FILTER/filter.gff3`
+**Output:** `results/FILTER/filtered.gff3`
+
+### Phase 3: Benchmark (Optional)
+
+Compare annotation quality across all pipeline stages using BUSCO and OMArk:
+
+```bash
+# Configure benchmark targets in config_filter.yml (Benchmark section)
+# Then run:
+./bin/benchmark_local.sh        # local
+./bin/benchmark.sh              # SLURM
+```
+
+This benchmarks each GFF3 listed in `Benchmark.gff3_files` by extracting proteins and running BUSCO protein-mode (and optionally OMArk). Results are saved to `results/BENCHMARK/benchmark_summary.tsv`.
+
+**OMArk setup (optional):** OMArk requires an OMAmer database (~6 GB). The pre-built Singularity image includes LUCA.h5 at `/usr/local/src/omark_db/LUCA.h5`. If building your own container or running outside the container, download it manually:
+```bash
+wget https://omabrowser.org/All/LUCA.h5 -O path/to/LUCA.h5
+```
+Then set `Benchmark.omark_db` in `config_filter.yml`. Leave empty to skip OMArk and run BUSCO only.
+
+**Output:** `results/BENCHMARK/benchmark_summary.tsv`
+
+> See the [Wiki — Step 5d](Wiki.md#step-5d-benchmark-busco--omark) for toydata benchmark results and detailed configuration.
+
+### Combined Pipeline
+
+Run all phases (annotate + filter + benchmark) sequentially:
+
+```bash
+./bin/run_local.sh              # all three phases
+SYLVAN_SKIP_ANNOTATE=1 ./bin/run_local.sh   # skip Phase 1
+SYLVAN_SKIP_BENCHMARK=1 ./bin/run_local.sh  # skip Phase 3
+```
 
 ### Feature Importance Test
 
@@ -564,7 +597,8 @@ All outputs are organized under `results/`:
 
 ```
 results/
-├── complete_draft.gff3          # Annotate phase final output
+├── PREFILTER/
+│   └── Sylvan.gff3              # Annotate phase final output
 │
 ├── AB_INITIO/
 │   └── Helixer/                 # Helixer predictions
@@ -602,6 +636,12 @@ results/
 │   ├── busco_*/                 # BUSCO results (monitoring only)
 │   └── lncrna_predict.csv       # lncDC predictions
 │
+├── BENCHMARK/                   # Quality benchmarking (optional)
+│   ├── benchmark_summary.tsv    # Combined BUSCO + OMArk table
+│   ├── {label}.pep              # Extracted proteins per GFF3
+│   ├── {label}.busco/           # BUSCO results per GFF3
+│   └── {label}.omark/           # OMArk results per GFF3 (if omark_db set)
+│
 ├── config/                      # Runtime config copies
 │
 └── logs/                        # SLURM job logs
@@ -615,7 +655,7 @@ Use TidyGFF to prepare annotations for public distribution:
 
 ```bash
 singularity exec sylvan.sif python bin/TidyGFF.py \
-  MySpecies results/FILTER/filter.gff3 \
+  MySpecies results/FILTER/filtered.gff3 \
   --out MySpecies_v1.0 --splice-name t --justify 5 --sort \
   --chrom-regex "^Chr" --source Sylvan
 ```
@@ -663,7 +703,7 @@ snakemake --report report.html --snakefile bin/Snakefile_annotate
 ### Cleanup
 
 `bin/cleanup.sh` removes intermediate files generated during the annotation phase while preserving:
-- Final outputs (`complete_draft.gff3`, `filter.gff3`)
+- Final outputs (`PREFILTER/Sylvan.gff3`, `FILTER/filtered.gff3`)
 - Log files (`results/logs/`)
 - Configuration files
 - Filter phase outputs (`FILTER/`)

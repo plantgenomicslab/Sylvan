@@ -1,0 +1,182 @@
+"""Snakefile_benchmark — BUSCO + OMArk benchmarking for multiple GFF3 annotations.
+
+Benchmarks all GFF3 files listed in config['Benchmark']['gff3_files'] by:
+1. Extracting proteins with gffread
+2. Running BUSCO in protein mode
+3. Running OMAmer search + OMArk
+
+Outputs a summary table at results/BENCHMARK/benchmark_summary.tsv
+"""
+
+import yaml, sys, os
+
+RESULTS_DIR = os.environ.get("SYLVAN_RESULTS_DIR", "results/")
+
+config_file_path = os.environ.get('SYLVAN_FILTER_CONFIG', 'config_filter.yml')
+with open(config_file_path, 'r') as config_file:
+	try:
+		config_dict = yaml.safe_load(config_file)
+	except yaml.YAMLError as e:
+		sys.exit("Could not load configs! Check config.yaml ...")
+
+singularity: config_dict.get("Input", {}).get("singularity", "") or config_dict.get("Singularity", "")
+shell.prefix("set +u; eval \"$(/usr/local/bin/micromamba shell hook -s bash)\"; set -u; ")
+
+genome = config_dict["Input"]["genome"]
+busco_lin = config_dict["Input"]["busco_lin"]
+omark_db = config_dict.get("Benchmark", {}).get("omark_db", "")
+gff3_files = config_dict.get("Benchmark", {}).get("gff3_files", {})
+
+# Validate
+if not gff3_files:
+	sys.exit("No GFF3 files specified in Benchmark.gff3_files config section")
+
+os.makedirs(f"{RESULTS_DIR}BENCHMARK", exist_ok=True)
+os.makedirs(f"{RESULTS_DIR}logs", exist_ok=True)
+
+# Labels are the keys (e.g., "augustus", "helixer", "sylvan_prefilter", "sylvan_filtered")
+LABELS = list(gff3_files.keys())
+
+def all_outputs(wc):
+	outputs = []
+	for label in LABELS:
+		outputs.append(f"{RESULTS_DIR}BENCHMARK/{label}.busco/run_{busco_lin}/full_table.tsv")
+		if omark_db:
+			outputs.append(f"{RESULTS_DIR}BENCHMARK/{label}.omark/{label}.sum")
+	outputs.append(f"{RESULTS_DIR}BENCHMARK/benchmark_summary.tsv")
+	return outputs
+
+rule all:
+	input: all_outputs
+
+def get_gff3_path(wildcards):
+	return gff3_files[wildcards.label]
+
+rule gff2pep:
+	input: gff = get_gff3_path
+	output: f"{RESULTS_DIR}BENCHMARK/{{label}}.pep"
+	params:
+		genome = genome
+	shell:"""
+		micromamba activate annotation
+		if [ -s {input.gff} ]; then
+			gffread {input.gff} -g {params.genome} --force-exons -S -y {output}.raw || true
+			if [ -s {output}.raw ]; then
+				# Clean headers (remove "/" that crashes BUSCO) and strip internal stop codons
+				awk '
+					/^>/ {{ gsub("/","_"); gsub(/ .*/, ""); print; next }}
+					{{ gsub(/\\./,""); print }}
+				' {output}.raw > {output}
+				rm -f {output}.raw
+			else
+				touch {output}
+			fi
+		else
+			touch {output}
+		fi
+		"""
+
+rule benchmark_busco:
+	input: f"{RESULTS_DIR}BENCHMARK/{{label}}.pep"
+	output: f"{RESULTS_DIR}BENCHMARK/{{label}}.busco/run_{busco_lin}/full_table.tsv"
+	params:
+		busco_lin = busco_lin,
+		out_dir = f"{RESULTS_DIR}BENCHMARK/{{label}}.busco"
+	shell:"""
+		micromamba activate filter
+		if [ -s {input} ]; then
+			busco -i {input} -l {params.busco_lin} -o {params.out_dir} -m protein -f
+		else
+			mkdir -p {params.out_dir}/run_{params.busco_lin}
+			echo "# Empty input - no BUSCO results" > {output}
+		fi
+		"""
+
+rule omamer_search:
+	input: f"{RESULTS_DIR}BENCHMARK/{{label}}.pep"
+	output: f"{RESULTS_DIR}BENCHMARK/{{label}}.omamer"
+	params:
+		db = omark_db
+	shell:"""
+		micromamba activate omark
+		if [ -s {input} ] && [ -n "{params.db}" ] && [ -f "{params.db}" ]; then
+			omamer search --db {params.db} --query {input} --out {output}
+		else
+			touch {output}
+		fi
+		"""
+
+rule omark:
+	input: f"{RESULTS_DIR}BENCHMARK/{{label}}.omamer"
+	output: f"{RESULTS_DIR}BENCHMARK/{{label}}.omark/{{label}}.sum"
+	resources: omark_lock=1  # Serialize: ete3 NCBITaxa writes to shared ~/.etetoolkit/taxa.sqlite
+	params:
+		db = omark_db,
+		out_dir = f"{RESULTS_DIR}BENCHMARK/{{label}}.omark"
+	shell:"""
+		micromamba activate omark
+		if [ -s {input} ] && [ -n "{params.db}" ] && [ -f "{params.db}" ]; then
+			omark -f {input} -d {params.db} -o {params.out_dir}
+		else
+			mkdir -p {params.out_dir}
+			echo "# Empty input - no OMArk results" > {output}
+		fi
+		"""
+
+rule benchmark_summary:
+	input:
+		busco = expand(f"{RESULTS_DIR}BENCHMARK/{{label}}.busco/run_{busco_lin}/full_table.tsv", label=LABELS),
+		omark = expand(f"{RESULTS_DIR}BENCHMARK/{{label}}.omark/{{label}}.sum", label=LABELS) if omark_db else []
+	output: f"{RESULTS_DIR}BENCHMARK/benchmark_summary.tsv"
+	run:
+		import re
+
+		rows = []
+		for label in LABELS:
+			busco_file = f"{RESULTS_DIR}BENCHMARK/{label}.busco/short_summary.specific.{busco_lin}.{label}.busco.txt"
+			busco_alt = f"{RESULTS_DIR}BENCHMARK/{label}.busco/short_summary.txt"
+
+			busco_c, busco_s, busco_d, busco_f, busco_m, busco_n = "N/A", "N/A", "N/A", "N/A", "N/A", "N/A"
+
+			# Try to parse BUSCO short summary
+			for bfile in [busco_file, busco_alt]:
+				if os.path.exists(bfile):
+					with open(bfile) as fh:
+						text = fh.read()
+					# Parse C:XX.X%[S:XX.X%,D:XX.X%],F:XX.X%,M:XX.X%,n:XXXX
+					m = re.search(r"C:(\d+\.?\d*)%\[S:(\d+\.?\d*)%,D:(\d+\.?\d*)%\],F:(\d+\.?\d*)%,M:(\d+\.?\d*)%,n:(\d+)", text)
+					if m:
+						busco_c, busco_s, busco_d, busco_f, busco_m, busco_n = m.groups()
+					break
+
+			omark_cons, omark_cont, omark_miss = "N/A", "N/A", "N/A"
+			omark_sum = f"{RESULTS_DIR}BENCHMARK/{label}.omark/{label}.sum"
+			if os.path.exists(omark_sum) and os.path.getsize(omark_sum) > 50:
+				with open(omark_sum) as fh:
+					for line in fh:
+						line = line.strip()
+						# Parse OMArk proteome line: A:92.10%[...],I:1.43%[...],C:0.00%[...],U:6.47%
+						m2 = re.search(r"^A:(\d+\.?\d*)%.*,I:(\d+\.?\d*)%.*,C:(\d+\.?\d*)%.*,U:(\d+\.?\d*)%", line)
+						if m2:
+							omark_cons = m2.group(1)
+							omark_cont = m2.group(3)
+							omark_miss = m2.group(4)
+
+			gff_path = gff3_files[label]
+			gene_count = "0"
+			if os.path.exists(gff_path) and os.path.getsize(gff_path) > 0:
+				with open(gff_path) as fh:
+					gene_count = str(sum(1 for line in fh if not line.startswith("#") and "\tgene\t" in line))
+
+			rows.append(f"{label}\t{gene_count}\t{busco_c}\t{busco_s}\t{busco_d}\t{busco_f}\t{busco_m}\t{busco_n}\t{omark_cons}\t{omark_cont}\t{omark_miss}")
+
+		with open(output[0], "w") as fh:
+			fh.write("Label\tGenes\tBUSCO_C%\tBUSCO_S%\tBUSCO_D%\tBUSCO_F%\tBUSCO_M%\tBUSCO_n\tOMArk_Consistent\tOMArk_Contamination\tOMArk_Missing\n")
+			for row in rows:
+				fh.write(row + "\n")
+
+		# Print table to stdout
+		header = "Label\tGenes\tBUSCO_C%\tBUSCO_S%\tBUSCO_D%\tBUSCO_F%\tBUSCO_M%\tBUSCO_n\tOMArk_Consistent\tOMArk_Contamination\tOMArk_Missing"
+		print(f"\n=== Benchmark Summary ===\n{header}")
+		for row in rows:
+			print(row)

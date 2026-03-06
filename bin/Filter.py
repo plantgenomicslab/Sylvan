@@ -319,7 +319,7 @@ if __name__ == "__main__":
 	parser.add_argument("--max-iter", type = int, default = 5, help = "Maximum number of random forest re-training iterations (Default: 5)")
 	parser.add_argument("--seed", type = int, default = 123, help = "Random seed for reproducibility (Default: 123)")
 	parser.add_argument("--chromRegex", type = str, default = "", help = "Regular expression to match chromosome prefixes (Default: '')")
-	parser.add_argument("--output", type = str, default = "filter.gff3", help = "Output file path (Default: filter.gff3)")
+	parser.add_argument("--output", type = str, default = "filtered.gff3", help = "Output file path (Default: filtered.gff3)")
 	parser.add_argument("--output-dir", type = str, default = "FILTER", help = "Output directory for intermediate files (Default: FILTER)")
 	args = parser.parse_args()
 

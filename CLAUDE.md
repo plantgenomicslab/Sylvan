@@ -44,6 +44,11 @@ pylint $(find bin -name "*.py" -type f) \
   --exit-zero
 ```
 
+### Build Singularity container (no sudo needed)
+```bash
+singularity build --fakeroot singularity/Sylvan.sif singularity/Sylvan.def
+```
+
 ### Force rerun of a pipeline
 ```bash
 ./bin/annotate.sh --forceall
@@ -62,13 +67,13 @@ Generates gene models from multiple evidence types, combined via EVM (Evidence M
 - Liftover from neighbor species (LiftOff)
 - GETA pipeline integration (Augustus training, gene model combination)
 - EVM consensus merging
-- Output: `results/complete_draft.gff3`
+- Output: `results/PREFILTER/Sylvan.gff3`
 
 **Phase 2 — Filter** (`bin/Snakefile_filter`, ~460 lines, 20 rules):
 Semi-supervised random forest filtering of draft gene models:
 - PfamScan (protein domains), RSEM (expression), BLAST (homology), lncDC (lncRNA), BUSCO (conservation)
 - Iterative RF training with data-driven heuristic for initial labels
-- Output: `results/FILTER/filter.gff3`
+- Output: `results/FILTER/filtered.gff3`
 
 ### Key Python Modules (all in `bin/`)
 

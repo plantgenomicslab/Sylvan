@@ -111,7 +111,7 @@
 - **Status**: FIXED
 
 ## Pipeline Status: COMPLETE
-- **Output**: `results/complete_draft.gff3` (5.8MB, 61,588 lines, ~4,744 gene models)
+- **Output**: `results/PREFILTER/Sylvan.gff3` (5.8MB, 61,588 lines, ~4,744 gene models)
 - **Steps**: 157/157 completed
 - **Known limitation**: Helixer produces empty output (CUDA version mismatch workaround)
 
@@ -183,7 +183,7 @@ BGM2AT, augustusWithHints
 - **Status**: FIXED
 
 ## Filter Pipeline Status: COMPLETE
-- **Output**: `results/FILTER/filter.gff3`
+- **Output**: `results/FILTER/filtered.gff3`
 - **Steps**: 82/82 completed
 - **Results**: 596 genes kept, 3,698 discarded (out of 4,294 total)
 - **Known limitation**: Empty Helixer evidence causes more aggressive filtering

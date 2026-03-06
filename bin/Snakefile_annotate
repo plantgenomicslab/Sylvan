@@ -156,7 +156,7 @@ rna_seq = config_dict["Input"]["rna_seq"]
 helixer_model = config_dict["Input"]["helixer_model"]
 helixer_model_dir = config_dict["Input"].get("helixer_model_dir", "")
 if not helixer_model_dir or helixer_model_dir == "placeholder":
-	helixer_model_dir = ""  # Helixer will use its default model directory
+	helixer_model_dir = "/usr/local/src/Helixer/models/"  # Container default path
 neighbor_gff = config_dict["Input"]["liftoff"]["neighbor_gff"]
 neighbor_fasta = config_dict["Input"]["liftoff"]["neighbor_fasta"]
 augustus_species = config_dict["Input"]["geta"]["augustus_species"]
@@ -247,7 +247,7 @@ for file_path in rna_seq.rglob("*.fastq.gz"):
 
 rule all:
 	input:
-		f"{RESULTS_DIR}complete_draft.gff3",
+		f"{RESULTS_DIR}PREFILTER/Sylvan.gff3",
 		f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3",
 		f"{RESULTS_DIR}LIFTOVER/LiftOff/liftoff.gff3",
 		f"{RESULTS_DIR}GETA/Augustus/augustus.gff3",
@@ -301,7 +301,7 @@ onsuccess:
 	print("\n" + "="*80)
 	print("SYLVAN ANNOTATION PIPELINE COMPLETED SUCCESSFULLY")
 	print("="*80)
-	print(f"Output: {RESULTS_DIR}complete_draft.gff3")
+	print(f"Output: {RESULTS_DIR}PREFILTER/Sylvan.gff3")
 	print(f"Workflow process has been logged in: {RESULTS_DIR}logs/")
 	print(f"  Example: {RESULTS_DIR}logs/stringtie_STAR_.err")
 	print("="*80 + "\n")
@@ -2857,7 +2857,7 @@ runEVM_Output = [f"{RESULTS_DIR}EVM/ok/commands.{evm_num}.ok" for evm_num in ran
 
 rule recombineEVM:
 	input: runEVM_Output
-	output: f"{RESULTS_DIR}EVM.all.gff3"
+	output: f"{RESULTS_DIR}EVM/EVM.all.gff3"
 	params:
 		genome = config_dict["Input"]["genome"],
 		results_dir = RESULTS_DIR,
@@ -2894,7 +2894,7 @@ rule recombineEVM:
 #TODO: Use snakemake 'ensure' to more robustly check for proper output
 rule pasaPost:
 	input:
-		evm = f"{RESULTS_DIR}EVM.all.gff3",
+		evm = f"{RESULTS_DIR}EVM/EVM.all.gff3",
 		spades = f"{RESULTS_DIR}TRANSCRIPT/PASA/transcripts_for_pasa.fasta.clean",
 		helixer = f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3"
 	output: f"{RESULTS_DIR}pasaPost.ok"
@@ -2929,12 +2929,13 @@ rule pasaPost:
 
 rule agat_clean_final:
 	input: f"{RESULTS_DIR}pasaPost.ok"
-	output: f"{RESULTS_DIR}complete_draft.gff3"
+	output: f"{RESULTS_DIR}PREFILTER/Sylvan.gff3"
 	params:
 		results_dir = RESULTS_DIR,
 		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA"
 	shell: """
 		micromamba activate annotation
+		mkdir -p {params.results_dir}PREFILTER
 		# Use an array to avoid pipefail issues with ls|head under set -euo pipefail
 		pasa_files=( {params.pasa_dir}/pasa.sqlite.gene_structures_post_PASA_updates.*.gff3 )
 		pasa_gff3="${{pasa_files[-1]}}"
@@ -2943,7 +2944,7 @@ rule agat_clean_final:
 			exit 1
 		fi
 		echo "Using PASA GFF3: ${{pasa_gff3}}"
-		agat_convert_sp_gxf2gxf.pl --gff "${{pasa_gff3}}" -o {params.results_dir}complete_draft.gff3
+		agat_convert_sp_gxf2gxf.pl --gff "${{pasa_gff3}}" -o {params.results_dir}PREFILTER/Sylvan.gff3
 
 		# Clean up AGAT log files and directories
 		mv -f *.agat.log {params.results_dir}TMP/ 2>/dev/null || true

@@ -11,7 +11,7 @@ Input:
   genome: results/GETA/genome.fasta            # [path] genome fasta file (GETA/genome.fasta)
   rna_seq: toydata/RNASeq                      # [path] Directory with paired-end RNAseq data
   protein: results/PROTEIN/merged_rmdup_proteins.fasta  # [path] Homolg protein FASTA (PROTEIN/merged_rmdup_proteins.fasta)
-  anot_gff: results/complete_draft.gff3        # [path] Annotated gff (complete_draft.gff3)
+  anot_gff: results/PREFILTER/Sylvan.gff3      # [path] Annotated gff (PREFILTER/Sylvan.gff3)
   augustus_gff: results/GETA/Augustus/augustus.gff3     # [path] Augustus annotation (GETA/Augustus/augustus.gff3)
   helixer_gff: results/AB_INITIO/Helixer/helixer.gff3   # [path] Helixer annotation (AB_INITIO/Helixer/helixer.gff3)
   repeat_gff: results/GETA/RepeatMasker/genome.repeat.gff3 # [path] Repeat annotation
@@ -27,6 +27,28 @@ Input:
 # [Optional] Configure GeneModelFilter
 #
 ###############################################################################################
+
+###############################################################################################
+#
+# Benchmark — GFF3 files to evaluate with BUSCO + OMArk (run via bin/Snakefile_benchmark)
+# omark_db: path to OMAmer database (e.g., LUCA.h5). Leave empty to skip OMArk.
+# Download: wget https://omabrowser.org/All/LUCA.h5 -O path/to/LUCA.h5
+# gff3_files: label → GFF3 path mapping
+#
+###############################################################################################
+
+Benchmark:
+  omark_db: ""                           # [path] OMAmer database (leave empty to skip OMArk)
+  gff3_files:
+    augustus: results/GETA/Augustus/augustus.gff3
+    helixer: results/AB_INITIO/Helixer/helixer.gff3
+    liftoff: results/LIFTOVER/LiftOff/liftoff.gff3
+    geta: results/GETA/geta.geneModels.gff3
+    geta_best: results/GETA/geta.bestGeneModels.gff3
+    miniprot: results/PROTEIN/merged_rmdup_proteins.fasta.miniprot.clean.gff3
+    evm: results/EVM/EVM.all.gff3
+    sylvan_prefilter: results/PREFILTER/Sylvan.gff3
+    sylvan_filtered: results/FILTER/filtered.gff3
 
 Cutoff:
   tpm: 3                   # Expression cutoff threshold (keep genes greater than)
