@@ -34,7 +34,7 @@ def read_cov_file(file_path):
 	return pd.read_csv(file_path, header=None, sep="\t", usecols=[0,6])
 
 def read_pfam_file(file_path):
-	return pd.read_csv(file_path, header=None, delim_whitespace=True, comment='#', usecols=[0])
+	return pd.read_csv(file_path, header=None, sep=r'\s+', comment='#', usecols=[0])
 
 def read_gff_file(file_path):
 	return pd.read_csv(file_path, header=None, sep="\t")
@@ -47,9 +47,9 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	## RSEM results
 	rsem_file = os.path.join(output_dir, "rsem_outdir", "RSEM.isoforms.results")
 	rsem_data = read_rsem_file(rsem_file)
-	filter_df = rsem_data.loc[:, ("transcript_id", "TPM")]
-	data = rsem_data.loc[:, ("transcript_id", "TPM")]
-	filter_df.loc[:,"TPM"] = rsem_data["TPM"] > float(tpm_cutoff)
+	filter_df = rsem_data.loc[:, ("transcript_id", "TPM")].copy()
+	data = rsem_data.loc[:, ("transcript_id", "TPM")].copy()
+	filter_df["TPM"] = rsem_data["TPM"] > float(tpm_cutoff)
 
 	## BlastP results
 	blast_file = os.path.join(output_dir, "BLASTP.OUT.TMP")
@@ -126,6 +126,13 @@ def filter_genes(tpm_cutoff, cov_cutoff, blast_pident, blast_qcovs, rex_pident, 
 	lncrna["LncRNA_predict"] = lncrna["LncRNA_predict"] == "lncrna"
 	data = data.merge(lncrna, on="transcript_id", how="left")
 	filter_df = filter_df.merge(lncrna, on="transcript_id", how="left")
+
+	# Fill NaN in boolean columns (pandas 3.0 compatibility: NaN == False is False, not True)
+	bool_cols = ["TPM", "COVERAGE", "blast_pident", "blast_qcovs", "PFAM", "AUGUSTUS",
+	             "HELIXER", "REPEAT", "singleExon", "rex_pident", "rex_qcovs", "LncRNA_predict"]
+	for col in bool_cols:
+		if col in filter_df.columns:
+			filter_df[col] = filter_df[col].fillna(False)
 
 	# Identify strong keep hits while maintaining as much feature diversity as possible
 	keep_cond = (

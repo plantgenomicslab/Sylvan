@@ -221,7 +221,7 @@ rule STAR_paired:
 			--readFilesCommand gunzip -c \
 			--readFilesIn {input.one} {input.two} \
 			--quantMode TranscriptomeSAM \
-			--quantTranscriptomeBan IndelSoftclipSingleend \
+			--quantTranscriptomeSAMoutput BanSingleEnd_BanIndels_ExtendSoftclip \
 			--alignEndsType EndToEnd
 			"""
 
@@ -435,7 +435,7 @@ rule lncRNA_pred:
 	threads: config_dict["Threads"]["lncRNA_pred"]
 	shell:'''
 		micromamba activate lncdc
-		lncDC.py \
+		python $CONDA_PREFIX/lib/python3.9/site-packages/bin/lncDC.py \
 		-x {params.lncdc_db}/plant_selected_nostructure_hexamer_table.csv \
 		-m {params.lncdc_db}/plant_selected_nostructure_xgb_model_SIF_PF.pkl \
 		-p {params.lncdc_db}/plant_selected_nostructure_imputer_SIF_PF.pkl \
@@ -489,7 +489,7 @@ rule filter:
 		results_dir = RESULTS_DIR
 	shell:"""
 		micromamba activate base
-		python bin/Filter.py \
+		/opt/envs/base/bin/python3 bin/Filter.py \
 		{params.anot_gff} \
 		{input.busco} \
 		--tpm {params.tpm} \
