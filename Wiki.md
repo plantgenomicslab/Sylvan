@@ -20,13 +20,14 @@ This tutorial walks you through running Sylvan on the included toy dataset (*A. 
 - [Toy Data Details](#toy-data-details)
 - [Utility Scripts](#utility-scripts)
 - [Runtime Benchmark](#runtime-benchmark)
+- [Local Execution (without SLURM)](#local-execution-without-slurm)
 - [Getting Help](#getting-help)
 
 ---
 
 ## Prerequisites
 
-- Linux system with SLURM
+- Linux system (SLURM optional — see [Local Execution](#local-execution-without-slurm))
 - Singularity 3.x+
 - Conda/Mamba
 - Git LFS
@@ -306,6 +307,24 @@ sbatch -A [account] -p [partition] -c 1 --mem=1g \
   -J annotate -o annotate.out -e annotate.err \
   --wrap="./bin/annotate_toydata.sh"
 ```
+
+### Alternative: Local Execution (no SLURM)
+
+If you don't have access to a SLURM cluster, use `annotate_local.sh` instead:
+
+```bash
+export SYLVAN_CONFIG="toydata/config/config_annotate_local.yml"
+
+# Dry run
+snakemake -n --snakefile bin/Snakefile_annotate
+
+# Run locally (16 cores)
+./bin/annotate_local.sh
+```
+
+This uses Snakemake's `--cores 16` for local parallelism instead of `--cluster`. The local config (`config_annotate_local.yml`) has per-rule thread counts scaled for a single machine (16 cores, 62 GB RAM). Adjust these values to match your hardware.
+
+See [Local Execution without SLURM](#local-execution-without-slurm) for a full walkthrough.
 
 **Output locations**
 - All intermediate/final results are written under the repo root `results/`.
@@ -962,6 +981,102 @@ The Earth BioGenome Project (EBP) targets thousands of species with genomes rang
 | ~2.5 Gb | Maize, wheat subgenome | 1–2 weeks |
 
 These estimates assume continuous job scheduling. In practice, SLURM queue wait times can dominate wall-clock time on shared clusters. Snakemake's job-level parallelism means that adding nodes provides near-linear speedup for the parallelizable steps (RNA-seq alignment, GeneWise, BLASTp, EVM).
+
+---
+
+## Local Execution (without SLURM)
+
+This section describes how to run the full Sylvan pipeline on a single Linux machine without SLURM.
+
+### Local Test Environment
+
+| Specification | Value |
+|---------------|-------|
+| CPUs | 16 cores |
+| Memory | 62 GB RAM |
+| GPU | NVIDIA GPU (CUDA 12.6) |
+| Storage | Local SSD |
+| OS | Ubuntu 22.04 (Linux 6.8) |
+| Singularity | 3.x (writable sandbox) |
+
+### Step-by-Step
+
+**1. Create a local config**
+
+Copy the provided local config template:
+
+```bash
+cp toydata/config/config_annotate_local.yml my_local_config.yml
+```
+
+Key differences from the SLURM config:
+- `account` and `partition` under `__default__` are empty (ignored)
+- Per-rule `ncpus`/`threads` are capped for a single machine (e.g., max 12 for heavy rules)
+
+**2. Run the pipeline**
+
+```bash
+export SYLVAN_CONFIG="toydata/config/config_annotate_local.yml"
+
+# Dry run first
+snakemake -n --snakefile bin/Snakefile_annotate
+
+# Run
+./bin/annotate_local.sh
+```
+
+**3. Monitor progress**
+
+```bash
+# Snakemake log
+tail -f .snakemake/log/*.snakemake.log
+
+# Per-rule logs
+ls -lt results/logs/*.err | head -10
+```
+
+### Local Execution: Issues Encountered and Fixes
+
+During local testing on the toy dataset, 17 issues were identified and fixed. These are documented in [`error.md`](error.md). Key categories:
+
+**Container execution issues:**
+- `run:` blocks in Snakemake execute on the HOST, not inside the container. Fixed with a `run_in_container()` helper that wraps commands with `singularity exec`.
+- Affected rules: `mergeTransfrag`, `geneRegion2Genewise`, `geneModels2AugusutsTrainingInput`, `BGM2AT`, `augustusWithHints`
+
+**Shell compatibility (dash vs bash):**
+- The container's `/bin/sh` is dash (Ubuntu-based), not bash. Perl `system()` calls use `/bin/sh`.
+- `&>` in dash means "background + redirect", not "redirect stderr". Fix: use `> file 2>&1`.
+
+**Tool-specific fixes:**
+- RepeatModeler 2.0.5: `-pa` deprecated → use `-threads`; output path changed to `RM_*/consensi.fa`
+- TransDecoder 5.7.1: `.gff3` output may not be retained → fallback recovery from internal checkpoints
+- Augustus config: `cp -rf config/ target/` creates nested directory → use `cp -rf config/* target/`
+- AGAT: `-gff` parsed as `-g ff` (Getopt::Long bundling) → use `--gff`
+- `hmmscan` in `filter` env, not `genepred`
+
+**GPU/CUDA:**
+- Helixer requires matching CUDA versions between container and host. Container CUDA 11.2 vs host CUDA 12.6 caused TensorFlow to fail silently. The pipeline continues with empty Helixer output.
+
+### Local Runtime Benchmark (Toy Data)
+
+Measured on the local test environment above (16 cores, 62 GB RAM, single machine):
+
+| Phase | Wall-clock time | Notes |
+|-------|----------------|-------|
+| Phase 1 — Annotate | ~12 hours | 157 steps, 16 cores |
+| Helixer | skipped | CUDA mismatch (empty output) |
+
+**Comparison with HPC:**
+
+| Environment | Cores | Phase 1 time |
+|-------------|-------|-------------|
+| HPC (4 nodes, 256 CPUs, V100 GPU) | 256 | 4–8 h |
+| Local (single machine) | 16 | ~12 h |
+
+The local run takes longer due to limited parallelism (16 vs 256 cores) and sequential execution of rules that would run on separate nodes in SLURM mode. However, the pipeline completes successfully and produces identical results.
+
+**Output (local run):**
+- `results/complete_draft.gff3` — 5.8 MB, 61,588 lines, ~4,744 gene models
 
 ---
 
