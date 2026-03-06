@@ -391,21 +391,23 @@ YAMLEOF
 	mv RepeatModeler-2.0.5 $REPEAT_PREFIX/share/RepeatModeler
 	rm RepeatModeler-2.0.5.tar.gz
 
-	# Configure RepeatModeler
+	# Configure RepeatModeler by directly editing RepModelConfig.pm
+	# (perl ./configure does not reliably accept CLI flags in v2.0.5)
 	cd $REPEAT_PREFIX/share/RepeatModeler
 	chmod 644 *.pm configure
 
-	perl ./configure \
-		--repeatmasker_dir $REPEAT_PREFIX/share/RepeatMasker \
-		--recon_dir $REPEAT_PREFIX/bin \
-		--rscout_dir $REPEAT_PREFIX/bin \
-		--trf_prgm $REPEAT_PREFIX/bin/trf \
-		--cdhit_dir $REPEAT_PREFIX/bin \
-		--rmblast_dir $REPEAT_PREFIX/bin \
-		--ltr_retriever_dir $REPEAT_PREFIX/bin \
-		--genometools_dir $REPEAT_PREFIX/bin \
-		--mafft_dir $REPEAT_PREFIX/bin \
-		--ninja_dir $REPEAT_PREFIX/bin
+	perl -0777 -i -pe "
+		s|('REPEATMASKER_DIR'.*?'value' => )'[^']*'|\$1'$REPEAT_PREFIX/share/RepeatMasker'|s;
+		s|('RMBLAST_DIR'.*?'value' => )'[^']*'|\$1'$REPEAT_PREFIX/bin'|s;
+		s|('RECON_DIR'.*?'value' => )'[^']*'|\$1'$REPEAT_PREFIX/bin'|s;
+		s|('RSCOUT_DIR'.*?'value' => )'[^']*'|\$1'$REPEAT_PREFIX/bin'|s;
+		s|('TRF_PRGM'.*?'value' => )'[^']*'|\$1'$REPEAT_PREFIX/bin/trf'|s;
+		s|('CDHIT_DIR'.*?'value' => )'[^']*'|\$1'$REPEAT_PREFIX/bin'|s;
+		s|('LTR_RETRIEVER_DIR'.*?'value' => )'[^']*'|\$1'$REPEAT_PREFIX/bin'|s;
+		s|('GENOMETOOLS_DIR'.*?'value' => )'[^']*'|\$1'$REPEAT_PREFIX/bin'|s;
+		s|('MAFFT_DIR'.*?'value' => )'[^']*'|\$1'$REPEAT_PREFIX/bin'|s;
+		s|('NINJA_DIR'.*?'value' => )'[^']*'|\$1'$REPEAT_PREFIX/bin'|s;
+	" RepModelConfig.pm
 
 	# Make RepeatModeler scripts accessible
 	ln -sf $REPEAT_PREFIX/share/RepeatModeler/RepeatModeler $REPEAT_PREFIX/bin/RepeatModeler

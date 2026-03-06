@@ -12,6 +12,7 @@ Sylvan is a comprehensive genome annotation pipeline that combines EVM/PASA, GET
 - **Semi-supervised filtering**: Random forest-based spurious gene removal
 - **Score-based filtering**: Alternative logistic regression + random forest scoring pipeline
 - **HPC-ready**: SLURM cluster support with Singularity containers
+- **Local execution**: Run without SLURM on any Linux machine with `bin/annotate_local.sh`
 - **Customizable cluster command**: `sbatch` template lives in the config YAML — no shell script edits needed
 - **TidyGFF**: Format annotations for public distribution
 - **Cleanup utility**: Remove intermediate files after pipeline completion
@@ -39,10 +40,10 @@ The toy data experiment uses *A. thaliana* chromosome 4 with 12 paired-end RNA-s
 
 ### Requirements
 
-- Linux (tested on CentOS/RHEL)
+- Linux (tested on CentOS/RHEL, Ubuntu)
 - Singularity 3.x+
 - Conda/Mamba
-- SLURM for cluster execution (no HPC? deploy via [Cloud Cluster Toolkit](https://docs.cloud.google.com/cluster-toolkit/docs/quickstarts/slurm-cluster))
+- SLURM for cluster execution (optional — see [Local Execution](#local-execution-without-slurm) for running without HPC)
 - Git LFS (for toy data)
 
 ### Dependencies
@@ -204,6 +205,8 @@ This section describes the inputs, configuration, and commands needed to run the
 
 ### Running the Pipeline
 
+#### SLURM (HPC)
+
 ```bash
 # Set config (required)
 export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
@@ -219,6 +222,21 @@ sbatch -A [account] -p [partition] -c 1 --mem=1g \
 # Or run directly
 ./bin/annotate_toydata.sh
 ```
+
+#### Local (no SLURM)
+
+```bash
+# Set config for local execution
+export SYLVAN_CONFIG="toydata/config/config_annotate_local.yml"
+
+# Dry run
+snakemake -n --snakefile bin/Snakefile_annotate
+
+# Run locally (uses --cores instead of --cluster)
+./bin/annotate_local.sh
+```
+
+See [Local Execution](#local-execution-without-slurm) for details.
 
 **Output:** `results/complete_draft.gff3`
 
@@ -658,6 +676,63 @@ Run this only after both annotation and filter phases have completed successfull
 |--------|---------|
 | `bin/generate_cluster_from_config.py` | Generate a standalone cluster-only YAML from `config_annotate.yml` |
 | `bin/cluster_submit.py` | SLURM job submission wrapper — dynamically builds `sbatch` command, skips `-A`/`-p` when account/partition are empty |
+
+---
+
+## Local Execution (without SLURM)
+
+Sylvan can run on any Linux machine without SLURM. The `bin/annotate_local.sh` script uses Snakemake's `--cores` flag for local parallelism instead of `--cluster`.
+
+### Requirements
+
+- 16+ CPU cores, 64+ GB RAM recommended
+- Singularity 3.x+ (or a writable sandbox)
+- No SLURM or job scheduler needed
+
+### Setup
+
+1. Create a local config by copying the toydata example:
+   ```bash
+   cp toydata/config/config_annotate_local.yml toydata/config/my_local_config.yml
+   ```
+
+2. Edit `__default__` — set `account` and `partition` to empty strings (they are ignored in local mode).
+
+3. Adjust per-rule `ncpus`/`threads` to fit your machine (e.g., cap at 12 for a 16-core machine).
+
+### Running
+
+```bash
+export SYLVAN_CONFIG="toydata/config/config_annotate_local.yml"
+
+# Dry run
+snakemake -n --snakefile bin/Snakefile_annotate
+
+# Run
+./bin/annotate_local.sh
+
+# Pass extra snakemake flags
+./bin/annotate_local.sh -n            # dry-run
+./bin/annotate_local.sh --forceall    # force rerun
+```
+
+### Key Differences from SLURM Mode
+
+| Aspect | SLURM (`annotate.sh`) | Local (`annotate_local.sh`) |
+|--------|----------------------|---------------------------|
+| Parallelism | `--cluster sbatch` | `--cores 16` |
+| Job scheduling | SLURM queue | Snakemake's built-in scheduler |
+| Resource limits | Per-job SLURM allocation | System-wide (all jobs share RAM) |
+| Singularity | `--use-singularity` | `--use-singularity` (same) |
+| GPU (Helixer) | `--gres=gpu:1` | `--nv` flag (auto-detects host GPU) |
+
+### Known Issues for Local Execution
+
+| Issue | Solution |
+|-------|----------|
+| Helixer GPU/CUDA mismatch | Container CUDA version must match host driver. If mismatched, Helixer produces empty output (pipeline continues). |
+| `run:` blocks execute on host | Already handled by `run_in_container()` helper in Snakefile_annotate. |
+| Container `/bin/sh` is dash | Avoid `&>` in shell commands inside container; use `> file 2>&1` instead. |
 
 ---
 
