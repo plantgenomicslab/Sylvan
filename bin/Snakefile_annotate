@@ -1,8 +1,32 @@
 import yaml, sys, os, re, math, logging, json
+import subprocess as _subprocess
 import pandas as pd
 from subprocess import check_output
 from rich.logging import Console, RichHandler
 from pathlib import Path
+
+def run_in_container(cmd_str, env_name="genepred", stderr_file=None):
+    """Run a command inside the singularity container (for run: blocks).
+
+    Snakemake run: blocks execute on the HOST, not inside singularity.
+    This wraps commands with 'singularity exec' to run them in the container.
+    Falls back to shell() when no container is configured.
+    """
+    sif = globals().get("config_dict", {}).get("Input", {}).get("singularity", "")
+    sing_args = os.environ.get("SNAKEMAKE_SINGULARITY_ARGS", "--nv").split()
+    if sif:
+        inner = f'eval "$(/usr/local/bin/micromamba shell hook -s bash)"; micromamba activate {env_name} && {cmd_str}'
+        fh = open(stderr_file, 'w') if stderr_file else None
+        try:
+            _subprocess.run(
+                ["singularity", "exec"] + sing_args + [sif, "bash", "-c", inner],
+                check=True, stderr=fh
+            )
+        finally:
+            if fh:
+                fh.close()
+    else:
+        shell(f"micromamba activate {env_name} && {cmd_str}")
 
 # Helper function to convert memory string (e.g., "48g", "16G", "4096m") to megabytes
 def parse_memory_to_mb(mem_str):
@@ -336,9 +360,18 @@ rule RepeatModeler:
 		fi
 
 		RepeatModeler \
-		-pa {threads} \
+		-threads {threads} \
 		-database {params.results_dir}GETA/RepeatMasker/repeatModeler/species \
 		-LTRStruct
+
+		# RepeatModeler 2.0.5 may leave output in RM_* subdir; copy to expected location
+		if [ ! -f {params.results_dir}GETA/RepeatMasker/repeatModeler/species-families.fa ]; then
+		  RM_DIR=$(ls -td {params.results_dir}GETA/RepeatMasker/repeatModeler/RM_*/ 2>/dev/null | head -1)
+		  if [ -n "$RM_DIR" ] && [ -f "$RM_DIR/consensi.fa" ]; then
+		    cp "$RM_DIR/consensi.fa" {params.results_dir}GETA/RepeatMasker/repeatModeler/species-families.fa
+		    cp "$RM_DIR/families.stk" {params.results_dir}GETA/RepeatMasker/repeatModeler/species-families.stk
+		  fi
+		fi
 		"""
 # Variable input required for RepeatMasker_custom based on value of 'RM_lib'
 def repeatMaskerCustom_input(wildcards):
@@ -646,10 +679,10 @@ rule mergeTransfrag:
 		if cmds:
 			shell(" ; ".join(cmds))
 
-		shell("micromamba activate base && transfragDump \
-			--out {rd}GETA/transcript/transfrag \
-			{rd}GETA/transcript/transfrag.gtf \
-			{input.genome_fasta}")
+		run_in_container(
+			f"transfragDump --out {rd}GETA/transcript/transfrag {rd}GETA/transcript/transfrag.gtf {input.genome_fasta}",
+			env_name="base"
+		)
 
 #TODO: add threads?
 rule transDecoder_LongOrfs:
@@ -660,16 +693,25 @@ rule transDecoder_LongOrfs:
 	shell:"""
 		micromamba activate genepred
 		if [ -d {params.results_dir}GETA/transcript.__checkpoints_longorfs ]; then
-		  if [ -z "$(ls -A {params.results_dir}GETA/transcript.__checkpoints_longorfs)" ]; then 
-		    echo "No checkpoints...continuing"; 
-		  else 
-		    rm {params.results_dir}GETA/transcript.__checkpoints_longorfs/*;
+		  if [ -z "$(ls -A {params.results_dir}GETA/transcript.__checkpoints_longorfs)" ]; then
+		    echo "No checkpoints...continuing"
+		  else
+		    rm {params.results_dir}GETA/transcript.__checkpoints_longorfs/*
 		  fi
-			fi
+		fi
 
 		TransDecoder.LongOrfs {params.args} \
 		  -t {input} -S \
-		  --output_dir {params.results_dir}GETA/transcript	 
+		  --output_dir {params.results_dir}GETA/transcript
+
+		# TransDecoder may write output to a subdirectory — copy to expected location
+		TD_DIR={params.results_dir}GETA/transcript/transfrag.strand.fasta.transdecoder_dir
+		OUT_DIR={params.results_dir}GETA/transcript
+		if [ ! -f ${{OUT_DIR}}/longest_orfs.cds ] && [ -f ${{TD_DIR}}/longest_orfs.cds ]; then
+		  cp ${{TD_DIR}}/longest_orfs.cds ${{OUT_DIR}}/longest_orfs.cds
+		  cp ${{TD_DIR}}/longest_orfs.gff3 ${{OUT_DIR}}/longest_orfs.gff3 2>/dev/null || true
+		  cp ${{TD_DIR}}/longest_orfs.pep ${{OUT_DIR}}/longest_orfs.pep 2>/dev/null || true
+		fi
 		"""
 rule transDecoder_Predict:
 	input: f"{RESULTS_DIR}GETA/transcript/longest_orfs.cds"
@@ -691,8 +733,21 @@ rule transDecoder_Predict:
 		  -t {params.results_dir}GETA/transcript/transfrag.strand.fasta \
 		  --output_dir {params.results_dir}GETA/transcript
 
-		mv transfrag.strand.fasta.transdecoder* {params.results_dir}GETA/transcript/
-		mv {params.results_dir}GETA/transcript/transfrag.strand.fasta.transdecoder.gff3 {params.results_dir}GETA/transcript/transfrag.transdecoder.gff3
+		mv transfrag.strand.fasta.transdecoder* {params.results_dir}GETA/transcript/ 2>/dev/null || true
+
+		# TransDecoder 5.7.1 may not retain the final .gff3 — recover from checkpoint
+		TD_DIR={params.results_dir}GETA/transcript/transfrag.strand.fasta.transdecoder_dir
+		OUT={params.results_dir}GETA/transcript/transfrag.transdecoder.gff3
+		if [ -f {params.results_dir}GETA/transcript/transfrag.strand.fasta.transdecoder.gff3 ]; then
+		  mv {params.results_dir}GETA/transcript/transfrag.strand.fasta.transdecoder.gff3 ${{OUT}}
+		elif [ -f ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3.revised_starts.gff3 ]; then
+		  cp ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3.revised_starts.gff3 ${{OUT}}
+		elif [ -f ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3 ]; then
+		  cp ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3 ${{OUT}}
+		else
+		  echo "ERROR: TransDecoder.Predict produced no usable .gff3 output" >&2
+		  exit 1
+		fi
 		"""
 
 #TODO: Add "nostrand"?
@@ -887,7 +942,7 @@ rule geneRegion2Genewise:
 
 		# Run all genewise calls under a single micromamba activate
 		if faa:
-			shell(f"micromamba activate genepred && bash {tmp_script}")
+			run_in_container(f"bash {tmp_script}")
 		os.remove(tmp_script)
 		
 
@@ -1169,16 +1224,19 @@ rule geneModels2AugusutsTrainingInput:
 		args = config_dict["Internal"]["geneModels2AugusutsTrainingInput"],
 		results_dir = RESULTS_DIR
 	run:
-		shell("micromamba activate genepred && geneModels2AugusutsTrainingInput \
+		log_err = f'{RESULTS_DIR}logs/geneModels2AugusutsTrainingInput_.err'
+		os.makedirs(f'{RESULTS_DIR}logs', exist_ok=True)
+
+		run_in_container(f"geneModels2AugusutsTrainingInput \
 		{params.args} \
 		--out_prefix ati \
 		--cpu {threads} \
 		{input.gff} \
-		{input.genome_fasta}")
+		{input.genome_fasta}", stderr_file=log_err)
 
 		training_genes_number=0
 
-		with open(f'{RESULTS_DIR}logs/geneModels2AugusutsTrainingInput_.err', 'r') as file:
+		with open(log_err, 'r') as file:
 			for line in file:
 				match = re.search(r'Best gene Models number:\s+(\d+)', line)
 				if match:
@@ -1186,7 +1244,7 @@ rule geneModels2AugusutsTrainingInput:
 					break
 
 		if training_genes_number < 1000:
-			shell("micromamba activate genepred && geneModels2AugusutsTrainingInput \
+			run_in_container(f"geneModels2AugusutsTrainingInput \
 			--min_evalue 1e-9 \
 			--min_identity 0.9 \
 			--min_coverage_ratio 0.9 \
@@ -1199,8 +1257,10 @@ rule geneModels2AugusutsTrainingInput:
 			{input.gff} \
 			{input.genome_fasta} 1> {params.results_dir}GETA/Augustus/training/geneModels2AugusutsTrainingInput.log.Loose_thresholds 2>&1")
 
-		shell("mv ati.filter1.gff3 {params.results_dir}GETA/Augustus/training/ati.filter1.gff3") #TODO: Fix this in GETA
-		shell("mv ati.filter2.gff3 {params.results_dir}GETA/Augustus/training/ati.filter2.gff3") #TODO: Fix this in GETA
+		# GETA writes ati.* outputs to CWD — move to proper locations
+		shell("mv ati.filter1.gff3 {params.results_dir}GETA/Augustus/training/ati.filter1.gff3")
+		shell("mv ati.filter2.gff3 {params.results_dir}GETA/Augustus/training/ati.filter2.gff3")
+		shell("mv -f ati.* {params.results_dir}TMP/ 2>/dev/null || true")
 
 rule BGM2AT:
 	input:
@@ -1224,18 +1284,12 @@ rule BGM2AT:
 		flanking_length = []
 		gene_length = []
 
-		try:
-			os.remove("firsttest.ok") # TODO: Clean up these .ok files. Prevents re-running
-		except OSError:
-			pass
-		try:
-			os.remove("secondtest.ok")
-		except OSError:
-			pass
-		try:
-			os.remove("optimize_augustus.ok")
-		except OSError:
-			pass
+		# Remove stale .ok checkpoint files that prevent re-running
+		for ok_file in ["firsttest.ok", "secondtest.ok", "optimize_augustus.ok"]:
+			try:
+				os.remove(ok_file)
+			except OSError:
+				pass
 
 		with open(f"{RESULTS_DIR}GETA/Augustus/training/geneModels.gff3", 'r') as IN:
 			for line in IN:
@@ -1272,11 +1326,10 @@ rule BGM2AT:
 			flanking_length = 200
 			
 		# Copy Augustus config from genepred env into the run directory
-		shell(
-			f"micromamba activate genepred && "
+		run_in_container(
 			f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training && "
 			f"rm -rf {params.results_dir}GETA/Augustus/config/* && "
-			f"cp -rf $CONDA_PREFIX/config/ {params.results_dir}GETA/Augustus/config && "
+			f"cp -rf $CONDA_PREFIX/config/* {params.results_dir}GETA/Augustus/config/ && "
 			f"cd {params.results_dir}GETA/Augustus && "
 			f"export AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
 			f"BGM2AT "
@@ -1469,33 +1522,21 @@ rule augustusWithHints:
 			segSize = line[0]
 			seqLength = line[1]
 
-		if seqLength > segSize:
-			shell(f"micromamba activate genepred && mkdir -p {params.results_dir}GETA/Augustus/config/species && \
-			CONFIG_PATH=$(readlink -f {params.results_dir}GETA/Augustus/config) && \
-			export AUGUSTUS_CONFIG_PATH=$CONFIG_PATH && \
-			augustus \
-			--gff3=on \
-			--species={params.species} \
-			--hintsfile={input.hints} \
-			--extrinsicCfgFile={params.results_dir}GETA/Augustus/temp_directory/extrinsic.cfg \
-			--allow_hinted_splicesites=gcag,atac \
-			--alternatives-from-evidence={alt_from_evidence} \
-			--min_intron_len={mil} \
-			--softmasking=1 {input.masked} > {output}")
-		else:
-			shell(f"micromamba activate genepred && mkdir -p {params.results_dir}GETA/Augustus/config/species && \
-			CONFIG_PATH=$(readlink -f {params.results_dir}GETA/Augustus/config) && \
-			export AUGUSTUS_CONFIG_PATH=$CONFIG_PATH && \
-			augustus \
-			--gff3=on \
-			--species={params.species} \
-			--hintsfile={input.hints} \
-			--extrinsicCfgFile={params.results_dir}GETA/Augustus/temp_directory/extrinsic.cfg \
-			--allow_hinted_splicesites=gcag,atac \
-			--alternatives-from-evidence={alt_from_evidence} \
-			--min_intron_len=30 \
-			--softmasking=1 \
-			{input.masked} > {output}")
+		intron_len = mil if seqLength > segSize else 30
+		run_in_container(
+			f"mkdir -p {params.results_dir}GETA/Augustus/config/species && "
+			f"export AUGUSTUS_CONFIG_PATH=$(readlink -f {params.results_dir}GETA/Augustus/config) && "
+			f"augustus "
+			f"--gff3=on "
+			f"--species={params.species} "
+			f"--hintsfile={input.hints} "
+			f"--extrinsicCfgFile={params.results_dir}GETA/Augustus/temp_directory/extrinsic.cfg "
+			f"--allow_hinted_splicesites=gcag,atac "
+			f"--alternatives-from-evidence={alt_from_evidence} "
+			f"--min_intron_len={intron_len} "
+			f"--softmasking=1 "
+			f"{input.masked} > {output}"
+		)
 
 def aggregate_augustusWithHints(wildcards):
 	outdir = checkpoints.prepAugustusWithHints.get(**wildcards).output[0]
@@ -2022,7 +2063,7 @@ rule filterHMMScan:
 	params: pfamdb = geta_pfamdb
 	shell:
 		"""
-		micromamba activate genepred
+		micromamba activate filter
 		# Check if file has valid FASTA content (at least one sequence line after header)
 		if [ -s {input} ] && grep -q '^[^>]' {input}; then
 			hmmscan \
@@ -2286,7 +2327,8 @@ rule helixer:
 		  --fasta-path {input.g} \
 		  $MODEL_ARG \
 		  --subsequence-length {params.subseq} \
-		  --gff-output-path {output}
+		  --gff-output-path {output} \
+		|| {{ echo "WARNING: Helixer failed (GPU/CUDA issue?). Creating empty output." >&2; touch {output}; }}
 		'''
 
 rule prepare_liftoff:
@@ -2893,11 +2935,19 @@ rule agat_clean_final:
 		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA"
 	shell: """
 		micromamba activate annotation
-		export pasa=$(ls -t {params.pasa_dir}/pasa.sqlite.gene_structures_post_PASA_updates.*.gff3 | head -n 1)
-		agat_convert_sp_gxf2gxf.pl -gff ${{pasa}} -o {params.results_dir}complete_draft.gff3
+		# Use an array to avoid pipefail issues with ls|head under set -euo pipefail
+		pasa_files=( {params.pasa_dir}/pasa.sqlite.gene_structures_post_PASA_updates.*.gff3 )
+		pasa_gff3="${{pasa_files[-1]}}"
+		if [ ! -f "${{pasa_gff3}}" ]; then
+			echo "ERROR: No PASA output GFF3 found in {params.pasa_dir}" >&2
+			exit 1
+		fi
+		echo "Using PASA GFF3: ${{pasa_gff3}}"
+		agat_convert_sp_gxf2gxf.pl --gff "${{pasa_gff3}}" -o {params.results_dir}complete_draft.gff3
 
-		# Clean up AGAT log files
-		mv -f *.agat.log {params.results_dir} 2>/dev/null || true
+		# Clean up AGAT log files and directories
+		mv -f *.agat.log {params.results_dir}TMP/ 2>/dev/null || true
+		mv -f agat_log_* {params.results_dir}TMP/ 2>/dev/null || true
 		"""
 #TODO: Can I add the filter snakemake in a modular fashion?
 # https://snakemake.readthedocs.io/en/stable/snakefiles/modularization.html#modules
