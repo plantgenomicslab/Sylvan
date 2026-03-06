@@ -62,10 +62,10 @@ rule gff2pep:
 		if [ -s {input.gff} ]; then
 			gffread {input.gff} -g {params.genome} --force-exons -S -y {output}.raw || true
 			if [ -s {output}.raw ]; then
-				# Clean headers (remove "/" that crashes BUSCO) and strip internal stop codons
+				# Clean headers (remove "/" that crashes BUSCO) and strip stop codons (*) and dots (.)
 				awk '
 					/^>/ {{ gsub("/","_"); gsub(/ .*/, ""); print; next }}
-					{{ gsub(/\\./,""); print }}
+					{{ gsub(/[.*]/,""); print }}
 				' {output}.raw > {output}
 				rm -f {output}.raw
 			else

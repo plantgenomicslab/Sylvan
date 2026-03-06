@@ -30,7 +30,7 @@ Input:
 Benchmark:
   omark_db: /usr/local/src/omark_db/LUCA.h5
   gff3_files:
-    tair10_chr4: toydata/backup/ath4.gff3
+    tair10_chr4: toydata/gff3/ath4.gff3
     augustus: results/GETA/Augustus/augustus.gff3
     helixer: results/AB_INITIO/Helixer/helixer.gff3
     liftoff: results/LIFTOVER/LiftOff/liftoff.gff3
