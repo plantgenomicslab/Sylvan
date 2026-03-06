@@ -123,3 +123,68 @@ helper function at the top of Snakefile_annotate that wraps commands with
 
 Affected rules: mergeTransfrag, geneRegion2Genewise, geneModels2AugusutsTrainingInput,
 BGM2AT, augustusWithHints
+
+---
+
+# Phase 2: Filter Pipeline Errors
+
+## Environment
+- Same machine as Phase 1 (16 cores, 62GB RAM, Linux)
+- Config: toydata/config/config_filter_local.yml
+- Runner: bin/filter_local.sh (--cores 16, no SLURM)
+
+### 18. lncDC.py command not found — FIXED
+- **Cause**: lncDC is installed as a Python package module at
+  `$CONDA_PREFIX/lib/python3.9/site-packages/bin/lncDC.py`, not as a CLI entry point.
+  Calling `lncDC.py` directly fails with "command not found".
+- **Fix**: Changed to `python $CONDA_PREFIX/lib/python3.9/site-packages/bin/lncDC.py`
+  in Snakefile_filter
+- **Status**: FIXED
+
+### 19. STAR --quantTranscriptomeBan unrecognized — FIXED
+- **Cause**: STAR 2.7.11b renamed `--quantTranscriptomeBan` to
+  `--quantTranscriptomeSAMoutput`
+- **Fix**: Changed parameter name to `--quantTranscriptomeSAMoutput` in Snakefile_filter
+- **Status**: FIXED
+
+### 20. `python: command not found` in base env — FIXED
+- **Cause**: `micromamba activate base` doesn't properly add `/opt/envs/base/bin` to
+  PATH inside singularity. `which python` returns nothing.
+- **Fix**: Changed to `python3` initially, then to `/opt/envs/base/bin/python3` (see #21)
+- **Status**: FIXED
+
+### 21. `No module named 'pandas'` — FIXED
+- **Cause**: System `/usr/bin/python3` lacks pandas. The correct interpreter is
+  `/opt/envs/base/bin/python3` (Python 3.14) which has pandas 3.0.1 + scikit-learn.
+- **Fix**: Changed Filter.py invocation to `/opt/envs/base/bin/python3 bin/Filter.py`
+  in Snakefile_filter
+- **Status**: FIXED
+
+### 22. pandas 3.0 `delim_whitespace` removed — FIXED
+- **Cause**: `pd.read_csv(delim_whitespace=True)` raises TypeError in pandas 3.0
+  (parameter was deprecated and removed)
+- **Fix**: Changed to `sep=r'\s+'` in Filter.py
+- **Status**: FIXED
+
+### 23. pandas 3.0 LossySetitemError (bool→float64) — FIXED
+- **Cause**: `filter_df.loc[:,"TPM"] = rsem_data["TPM"] > float(tpm_cutoff)` fails
+  because the column dtype is float64 and the assigned value is bool, which pandas 3.0
+  treats as lossy.
+- **Fix**: Use `.copy()` on DataFrame creation and direct column assignment
+  `filter_df["TPM"] = ...` instead of `.loc` assignment
+- **Status**: FIXED
+
+### 24. 0 test samples — empty x_test in RF training — FIXED
+- **Cause**: With pandas 3.0, `NaN == False` returns `False` (changed from older pandas
+  where it returned `True`). Combined with empty Helixer evidence (all NaN), the
+  keep/discard conditions matched every gene, leaving none as "None" for the test set.
+- **Fix**: Added explicit `filter_df[col] = filter_df[col].fillna(False)` for all
+  boolean columns before the keep/discard labeling conditions
+- **Status**: FIXED
+
+## Filter Pipeline Status: COMPLETE
+- **Output**: `results/FILTER/filter.gff3`
+- **Steps**: 82/82 completed
+- **Results**: 596 genes kept, 3,698 discarded (out of 4,294 total)
+- **Known limitation**: Empty Helixer evidence causes more aggressive filtering
+  (596 vs ~3,756 expected with valid Helixer data)

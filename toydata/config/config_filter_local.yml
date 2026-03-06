@@ -1,0 +1,125 @@
+###############################################################################################
+#
+# Local execution filter config (no SLURM, 16 cores, 62GB RAM)
+#
+###############################################################################################
+
+Singularity: singularity/Sylvan_sandbox_v2
+
+Input:
+  genome: results/GETA/genome.fasta
+  rna_seq: toydata/RNASeq
+  protein: results/PROTEIN/merged_rmdup_proteins.fasta
+  anot_gff: results/complete_draft.gff3
+  augustus_gff: results/GETA/Augustus/augustus.gff3
+  helixer_gff: results/AB_INITIO/Helixer/helixer.gff3
+  repeat_gff: results/GETA/RepeatMasker/genome.repeat.gff3
+  HmmDB: /usr/local/src
+  RexDB: toydata/misc/Viridiplantae_v4.0.fasta
+  busco_lin: eudicots_odb10
+  chrom_regex: (^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)
+
+###############################################################################################
+#
+# Filter cutoffs
+#
+###############################################################################################
+
+Cutoff:
+  tpm: 3
+  rsem_cov: 0.5
+  blast_pident: 0.6
+  blast_qcovs: 0.6
+  rex_pident: 0.6
+  rex_qcovs: 0.6
+  helixer_cov: 0.8
+  augustus_cov: 0.8
+  repeat_cov: 0.5
+
+###############################################################################################
+#
+# Per-rule resource allocation — scaled for local execution (16 cores, 62GB)
+#
+###############################################################################################
+
+Threads:
+  PfamScan: 12
+  sortSTAR: 8
+  blast: 8
+  STAR_generate: 8
+  fastp_PAIRED: 8
+  prepRSEM: 8
+  STAR: 8
+  mergeSTAR: 8
+  calculateRSEMExpression: 8
+  lncRNA_pred: 8
+  STAR_index: 8
+
+__default__:
+  account: ""
+  partition: ""
+  memory: 8g
+  name: "{rule}.{wildcards}"
+  ncpus: 4
+  nodes: 1
+  time: "3-00:00:00"
+  output: results/logs/{rule}_{wildcards}.out
+  error: results/logs/{rule}_{wildcards}.err
+  extra_args: ""
+PfamScan:
+  ncpus: 12
+  memory: 48g
+RSEM:
+  ncpus: 8
+  memory: 32g
+sortSTAR:
+  ncpus: 8
+  memory: 32g
+blast:
+  ncpus: 8
+  memory: 32g
+coverage:
+  ncpus: 8
+  memory: 32g
+indexRef:
+  ncpus: 4
+  memory: 16g
+blastDB:
+  ncpus: 4
+  memory: 16g
+blastRexDB:
+  ncpus: 4
+  memory: 16g
+splitPep:
+  ncpus: 4
+  memory: 16g
+combineBlast:
+  ncpus: 4
+  memory: 16g
+abInitioCoverage:
+  ncpus: 1
+  memory: 4g
+STAR_generate:
+  ncpus: 8
+  memory: 32g
+fastp_PAIRED:
+  ncpus: 8
+  memory: 32g
+STAR_paired:
+  ncpus: 8
+  memory: 32g
+mergeSTAR:
+  ncpus: 8
+  memory: 32g
+calculateRSEMExpression:
+  ncpus: 8
+  memory: 32g
+prepRSEM:
+  ncpus: 8
+  memory: 32g
+lncRNA_pred:
+  ncpus: 8
+  memory: 32g
+STAR_index:
+  ncpus: 8
+  memory: 32g
