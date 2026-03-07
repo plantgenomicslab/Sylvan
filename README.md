@@ -366,11 +366,11 @@ Compare annotation quality across all pipeline stages using BUSCO and OMArk:
 
 This benchmarks each GFF3 listed in `Benchmark.gff3_files` by extracting proteins and running BUSCO protein-mode (and optionally OMArk). Results are saved to `results/BENCHMARK/benchmark_summary.tsv`.
 
-**OMArk setup (optional):** OMArk requires an OMAmer database (~6 GB). The pre-built Singularity image includes LUCA.h5 at `/usr/local/src/omark_db/LUCA.h5`. If building your own container or running outside the container, download it manually:
+**OMArk setup (optional):** OMArk requires an OMAmer database (~6 GB), which is **not** bundled in the container (to keep the image under 10 GB). Download it separately:
 ```bash
-wget https://omabrowser.org/All/LUCA.h5 -O path/to/LUCA.h5
+wget https://omabrowser.org/All/LUCA.h5 -O LUCA.h5
 ```
-Then set `Benchmark.omark_db` in `config_filter.yml`. Leave empty to skip OMArk and run BUSCO only.
+Then set `Benchmark.omark_db` in `config_filter.yml` to the host path (e.g., `LUCA.h5`). Bind the path into the container via `SINGULARITY_BIND` or ensure it is under the working directory. Leave empty to skip OMArk and run BUSCO only.
 
 **Output:** `results/BENCHMARK/benchmark_summary.tsv`
 

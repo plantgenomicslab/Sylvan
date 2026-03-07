@@ -28,7 +28,7 @@ Input:
 ###############################################################################################
 
 Benchmark:
-  omark_db: /usr/local/src/omark_db/LUCA.h5
+  omark_db: LUCA.h5
   gff3_files:
     tair10_chr4: toydata/gff3/ath4.gff3
     augustus: results/GETA/Augustus/augustus.gff3
