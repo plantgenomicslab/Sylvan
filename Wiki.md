@@ -75,7 +75,10 @@ git lfs install
 ### Sylvan Container
 
 ```bash
+# latest = v4 (GPU-capable TensorFlow, ~16 GB)
 singularity pull --arch amd64 sylvan.sif library://wyim/sylvan/sylvan:latest
+# Or v3 (CPU-only TensorFlow, ~8 GB):
+# singularity pull --arch amd64 sylvan.sif library://wyim/sylvan/sylvan:v3
 ```
 
 ### EDTA Container (for repeat library)
