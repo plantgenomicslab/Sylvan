@@ -259,11 +259,10 @@ YAMLEOF
 		https://raw.githubusercontent.com/wyim-pgl/genome_annotation_installations/main/Helixer_models/vertebrate_v0.3_a_0400.h5
 
 
-	# ---- Download OMAmer database (LUCA.h5) for OMArk ---- #
-	mkdir -p /usr/local/src/omark_db
-	wget --retry-connrefused --waitretry=1 --read-timeout=60 --timeout=30 --tries=5 \
-		-O /usr/local/src/omark_db/LUCA.h5 \
-		https://omabrowser.org/All/LUCA.h5
+	# ---- OMAmer database (LUCA.h5) for OMArk ---- #
+	# NOT bundled in container (~6 GB, would exceed Sylabs Cloud 10 GB limit).
+	# Users download separately:  wget -O LUCA.h5 https://omabrowser.org/All/LUCA.h5
+	# Then set Benchmark.omark_db in config_filter.yml to the host path.
 
 
 	# ---- Install HelixerPost (Rust binary) ---- #
@@ -310,8 +309,9 @@ YAMLEOF
 	# Move the built binary to /usr/local/bin for global access
 	mv /usr/local/src/HelixerPost/target/release/helixer_post_bin /usr/local/bin
 
-	# Remove unnecessary build files
+	# Remove unnecessary build files and Rust toolchain (~1.5 GB)
 	rm -rf /usr/local/src/HelixerPost/target/release/
+	rm -rf /root/.rustup /root/.cargo /root/.cache
 
 
 	# ---- Install GETA ---- #

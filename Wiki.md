@@ -505,7 +505,7 @@ The benchmark is configured in `config_filter.yml` (or its local equivalent):
 
 ```yaml
 Benchmark:
-  omark_db: /usr/local/src/omark_db/LUCA.h5   # OMAmer database. Leave empty to skip OMArk.
+  omark_db: LUCA.h5                            # OMAmer database (download separately). Leave empty to skip OMArk.
   gff3_files:
     tair10_chr4: toydata/backup/ath4.gff3      # TAIR10 reference (ground truth)
     augustus: results/GETA/Augustus/augustus.gff3
@@ -568,12 +568,17 @@ results/BENCHMARK/
 
 ### OMArk setup
 
-OMArk requires an OMAmer database file (e.g., `LUCA.h5`, ~6 GB). The pre-built
-Singularity image includes it at `/usr/local/src/omark_db/LUCA.h5`. If building
-your own container or running externally, download from the
-[OMAmer database page](https://omabrowser.org/oma/current/) and set
-`Benchmark.omark_db` in the config. If left empty, OMArk steps are skipped and
-only BUSCO is run.
+OMArk requires an OMAmer database file (`LUCA.h5`, ~6 GB), which is **not** bundled
+in the container (to keep the image under 10 GB). Download it separately:
+
+```bash
+wget https://omabrowser.org/All/LUCA.h5
+```
+
+Set `Benchmark.omark_db` in `config_filter.yml` to the host path. Ensure
+the file is accessible inside the container (under the working directory or
+via `SINGULARITY_BIND`). If left empty, OMArk steps are skipped and only BUSCO
+is run.
 
 ### Toydata benchmark results
 
