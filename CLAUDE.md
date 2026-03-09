@@ -87,6 +87,7 @@ Semi-supervised random forest filtering of draft gene models:
 | `score_filter.py` | Alternative scoring approach (`bin/Snakefile_filter_score`) |
 | `Pick_Primaries.py` | Primary isoform selection |
 | `repeat_gene_removal.py` | Repeat-based gene filtering |
+| `refine_boundaries.py` | Gene boundary refinement using Helixer/Augustus + RNA-seq splice junctions |
 | `gff_to_evm.py` | GFF3 to EVM format conversion |
 
 ### Configuration

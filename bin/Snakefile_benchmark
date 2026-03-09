@@ -66,8 +66,59 @@ rule gff2pep:
 				awk '
 					/^>/ {{ gsub("/","_"); gsub(/ .*/, ""); print; next }}
 					{{ gsub(/[.*]/,""); print }}
-				' {output}.raw > {output}
+				' {output}.raw > {output}.all
 				rm -f {output}.raw
+
+				# Keep only primary (longest) isoform per gene
+				# Build mRNA→gene mapping from GFF3, then keep longest protein per gene
+				python3 -c "
+import sys, re
+from collections import defaultdict
+
+# Build mRNA ID → gene ID mapping from GFF3
+mrna_to_gene = {{}}
+with open('{input.gff}') as f:
+    for line in f:
+        if line.startswith('#'):
+            continue
+        cols = line.strip().split('\\t')
+        if len(cols) < 9:
+            continue
+        if cols[2] in ('mRNA', 'transcript'):
+            attrs = dict(kv.split('=', 1) for kv in cols[8].split(';') if '=' in kv)
+            mid = attrs.get('ID', '')
+            parent = attrs.get('Parent', mid)
+            mrna_to_gene[mid] = parent
+
+# Parse all protein sequences
+seqs = []
+current_id = current_seq = None
+with open('{output}.all') as f:
+    for line in f:
+        if line.startswith('>'):
+            if current_id:
+                seqs.append((current_id, current_seq))
+            current_id = line[1:].strip().split()[0]
+            current_seq = ''
+        else:
+            current_seq += line.strip()
+    if current_id:
+        seqs.append((current_id, current_seq))
+
+# Group by gene
+grouped = defaultdict(list)
+for sid, seq in seqs:
+    gene = mrna_to_gene.get(sid, sid)
+    grouped[gene].append((sid, seq))
+
+with open('{output}', 'w') as out:
+    for gene, isoforms in grouped.items():
+        best = max(isoforms, key=lambda x: len(x[1]))
+        out.write(f'>{{best[0]}}\\n{{best[1]}}\\n')
+
+print(f'Primary isoforms: {{len(grouped)}} genes from {{len(seqs)}} proteins')
+"
+				rm -f {output}.all
 			else
 				touch {output}
 			fi
@@ -166,7 +217,12 @@ rule benchmark_summary:
 			gene_count = "0"
 			if os.path.exists(gff_path) and os.path.getsize(gff_path) > 0:
 				with open(gff_path) as fh:
-					gene_count = str(sum(1 for line in fh if not line.startswith("#") and "\tgene\t" in line))
+					lines = [line for line in fh if not line.startswith("#")]
+				# Count gene features; fall back to mRNA if GFF3 has no gene-level features
+				n_genes = sum(1 for line in lines if "\tgene\t" in line)
+				if n_genes == 0:
+					n_genes = sum(1 for line in lines if "\tmRNA\t" in line)
+				gene_count = str(n_genes)
 
 			rows.append(f"{label}\t{gene_count}\t{busco_c}\t{busco_s}\t{busco_d}\t{busco_f}\t{busco_m}\t{busco_n}\t{omark_cons}\t{omark_cont}\t{omark_miss}")
 

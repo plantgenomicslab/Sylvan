@@ -35,6 +35,11 @@ def main():
     fixed_lines = []
     for line in lines:
         updated_line = line
+
+        # Extract --exec_dir to resolve relative paths against the partition directory
+        exec_dir_match = re.search(r"--exec_dir\s+(\S+)", line)
+        partition_dir = Path(exec_dir_match.group(1)).resolve() if exec_dir_match else evm_dir
+
         # These are the flags that take a single file path argument that needs to be made absolute.
         for flag in ["-G", "-g", "-e", "-p"]:
             # The pattern looks for:
@@ -44,16 +49,17 @@ def main():
             #   - The path is assumed not to start with a "/" (i.e., it's a relative path).
             #   - The path consists of any characters that are not whitespace.
             pattern = re.compile(f"({flag}\\s+)([^/\\s][^\\s]*)")
-            
+
             # The replacement function constructs the absolute path.
-            def repl(match):
+            # Relative paths are relative to --exec_dir (the partition directory),
+            # NOT the top-level EVM directory.
+            def repl(match, _partition_dir=partition_dir):
                 file_path = match.group(2)
-                # All relative paths in commands.list are relative to the EVM directory.
-                abs_path = evm_dir / file_path
+                abs_path = _partition_dir / file_path
                 return f"{match.group(1)}{abs_path}"
 
             updated_line = pattern.sub(repl, updated_line)
-        
+
         fixed_lines.append(updated_line)
 
     # Shuffle and distribute the fixed commands

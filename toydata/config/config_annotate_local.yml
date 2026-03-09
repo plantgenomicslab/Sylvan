@@ -9,7 +9,7 @@ Input:
   genome: toydata/genome/ath4.fasta        # Use uncompressed fasta directly (LFS .gz not available)
   rna_seq: toydata/RNASeq
   proteins: toydata/cds_aa/neighbor.aa
-  singularity: singularity/Sylvan_sandbox_v3
+  singularity: singularity/Sylvan_sandbox_v4
   liftoff:
     neighbor_gff: toydata/neighbor_gff3
     neighbor_fasta: toydata/neighbor_genome
