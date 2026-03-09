@@ -199,6 +199,14 @@ The annotation phase generates gene models by integrating multiple configurable 
 - **PASA Post-processing**
   - PASA operates at two stages in the pipeline: (1) initial transcript assembly and clustering before EVM, and (2) post-EVM refinement for UTR addition and alternative isoform incorporation
 
+- **PASA–EVM Merge**
+  - PASA annotation comparison only outputs gene models with transcript evidence overlap, silently dropping EVM genes without transcript support. The merge step (`merge_pasa_evm.py`) rescues these dropped EVM genes by adding them back alongside PASA-updated models, preserving conserved genes that lack RNA-seq coverage.
+
+- **Gene Boundary Refinement**
+  - Detects truncated gene models by comparing against Helixer and Augustus predictions at the same locus
+  - Replaces truncated models only when supported by independent evidence: RNA-seq splice junctions (primary authority for exon boundaries), miniprot protein alignment coverage (detection only, not used for replacement), and cross-source CDS boundary agreement
+  - Miniprot is explicitly excluded as a replacement source — its protein-level alignments give approximate, not exact, exon boundaries
+
 - **AGAT**
   - Final GFF3 format cleaning and validation
 
@@ -217,21 +225,24 @@ The following features are computed for every gene model in the draft annotation
 - **BLASTp (homolog)** — measures similarity to a user-supplied protein database (parallelized across 20 split peptide files)
 - **BLASTp (RexDB)** — measures similarity to a repeat element protein database (e.g. RepeatExplorer Viridiplantae)
 - **Ab initio overlap** — computes the fraction of each gene model overlapping with Augustus predictions, Helixer predictions, and RepeatMasker annotations
+- **Miniprot overlap** — computes the fraction of each gene model overlapping with Miniprot protein-to-genome alignments (used as RF feature only — not as a rescue condition)
 - **lncDC** — classifies transcripts as protein-coding or long non-coding RNA using an XGBoost model with plant-specific pre-trained parameters
-- **BUSCO** — identifies conserved single-copy orthologs (*used only to monitor the filtration process; not used as a classifier feature*)
+- **BUSCO** — identifies conserved single-copy orthologs (*used to monitor the filtration process and as a safety net to prevent discarding conserved genes*)
 
 #### Semi-supervised Classification
 
 1. **Initial gene set selection**: A data-driven heuristic selects high-confidence positive genes (strong homolog/Pfam/expression evidence) and high-confidence negative genes (repeat-like, no expression) using configurable cutoff thresholds (TPM, coverage, BLAST identity/coverage, repeat overlap)
 2. **Random forest training**: A binary classifier is trained on the initial gene set
 3. **Iterative refinement**: High-confidence predictions (above the `--recycle` threshold, default 0.95) are added back to the training set, and the model is retrained. This repeats for up to `--max-iter` iterations (default 5) or until convergence
+4. **Three-tier rescue for undecided genes**: (1) RF Keep probability > 0.6 excluding TE-only genes, (2) Pfam domain present without repeat/RexDB contamination, (3) BUSCO safety net — genes with Complete BUSCO hits are never discarded
+5. **Discard classification**: Discarded genes are categorized as `TE_related` (RexDB hit), `lncRNA` (lncDC prediction), or `pseudogene` (low/no evidence)
 
 **Output files:**
 - `results/FILTER/filtered.gff3` — Kept gene models
-- `results/FILTER/discard.gff3` — Discarded gene models
+- `results/FILTER/discard.gff3` — Discarded gene models (each feature annotated with `discard_reason=TE_related|lncRNA|pseudogene`)
 - `results/FILTER/data.tsv` — Feature matrix used by random forest
 - `results/FILTER/keep_data.tsv` — Evidence data for kept genes
-- `results/FILTER/discard_data.tsv` — Evidence data for discarded genes
+- `results/FILTER/discard_data.tsv` — Evidence data for discarded genes with `discard_reason` column
 - `results/FILTER/{prefix}.cdna` — Extracted transcript sequences
 - `results/FILTER/{prefix}.pep` — Extracted peptide sequences
 
@@ -332,6 +343,7 @@ This section describes the inputs and commands for the filter pipeline. All inpu
 | `rex_pident` / `rex_qcovs` | RexDB identity / coverage | 0.6 / 0.6 |
 | `helixer_cov` / `augustus_cov` | Ab initio overlap | 0.8 / 0.8 |
 | `repeat_cov` | Repeat overlap coverage threshold | 0.5 |
+| `miniprot_cov` | Miniprot protein alignment overlap (RF feature) | 0.5 |
 
 ### Running the Pipeline
 
@@ -366,11 +378,14 @@ Compare annotation quality across all pipeline stages using BUSCO and OMArk:
 
 This benchmarks each GFF3 listed in `Benchmark.gff3_files` by extracting proteins and running BUSCO protein-mode (and optionally OMArk). Results are saved to `results/BENCHMARK/benchmark_summary.tsv`.
 
-**OMArk setup (optional):** OMArk requires an OMAmer database (~6 GB), which is **not** bundled in the container (to keep the image under 10 GB). Download it separately:
+**OMArk setup (optional):** OMArk requires the OMAmer database (`LUCA.h5`, ~6 GB), which is **not** bundled in the container to keep the image under the Sylabs Cloud 10 GB limit. Download it into your project root:
+
 ```bash
-wget https://omabrowser.org/All/LUCA.h5 -O LUCA.h5
+cd Sylvan/                    # project root
+wget https://omabrowser.org/All/LUCA.h5
 ```
-Then set `Benchmark.omark_db` in `config_filter.yml` to the host path (e.g., `LUCA.h5`). Bind the path into the container via `SINGULARITY_BIND` or ensure it is under the working directory. Leave empty to skip OMArk and run BUSCO only.
+
+The toydata config (`toydata/config/config_filter_local.yml`) already references `LUCA.h5` as a relative path from the working directory. For custom projects, set `Benchmark.omark_db` in `config_filter.yml` to the path where you downloaded `LUCA.h5`. Leave empty to skip OMArk and run BUSCO only.
 
 **Output:** `results/BENCHMARK/benchmark_summary.tsv`
 

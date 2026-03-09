@@ -5,7 +5,7 @@ from pathlib import Path
 # TODO: file handling for re-runs is inadequate ... if a new gff is used many outputs need to be overwritten
 
 # Results directory prefix - all outputs will be placed under this directory
-RESULTS_DIR = "results/"
+RESULTS_DIR = os.environ.get("SYLVAN_RESULTS_DIR", "results/")
 
 # Load config file (can be overridden via SYLVAN_FILTER_CONFIG environment variable)
 config_file_path = os.environ.get('SYLVAN_FILTER_CONFIG', 'config_filter.yml')
@@ -16,20 +16,18 @@ with open(config_file_path, 'r') as config_file:
 		sys.exit("Could not load configs! Check config.yaml ...")
 
 # Check inputs
-for input in config_dict["Input"]:
-	if input == "chrom_regex":
+for key in config_dict["Input"]:
+	if key in ("chrom_regex", "busco_lin"):
 		continue
-	if input == "busco_lin":
-		continue
-	if input == "HmmDB":
-		hmm_path = config_dict["Input"][input]
+	if key == "HmmDB":
+		hmm_path = config_dict["Input"][key]
 		if hmm_path.startswith("/usr/local/") or hmm_path == "placeholder":
 			continue  # Will use conda env default
 		elif not os.path.exists(hmm_path):
-			sys.exit(f"Could not find {hmm_path}! Check {input} in config.yaml ...")
+			sys.exit(f"Could not find {hmm_path}! Check {key} in config.yaml ...")
 		continue
-	if not os.path.exists(config_dict["Input"][input]):
-		sys.exit(f"Could not find {config_dict['Input'][input]}! Check {input} in config.yaml ...")
+	if not os.path.exists(config_dict["Input"][key]):
+		sys.exit(f"Could not find {config_dict['Input'][key]}! Check {key} in config.yaml ...")
 
 
 # Singularity container with pre-built micromamba environments
@@ -104,15 +102,17 @@ def inputAll(wc):
 	return(input)
 
 anot_cdna = f"{RESULTS_DIR}FILTER/{pep_string}.cdna"
+anot_mrna = f"{RESULTS_DIR}FILTER/{pep_string}.mrna"   # Full mRNA (exons incl. UTRs) for RSEM
 anot_pep = f"{RESULTS_DIR}FILTER/{pep_string}.pep"
 
 rule all:
 	input: inputAll
 
 rule makeCDSPep:
-	output: 
+	output:
 		cdna = anot_cdna,
-		pep = anot_pep
+		pep = anot_pep,
+		mrna = anot_mrna
 	params:
 		genome = config_dict["Input"]["genome"],
 		gff =  config_dict["Input"]["anot_gff"]
@@ -121,6 +121,10 @@ rule makeCDSPep:
 		gff3_file_to_proteins.pl {params.gff} {params.genome} cDNA > {output.cdna}
 
 		gff3_file_to_proteins.pl {params.gff} {params.genome} prot > {output.pep}
+
+		# Extract full mRNA (exons incl. UTRs) for RSEM — must match STAR transcriptome BAM lengths
+		micromamba activate annotation
+		gffread {params.gff} -g {params.genome} -w {output.mrna} || true
 		"""
 
 rule PfamScan:
@@ -138,18 +142,18 @@ rule PfamScan:
 			-outfile {output}
 		"""
 
-# Prepare RSEM files
+# Prepare RSEM files — use full mRNA (exons incl. UTRs) to match STAR transcriptome BAM lengths
 rule prepRSEM:
-	input: anot_cdna
-	output: f"{anot_cdna}.seq"
+	input: anot_mrna
+	output: f"{anot_mrna}.seq"
 	threads: config_dict["Threads"]["prepRSEM"]
-	params: cdna = anot_cdna
+	params: mrna = anot_mrna
 	shell: """
 		micromamba activate filter
 		rsem-prepare-reference \
 		-p {threads} \
 		{input} \
-		{params.cdna}
+		{params.mrna}
 		"""
 
 rule fastp_PAIRED:
@@ -227,19 +231,19 @@ rule STAR_paired:
 
 rule calculateRSEMExpression_PAIRED:
 	input:
-		prep = f"{anot_cdna}.seq",
+		prep = f"{anot_mrna}.seq",
 		bam = f"{RESULTS_DIR}FILTER/STAR/{{run}}.STAR_pairedend.bamAligned.toTranscriptome.out.bam"
 	output: f"{RESULTS_DIR}FILTER/rsem_outdir/{{run}}.isoforms.results"
 	threads: config_dict["Threads"]["calculateRSEMExpression"]
 	params:
-		cdna = anot_cdna,
+		mrna = anot_mrna,
 		results_dir = RESULTS_DIR
 	shell:"""
 		micromamba activate filter
 		rsem-calculate-expression \
 		--no-bam-output -p {threads} \
 		--alignments \
-		--paired-end {input.bam} {params.cdna} {params.results_dir}FILTER/rsem_outdir/{wildcards.run}
+		--paired-end {input.bam} {params.mrna} {params.results_dir}FILTER/rsem_outdir/{wildcards.run}
 		"""
 
 rule mergeRSEM:
@@ -253,8 +257,8 @@ rule mergeRSEM:
 			try:
 				current = pd.read_csv(result, sep="\t", usecols=["transcript_id", "TPM"])
 				summary["TPM"] = summary["TPM"] + current["TPM"]
-			except:
-				print(f"WARNING: Error parsing {result}")
+			except (pd.errors.EmptyDataError, ValueError, KeyError) as e:
+				print(f"WARNING: Error parsing {result}: {e}")
 				num_inputs -= 1
 		
 		summary["TPM"] = summary["TPM"]/num_inputs
@@ -399,11 +403,13 @@ rule abInitioCoverage:
 	output:
 		f"{RESULTS_DIR}FILTER/augustus_coverage.bed",
 		f"{RESULTS_DIR}FILTER/helixer_coverage.bed",
-		f"{RESULTS_DIR}FILTER/repeat_coverage.bed"
+		f"{RESULTS_DIR}FILTER/repeat_coverage.bed",
+		f"{RESULTS_DIR}FILTER/miniprot_coverage.bed"
 	params:
 		augustus = config_dict["Input"]["augustus_gff"],
 		helixer = config_dict["Input"]["helixer_gff"],
 		repeat = config_dict["Input"]["repeat_gff"],
+		miniprot = config_dict["Input"]["miniprot_gff"],
 		gff = config_dict['Input']['anot_gff'],
 		results_dir = RESULTS_DIR
 	shell:"""
@@ -416,6 +422,9 @@ rule abInitioCoverage:
 
 		cut -f1,4,5,7 {params.repeat} > {params.results_dir}FILTER/repeat.bed
 
+		grep -P '\tmRNA\t' {params.miniprot} | \
+		   cut -f1,4,5,7 > {params.results_dir}FILTER/miniprot.bed || true
+
 		grep -P '\\tmRNA\\t' {params.gff} | \
 			cut -f1,4,5,7,9 | \
 			awk -F';' '{{print $1}}'| \
@@ -425,6 +434,7 @@ rule abInitioCoverage:
 		bedtools coverage -a {params.results_dir}FILTER/prefilter.bed -b {params.results_dir}FILTER/augustus.bed > {params.results_dir}FILTER/augustus_coverage.bed
 		bedtools coverage -a {params.results_dir}FILTER/prefilter.bed -b {params.results_dir}FILTER/helixer.bed > {params.results_dir}FILTER/helixer_coverage.bed
 		bedtools coverage -a {params.results_dir}FILTER/prefilter.bed -b {params.results_dir}FILTER/repeat.bed > {params.results_dir}FILTER/repeat_coverage.bed
+		bedtools coverage -a {params.results_dir}FILTER/prefilter.bed -b {params.results_dir}FILTER/miniprot.bed > {params.results_dir}FILTER/miniprot_coverage.bed
 		"""
 
 rule lncRNA_pred:
@@ -469,6 +479,7 @@ rule filter:
 		augustus = f"{RESULTS_DIR}FILTER/augustus_coverage.bed",
 		helixer = f"{RESULTS_DIR}FILTER/helixer_coverage.bed",
 		repeat = f"{RESULTS_DIR}FILTER/repeat_coverage.bed",
+		miniprot = f"{RESULTS_DIR}FILTER/miniprot_coverage.bed",
 		cov = f"{RESULTS_DIR}FILTER/cov.bed",
 		lncrna = f"{RESULTS_DIR}FILTER/lncrna_predict.csv",
 		busco = f"{RESULTS_DIR}FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv"
@@ -485,6 +496,7 @@ rule filter:
 		blast_qcovs = config_dict["Cutoff"]["blast_qcovs"],
 		rex_pident = config_dict["Cutoff"]["rex_pident"],
 		rex_qcovs = config_dict["Cutoff"]["rex_qcovs"],
+		miniprot_cov = config_dict["Cutoff"]["miniprot_cov"],
 		regex = config_dict["Input"]["chrom_regex"],
 		results_dir = RESULTS_DIR
 	shell:"""
@@ -501,6 +513,7 @@ rule filter:
 		--blast-qcovs {params.blast_qcovs} \
 		--rex-pident {params.rex_pident} \
 		--rex-qcovs {params.rex_qcovs} \
+		--miniprot-cov {params.miniprot_cov} \
 		--seed 123 \
 		--trees 100 \
 		--predictors 5 \

@@ -37,6 +37,7 @@ Input:
                                       # See: https://github.com/Gaius-Augustus/Augustus/tree/master/config/species
   evm_weights: toydata/config/evm_weights.txt  # [!!!!REQUIRED!!!!:file] EVM weights file (included in Sylvan/config/)
   num_evm_files: 126              # [optional:value] Number of EVM splits (default: 126)
+  swissprot: "toydata/misc/uniprot_sprot.fasta"  # [optional:file] SwissProt reviewed FASTA for PASA/EVM model comparison
 
 ###############################################################################################
 #

@@ -18,6 +18,7 @@ Input:
   HmmDB: /usr/local/src                        # [path] PFAM directory for pfam scanning (contains Pfam-A.hmm files)
   RexDB: toydata/misc/Viridiplantae_v4.0.fasta # [path] RexDB protein FASTA for retroelement filtering
                                                # Example (Viridiplantae v4.0): wget -O toydata/misc/Viridiplantae_v4.0.fasta https://raw.githubusercontent.com/repeatexplorer/rexdb/refs/heads/main/Viridiplantae_v4.0.fasta
+  miniprot_gff: results/PROTEIN/merged_rmdup_proteins.fasta.miniprot.clean.gff3  # [path] Miniprot protein alignment GFF3
   busco_lin: eudicots_odb10                    # [string] Busco lineage to use for filter monitoring (e.g. eudicots_odb10)
   chrom_regex: (^Chr)|(^chr)|(^LG)|(^Ch)|(^\d) # [string] Regex string capturing the prefix of all chromosomes in the genome file
 
@@ -38,8 +39,9 @@ Input:
 ###############################################################################################
 
 Benchmark:
-  omark_db: ""                           # [path] OMAmer database (leave empty to skip OMArk)
+  omark_db: "LUCA.h5"                     # [path] OMAmer database (leave empty to skip OMArk)
   gff3_files:
+    tair10_chr4: toydata/gff3/ath4.gff3
     augustus: results/GETA/Augustus/augustus.gff3
     helixer: results/AB_INITIO/Helixer/helixer.gff3
     liftoff: results/LIFTOVER/LiftOff/liftoff.gff3
@@ -60,6 +62,7 @@ Cutoff:
   helixer_cov: 0.8         # Helixer coverage cutoff (keep genes greater than)
   augustus_cov: 0.8        # Augustus coverage cutoff (keep genes greater than)
   repeat_cov: 0.5          # Repeat coverage cutoff (keep genes less than)
+  miniprot_cov: 0.5        # Miniprot alignment coverage cutoff for rescue (keep genes greater than)
 
 ###############################################################################################
 #

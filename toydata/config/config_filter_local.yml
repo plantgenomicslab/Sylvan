@@ -4,7 +4,7 @@
 #
 ###############################################################################################
 
-Singularity: singularity/Sylvan_sandbox_v3
+Singularity: singularity/Sylvan_sandbox_v4
 
 Input:
   genome: results/GETA/genome.fasta
@@ -16,6 +16,7 @@ Input:
   repeat_gff: results/GETA/RepeatMasker/genome.repeat.gff3
   HmmDB: /usr/local/src
   RexDB: toydata/misc/Viridiplantae_v4.0.fasta
+  miniprot_gff: results/PROTEIN/merged_rmdup_proteins.fasta.miniprot.clean.gff3
   busco_lin: eudicots_odb10
   chrom_regex: (^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)
 
@@ -57,6 +58,7 @@ Cutoff:
   helixer_cov: 0.8
   augustus_cov: 0.8
   repeat_cov: 0.5
+  miniprot_cov: 0.5
 
 ###############################################################################################
 #

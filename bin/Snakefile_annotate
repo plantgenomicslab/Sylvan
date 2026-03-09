@@ -372,6 +372,10 @@ rule RepeatModeler:
 		    cp "$RM_DIR/families.stk" {params.results_dir}GETA/RepeatMasker/repeatModeler/species-families.stk
 		  fi
 		fi
+
+		# If no repeats found (small genome), create empty output so pipeline continues
+		touch {params.results_dir}GETA/RepeatMasker/repeatModeler/species-families.fa
+		touch {params.results_dir}GETA/RepeatMasker/repeatModeler/species-families.stk
 		"""
 # Variable input required for RepeatMasker_custom based on value of 'RM_lib'
 def repeatMaskerCustom_input(wildcards):
@@ -391,13 +395,18 @@ rule RepeatMasker_custom:
 		results_dir = RESULTS_DIR
 	shell:"""
 		micromamba activate repeat
-		LIB_PATH=$(readlink -f {input.lib})
-		cd {params.results_dir}GETA/RepeatMasker/repeatModeler && \
-		RepeatMasker {params.args} \
-			-pa {threads} \
-			-lib $LIB_PATH \
-			-dir {params.results_dir}GETA/RepeatMasker/repeatModeler \
-			{input.genome_fasta}
+		if [ ! -s {input.lib} ]; then
+			echo "WARNING: Empty repeat library — skipping RepeatMasker_custom" >&2
+			touch {output}
+		else
+			LIB_PATH=$(readlink -f {input.lib})
+			cd {params.results_dir}GETA/RepeatMasker/repeatModeler && \
+			RepeatMasker {params.args} \
+				-pa {threads} \
+				-lib $LIB_PATH \
+				-dir {params.results_dir}GETA/RepeatMasker/repeatModeler \
+				{input.genome_fasta}
+		fi
 		"""
 rule RepeatMasker_merge:
 	input:
@@ -2766,11 +2775,13 @@ rule partitionEVM:
 			export SLURM_TMPDIR={RESULTS_DIR_ABS}/TMP
 
 			# EVM partition_EVM_inputs.pl doesn't support gzipped files
-			# Decompress genome if it's gzipped
-			GENOME_FILE="{params.genome}"
-			if [[ "$GENOME_FILE" == *.gz ]]; then
-				zcat "$GENOME_FILE" > {params.results_dir}EVM/genome_temp.fasta
-				GENOME_FILE="{params.results_dir}EVM/genome_temp.fasta"
+			# Use a consistent name (genome.fasta) so partition subsets match
+			# the name used by write_EVM_commands.pl in writeEVMCommands rule.
+			GENOME_FILE="{params.results_dir_abs}/genome.fasta"
+			if [[ "{params.genome}" == *.gz ]]; then
+				zcat "{params.genome}" > "$GENOME_FILE"
+			else
+				ln -sf "$(readlink -f "{params.genome}")" "$GENOME_FILE"
 			fi
 
 			partition_EVM_inputs.pl \
@@ -2782,9 +2793,6 @@ rule partitionEVM:
 				--overlapSize 20000 \
 				--partition_dir {params.results_dir_abs} \
 				--partition_listing {params.results_dir_abs}/partitions_list.out
-
-			# Clean up temp genome file
-			rm -f {params.results_dir}EVM/genome_temp.fasta
 			"""
 
 
@@ -2807,15 +2815,7 @@ rule writeEVMCommands:
 			export TMPDIR=./{params.results_dir}TMP
 			export SLURM_TMPDIR=./{params.results_dir}TMP
 
-			# EVM doesn't support gzipped files - decompress if needed
-			# This file is kept for runEVM to use
-			GENOME_FILE="{params.genome}"
-			if [[ "$GENOME_FILE" == *.gz ]]; then
-				zcat "$GENOME_FILE" > {params.results_dir_abs}/genome.fasta
-			else
-				# Create symlink for non-gzipped genome so genome.fasta exists in EVM dir
-				ln -sf "$(readlink -f "$GENOME_FILE")" {params.results_dir_abs}/genome.fasta
-			fi
+			# genome.fasta was already created by partitionEVM rule
 			GENOME_FILE="{params.results_dir_abs}/genome.fasta"
 
 			write_EVM_commands.pl \
@@ -2867,28 +2867,25 @@ rule recombineEVM:
 			export TMPDIR=./{params.results_dir}TMP
 			export SLURM_TMPDIR=./{params.results_dir}TMP
 
-			# Use decompressed genome if available, otherwise decompress
-			GENOME_FILE="{params.genome}"
-			if [[ -f "{params.results_dir_abs}/genome.fasta" ]]; then
-				GENOME_FILE="{params.results_dir_abs}/genome.fasta"
-			elif [[ "$GENOME_FILE" == *.gz ]]; then
-				zcat "$GENOME_FILE" > {params.results_dir_abs}/genome.fasta
-				GENOME_FILE="{params.results_dir_abs}/genome.fasta"
-			fi
+			# genome.fasta was created by partitionEVM rule
+			GENOME_FILE="{params.results_dir_abs}/genome.fasta"
 
 			recombine_EVM_partial_outputs.pl \
 			--partitions {params.results_dir_abs}/partitions_list.out \
-			--output_file_name {params.results_dir_abs}/evm.out
+			--output_file_name evm.out
 
 			convert_EVM_outputs_to_GFF3.pl \
 			--partitions {params.results_dir_abs}/partitions_list.out \
-			--output {params.results_dir_abs}/evm.out \
+			--output evm.out \
 			--genome $GENOME_FILE
 
-			find . -regex '.*\\/evm.out.gff3' -exec cat {{}} \\; > {output}
+			find . -regex '.*\\/evm.out.gff3' -exec cat {{}} \\; > {output}.raw
 
-			# Clean up temp genome
-			rm -f {params.results_dir_abs}/genome.fasta
+			# Remove phantom genes with coordinates beyond chromosome boundaries
+			# (safety net for EVM partition merge issues)
+			samtools faidx $GENOME_FILE
+			python bin/dedup_evm_gff3.py {output}.raw ${{GENOME_FILE}}.fai {output}
+			rm -f {output}.raw
 		"""
 
 #TODO: Use snakemake 'ensure' to more robustly check for proper output
@@ -2928,15 +2925,25 @@ rule pasaPost:
 			"""
 
 rule agat_clean_final:
-	input: f"{RESULTS_DIR}pasaPost.ok"
+	input:
+		pasa_ok = f"{RESULTS_DIR}pasaPost.ok",
+		evm = f"{RESULTS_DIR}EVM/EVM.all.gff3",
+		genome = f"{RESULTS_DIR}GETA/genome.fasta",
+		helixer = f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3",
+		augustus = f"{RESULTS_DIR}GETA/Augustus/augustus.gff3",
+		miniprot = f"{RESULTS_DIR}PROTEIN/merged_rmdup_proteins.fasta.miniprot.clean.gff3",
+		psiclass = f"{RESULTS_DIR}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gff"
 	output: f"{RESULTS_DIR}PREFILTER/Sylvan.gff3"
 	params:
 		results_dir = RESULTS_DIR,
-		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA"
+		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA",
+		swissprot = config_dict["Input"].get("swissprot", ""),
+		splice = f"{RESULTS_DIR}TRANSCRIPT/PsiClass/splice/psiclass.STAR_bam.trusted_splice"
 	shell: """
 		micromamba activate annotation
 		mkdir -p {params.results_dir}PREFILTER
-		# Use an array to avoid pipefail issues with ls|head under set -euo pipefail
+
+		# Find latest PASA output GFF3
 		pasa_files=( {params.pasa_dir}/pasa.sqlite.gene_structures_post_PASA_updates.*.gff3 )
 		pasa_gff3="${{pasa_files[-1]}}"
 		if [ ! -f "${{pasa_gff3}}" ]; then
@@ -2944,7 +2951,31 @@ rule agat_clean_final:
 			exit 1
 		fi
 		echo "Using PASA GFF3: ${{pasa_gff3}}"
-		agat_convert_sp_gxf2gxf.pl --gff "${{pasa_gff3}}" -o {params.results_dir}PREFILTER/Sylvan.gff3
+
+		# Merge PASA-updated genes with EVM genes that PASA dropped
+		merge_args=("${{pasa_gff3}}" {input.evm} {params.results_dir}PREFILTER/Sylvan_merged.gff3)
+		if [ -n "{params.swissprot}" ] && [ -f "{params.swissprot}" ]; then
+			echo "Using SwissProt DB for PASA/EVM comparison: {params.swissprot}"
+			merge_args+=({input.genome} {params.swissprot})
+		fi
+		python3 {workflow.basedir}/merge_pasa_evm.py "${{merge_args[@]}}"
+
+		# Refine gene boundaries using independent evidence
+		# Fixes truncated gene models by comparing against Helixer/Augustus/Miniprot
+		# Uses RNA-seq splice junctions + protein alignment + cross-source agreement
+		python3 {workflow.basedir}/refine_boundaries.py \
+			{params.results_dir}PREFILTER/Sylvan_merged.gff3 \
+			--helixer {input.helixer} \
+			--augustus {input.augustus} \
+			--miniprot {input.miniprot} \
+			--splice {params.splice} \
+			--output {params.results_dir}PREFILTER/Sylvan_refined.gff3
+
+		# Clean with AGAT
+		agat_convert_sp_gxf2gxf.pl --gff {params.results_dir}PREFILTER/Sylvan_refined.gff3 \
+			-o {params.results_dir}PREFILTER/Sylvan.gff3
+		rm -f {params.results_dir}PREFILTER/Sylvan_merged.gff3
+		rm -f {params.results_dir}PREFILTER/Sylvan_refined.gff3
 
 		# Clean up AGAT log files and directories
 		mv -f *.agat.log {params.results_dir}TMP/ 2>/dev/null || true

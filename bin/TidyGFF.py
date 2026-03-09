@@ -141,13 +141,26 @@ def loadGFF(gff: str) -> dict:
 					continue
 				mrna = getParent(line[8])
 				if missing_parent:
+					# Handle duplicate feature IDs (e.g., CDS segments sharing one ID)
+					orig_id = feature_id
+					suffix = 2
+					while feature_id in gff_dict[chrom][mrna]:
+						feature_id = f"{orig_id}_{suffix}"
+						suffix += 1
 					gff_dict[chrom][mrna][feature_id] = {"data":feature_data}
 				else:
 					gene = getParent(gff_dict[chrom][gene][mrna]["data"]["attributes"])
 					if (mrna != cur_mrna) or (gene != cur_gene):
 						print(f"WARNING: Could not parse parents for {line[2]} type feature with id {feature_id}")
 
-					gff_dict[chrom][gene][mrna][feature_id] = {"data":feature_data}
+					# Handle duplicate feature IDs (e.g., CDS segments sharing one ID)
+					parent_dict = gff_dict[chrom][gene][mrna]
+					orig_id = feature_id
+					suffix = 2
+					while feature_id in parent_dict:
+						feature_id = f"{orig_id}_{suffix}"
+						suffix += 1
+					parent_dict[feature_id] = {"data":feature_data}
 	return(gff_dict)
 
 def singleExonGenes(gff_dict):

@@ -37,6 +37,7 @@ trap 'echo ""; echo "=== Log files: results/logs/{rule}_{wildcards}.err ==="; ec
 # Singularity bind paths adapted for local filesystem
 snakemake -p \
 	--rerun-incomplete \
+	--rerun-triggers mtime \
 	--use-singularity \
 	--singularity-args "$SINGULARITY_ARGS" \
 	--keep-going \
@@ -45,5 +46,5 @@ snakemake -p \
 	--snakefile bin/Snakefile_annotate \
 	--groups Sam2Transfrag=group0 --group-components group0=100 \
 	--cores 16 \
-	--latency-wait 10 \
+	--latency-wait 120 \
 		"$@"

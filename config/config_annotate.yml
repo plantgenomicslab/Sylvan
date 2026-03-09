@@ -36,6 +36,8 @@ Input:
                                       # See: https://github.com/Gaius-Augustus/Augustus/tree/master/config/species
   evm_weights: config/evm_weights.txt  # [!!!!REQUIRED!!!!:file] EVM weights file (included in Sylvan/config/)
   num_evm_files: 126              # [optional:value] Number of EVM splits (default: 126)
+  swissprot: "toydata/misc/uniprot_sprot.fasta"  # [optional:file] SwissProt reviewed FASTA for PASA/EVM model comparison
+                                  # Download: curl -o swissprot_viridiplantae.fasta.gz "https://rest.uniprot.org/uniprotkb/stream?query=(taxonomy_id:33090)+AND+(reviewed:true)&format=fasta&compressed=true" && gunzip swissprot_viridiplantae.fasta.gz
 
 ###############################################################################################
 #
