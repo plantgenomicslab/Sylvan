@@ -2327,6 +2327,8 @@ rule helixer:
 	output: f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3"
 	shell: '''
 		micromamba activate helixer
+		# TF 2.15 XLA JIT needs libdevice.10.bc — point to pip-installed nvidia cuda_nvcc
+		export XLA_FLAGS="--xla_gpu_cuda_data_dir=$(python -c 'import nvidia.cuda_nvcc; import os; print(os.path.dirname(nvidia.cuda_nvcc.__file__))' 2>/dev/null || echo '')"
 		if [ -n "{params.model_dir}" ]; then
 		    MODEL_ARG="--model-filepath {params.model_dir}/{params.l}.h5"
 		else
