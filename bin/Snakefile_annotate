@@ -15,7 +15,7 @@ def run_in_container(cmd_str, env_name="genepred", stderr_file=None):
     sif = globals().get("config_dict", {}).get("Input", {}).get("singularity", "")
     sing_args = os.environ.get("SNAKEMAKE_SINGULARITY_ARGS", "--nv").split()
     if sif:
-        inner = f'eval "$(/usr/local/bin/micromamba shell hook -s bash)"; micromamba activate {env_name} && {cmd_str}'
+        inner = f'eval "$(/usr/local/bin/micromamba shell hook -s bash)"; micromamba activate /opt/mamba/envs/{env_name} && {cmd_str}'
         fh = open(stderr_file, 'w') if stderr_file else None
         try:
             _subprocess.run(
@@ -26,7 +26,7 @@ def run_in_container(cmd_str, env_name="genepred", stderr_file=None):
             if fh:
                 fh.close()
     else:
-        shell(f"micromamba activate {env_name} && {cmd_str}")
+        shell(f"micromamba activate /opt/mamba/envs/{env_name} && {cmd_str}")
 
 # Helper function to convert memory string (e.g., "48g", "16G", "4096m") to megabytes
 def parse_memory_to_mb(mem_str):
@@ -147,8 +147,21 @@ if (config_dict["Input"]["geta"]["augustus_species"] != "placeholder") | (config
 # Singularity container with pre-built micromamba environments
 singularity: config_dict.get("Input", {}).get("singularity", "") or config_dict.get("Singularity", "")
 
-# Set up micromamba shell hook for all shell commands
-shell.prefix("set +u; eval \"$(/usr/local/bin/micromamba shell hook -s bash)\"; set -u; ")
+# Set up micromamba shell hook for all shell commands.
+# Cache the hook output to a host-mounted file so each rule sources it
+# instead of forking `micromamba shell hook` (which has a 5s hardcoded
+# timeout and intermittently kills jobs under heavy cluster I/O).
+# Invalidate by deleting the cache file when the .sif image changes.
+_HOOK_CACHE = f"{RESULTS_DIR}/.micromamba_hook.sh"
+shell.prefix(
+    'set +u; '
+    f'if [ ! -s "{_HOOK_CACHE}" ]; then '
+    f'  /usr/local/bin/micromamba shell hook -s bash > "{_HOOK_CACHE}.tmp.$$" && '
+    f'  mv -n "{_HOOK_CACHE}.tmp.$$" "{_HOOK_CACHE}" || rm -f "{_HOOK_CACHE}.tmp.$$"; '
+    f'fi; '
+    f'source "{_HOOK_CACHE}"; '
+    'set -u; '
+)
 
 # Get inputs
 genome = config_dict["Input"]["genome"]
@@ -488,7 +501,8 @@ rule STAR_generate:
 			--runMode genomeGenerate \
 			--genomeDir {params.results_dir}GETA/STAR/ \
 			--genomeFastaFiles {input} \
-			--genomeSAindexNbases 12
+			--genomeSAindexNbases 14 \
+			--limitGenomeGenerateRAM 200000000000
 			"""
 
 rule STAR_paired:
@@ -505,9 +519,14 @@ rule STAR_paired:
 			micromamba activate alignment
 			STAR --runMode alignReads \
   			--runThreadN {threads} \
-  			--outFilterMultimapNmax 100 \
-  			--alignIntronMin 25 \
-  			--alignIntronMax 10000 \
+  			--outFilterMultimapNmax 50 \
+  			--alignIntronMin 20 \
+  			--alignIntronMax 100000 \
+  			--alignSJoverhangMin 8 \
+  			--outFilterMismatchNoverReadLmax 0.04 \
+  			--outFilterScoreMinOverLread 0.3 \
+  			--outFilterMatchNminOverLread 0.3 \
+  			--outReadsUnmapped Fastx \
   			--genomeDir {params.results_dir}GETA/STAR \
 			--outSAMtype BAM SortedByCoordinate \
 			--limitBAMsortRAM 216000000000 \
@@ -545,9 +564,14 @@ rule STAR_single:
 		micromamba activate alignment
 		STAR --runMode alignReads \
 		--runThreadN {threads} \
-		--outFilterMultimapNmax 100 \
-		--alignIntronMin 25 \
-		--alignIntronMax 10000 \
+		--outFilterMultimapNmax 50 \
+		--alignIntronMin 20 \
+		--alignIntronMax 100000 \
+		--alignSJoverhangMin 8 \
+		--outFilterMismatchNoverReadLmax 0.04 \
+		--outFilterScoreMinOverLread 0.3 \
+		--outFilterMatchNminOverLread 0.3 \
+		--outReadsUnmapped Fastx \
 		--genomeDir {params.results_dir}GETA/STAR \
 		--outSAMtype BAM SortedByCoordinate \
 		--outSAMattributes XS \
@@ -675,18 +699,22 @@ rule mergeTransfrag:
 		results_dir = RESULTS_DIR
 	run:
 		rd = params.results_dir
-		shell(f"rm -f {rd}GETA/transcript/transfrag.list {rd}GETA/transcript/intron.txt {rd}GETA/transcript/base_depth.txt")
-		shell(f"touch {rd}GETA/transcript/intron.txt {rd}GETA/transcript/base_depth.txt")
+		shell(f"rm -f {rd}GETA/transcript/transfrag.list {rd}GETA/transcript/transfrag.gtf {rd}GETA/transcript/intron.txt {rd}GETA/transcript/base_depth.txt")
+		shell(f"touch {rd}GETA/transcript/transfrag.gtf {rd}GETA/transcript/intron.txt {rd}GETA/transcript/base_depth.txt")
 
-		# Build concatenation commands and execute in a single shell call
-		cmds = []
-		for item in input.gtf_files:
-			item = re.sub(r"\.[a-zA-Z]+$", "", item)
-			cmds.append(f"cat {item}.gtf >> {rd}GETA/transcript/transfrag.gtf")
-			cmds.append(f"[ -f {item}.intron ] && cat {item}.intron >> {rd}GETA/transcript/intron.txt || true")
-			cmds.append(f"[ -f {item}.base_depth ] && cat {item}.base_depth >> {rd}GETA/transcript/base_depth.txt || true")
-		if cmds:
-			shell(" ; ".join(cmds))
+		# Write basenames to a list file and merge via a while-loop. A single
+		# `;`-joined shell string segfaults bash when input.gtf_files >100k.
+		list_path = f"{rd}GETA/transcript/transfrag.list"
+		with open(list_path, 'w') as lf:
+			for item in input.gtf_files:
+				lf.write(re.sub(r"\.[a-zA-Z]+$", "", item) + "\n")
+		shell(f"""
+			while IFS= read -r base; do
+				cat "$base.gtf" >> {rd}GETA/transcript/transfrag.gtf
+				[ -f "$base.intron" ] && cat "$base.intron" >> {rd}GETA/transcript/intron.txt || true
+				[ -f "$base.base_depth" ] && cat "$base.base_depth" >> {rd}GETA/transcript/base_depth.txt || true
+			done < {list_path}
+		""")
 
 		run_in_container(
 			f"transfragDump --out {rd}GETA/transcript/transfrag {rd}GETA/transcript/transfrag.gtf {input.genome_fasta}",
@@ -2419,7 +2447,7 @@ rule gmapExon:
 	shell:
 		"""
 		micromamba activate annotation
-		gmap -D {params.results_dir}TRANSCRIPT/Gmap -d DB -t {threads}  --min-identity=0.7 \
+		gmapl -D {params.results_dir}TRANSCRIPT/Gmap -d DB -t {threads}  --min-identity=0.7 \
 		--min-trimmed-coverage=0.85 --cross-species \
 		--max-intronlength-middle=0  \
 		--max-intronlength-ends=0 --mapexons -p 1 -f 3 \

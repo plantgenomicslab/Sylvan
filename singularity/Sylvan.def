@@ -503,6 +503,12 @@ YAMLEOF
 		-C /usr/local/bin/evigene
 
 
+	# ---- PASA patch: use CSI index so chromosomes >512Mb are supported ---- #
+	# BAI is 32-bit (max ~512Mb); samtools index needs -c for large genomes.
+	for f in $(find /opt -name process_minimap2_alignments.pl 2>/dev/null); do
+		sed -i 's/samtools index \$output/samtools index -c \$output/g' "$f"
+	done
+
 	# ---- Cleanup ---- #
 	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
 		/usr/local/bin/micromamba clean --all -f --yes
