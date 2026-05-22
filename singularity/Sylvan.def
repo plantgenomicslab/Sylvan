@@ -509,6 +509,29 @@ YAMLEOF
 		sed -i 's/samtools index \$output/samtools index -c \$output/g' "$f"
 	done
 
+	# ---- GETA shebang fix: scripts use #!/opt/miniconda3/bin/perl which ---- #
+	# this build no longer provides. Rewrite to env-relative perl.
+	if [ -d /usr/local/bin/geta ]; then
+		grep -rIl '^#!/opt/miniconda3/bin/perl' /usr/local/bin/geta 2>/dev/null | \
+			xargs -r sed -i '1c#!/usr/bin/env perl'
+	fi
+
+	# ---- TransDecoder symlink fix: package moved scripts to util/ ---- #
+	# Conda's TransDecoder feedstock now installs binaries under
+	# opt/transdecoder/util/, but the env's bin/ symlinks still point at the
+	# old opt/transdecoder/ location, producing broken links.
+	for env_bin in /opt/envs/annotation/bin /opt/envs/genepred/bin; do
+		[ -d "$env_bin" ] || continue
+		for link in "$env_bin"/TransDecoder.*; do
+			[ -L "$link" ] || continue
+			[ -e "$link" ] && continue
+			base=$(basename "$link")
+			if [ -e "$env_bin/../opt/transdecoder/util/$base" ]; then
+				ln -sf "../opt/transdecoder/util/$base" "$link"
+			fi
+		done
+	done
+
 	# ---- Cleanup ---- #
 	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
 		/usr/local/bin/micromamba clean --all -f --yes
