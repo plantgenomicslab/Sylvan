@@ -87,8 +87,13 @@ echo "==========================================="
 singularity exec $SINGULARITY_ARGS "$SIF" bash -c "
 eval \"\$(/usr/local/bin/micromamba shell hook -s bash)\"
 micromamba activate helixer
-# TF XLA JIT needs libdevice.10.bc — point to pip-installed nvidia cuda_nvcc
-export XLA_FLAGS=\"--xla_gpu_cuda_data_dir=\$(python -c 'import nvidia.cuda_nvcc; import os; print(os.path.dirname(nvidia.cuda_nvcc.__file__))' 2>/dev/null || echo '')\"
+# TF XLA JIT needs libdevice.10.bc + ptxas from pip-installed nvidia cuda_nvcc.
+# cuda_nvcc is a namespace package (__file__ is None) — use __path__, not __file__.
+CUDA_NVCC_DIR=\$(python -c 'import nvidia.cuda_nvcc as m; print(list(m.__path__)[0])' 2>/dev/null || echo '')
+if [ -n \"\$CUDA_NVCC_DIR\" ]; then
+  export XLA_FLAGS=\"--xla_gpu_cuda_data_dir=\$CUDA_NVCC_DIR\"
+  export PATH=\"\$CUDA_NVCC_DIR/bin:\$PATH\"
+fi
 Helixer.py \
   --fasta-path $GENOME \
   --model-filepath $MODEL_FILE \
