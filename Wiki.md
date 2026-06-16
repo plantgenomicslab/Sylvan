@@ -623,7 +623,8 @@ Running the benchmark on *A. thaliana* Chr4 toydata (eudicots_odb10, 16 cores, 6
 >   genes). This serves as the ground truth for comparison.
 > - Low BUSCO C% is expected for single-chromosome data — only ~17% of eudicot BUSCOs
 >   map to Chr4. The reference TAIR10 itself shows 16.6% C, confirming this ceiling.
-> - **Helixer** produced empty GFF3 in this toydata run due to GPU/CUDA sandbox issue.
+> - **Helixer** produced empty GFF3 in this toydata run due to a GPU/CUDA XLA issue
+>   (libdevice not found — see [Running Helixer on GPU](docs/helixer_gpu.md)).
 >   On full genome runs with proper GPU access, Helixer typically achieves OMArk > 95%.
 > - **Sylvan filtered beats TAIR10 reference** in OMArk consistency (94.88% vs 94.28%),
 >   demonstrating effective pseudogene/TE removal while preserving all BUSCO orthologs.
@@ -719,7 +720,10 @@ helixer:
   memory: 32g
   account: your-gpu-account
   partition: your-gpu-partition
+  extra_args: "--gres=gpu:1"   # the actual GPU request
 ```
+
+> Helixer's XLA JIT requires `libdevice.10.bc`/`ptxas` from `nvidia-cuda-nvcc` in the `helixer` env; the pipeline auto-detects them (via `nvidia.cuda_nvcc.__path__`) and sets `XLA_FLAGS`. If you build a custom container, ensure `python -c 'import nvidia.cuda_nvcc'` works. Full guide: **[Running Helixer on GPU](docs/helixer_gpu.md)**.
 
 ### Custom Helixer Models
 
