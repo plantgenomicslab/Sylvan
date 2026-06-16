@@ -134,6 +134,8 @@ helixer:
 
 All other rules run on CPU nodes using the `__default__` account/partition. Only the `helixer` rule needs GPU access.
 
+> **libdevice/XLA:** Helixer's TensorFlow XLA JIT needs `libdevice.10.bc` and `ptxas` from the `nvidia-cuda-nvcc` package in the `helixer` env. The pipeline locates them automatically (via `nvidia.cuda_nvcc.__path__`) and sets `XLA_FLAGS`; no manual setup is required. See **[Running Helixer on GPU](docs/helixer_gpu.md)** for full GPU setup, standalone runs, and the no-GPU-cluster workflow.
+
 **Compatibility matrix (tested):**
 
 | Host GPU | Host Driver | Container CUDA | Status |
