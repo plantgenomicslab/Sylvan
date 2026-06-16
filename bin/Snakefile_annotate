@@ -2355,8 +2355,13 @@ rule helixer:
 	output: f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3"
 	shell: '''
 		micromamba activate helixer
-		# TF 2.15 XLA JIT needs libdevice.10.bc — point to pip-installed nvidia cuda_nvcc
-		export XLA_FLAGS="--xla_gpu_cuda_data_dir=$(python -c 'import nvidia.cuda_nvcc; import os; print(os.path.dirname(nvidia.cuda_nvcc.__file__))' 2>/dev/null || echo '')"
+		# TF 2.15 XLA JIT needs libdevice.10.bc + ptxas from pip-installed nvidia cuda_nvcc.
+		# cuda_nvcc is a namespace package (__file__ is None) — use __path__, not __file__.
+		CUDA_NVCC_DIR=$(python -c 'import nvidia.cuda_nvcc as m; print(list(m.__path__)[0])' 2>/dev/null || echo '')
+		if [ -n "$CUDA_NVCC_DIR" ]; then
+		    export XLA_FLAGS="--xla_gpu_cuda_data_dir=$CUDA_NVCC_DIR"
+		    export PATH="$CUDA_NVCC_DIR/bin:$PATH"
+		fi
 		if [ -n "{params.model_dir}" ]; then
 		    MODEL_ARG="--model-filepath {params.model_dir}/{params.l}.h5"
 		else
@@ -2366,8 +2371,12 @@ rule helixer:
 		  --fasta-path {input.g} \
 		  $MODEL_ARG \
 		  --subsequence-length {params.subseq} \
-		  --gff-output-path {output} \
-		|| {{ echo "WARNING: Helixer failed (GPU/CUDA issue?). Creating empty output." >&2; touch {output}; }}
+		  --gff-output-path {output}
+		# Fail loudly if Helixer produced no usable output (no silent empty-file fallback).
+		if [ ! -s {output} ]; then
+		    echo "ERROR: Helixer produced empty/no output — failing rule." >&2
+		    exit 1
+		fi
 		'''
 
 rule prepare_liftoff:
