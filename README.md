@@ -282,6 +282,18 @@ This section describes the inputs, configuration, and commands needed to run the
 
 #### SLURM (HPC)
 
+**Toydata test (A. thaliana chr4)** — `annotate_toydata.sh` sets the toydata config and SLURM cluster config internally, then submits per-rule jobs to SLURM:
+
+```bash
+# Dry run
+./bin/annotate_toydata.sh -n
+
+# Run (head process submits per-rule jobs to SLURM)
+./bin/annotate_toydata.sh
+```
+
+**Your own data:**
+
 ```bash
 # Set config (required)
 export SYLVAN_CONFIG="config/config_annotate.yml"
@@ -352,6 +364,18 @@ This section describes the inputs and commands for the filter pipeline. All inpu
 | `miniprot_cov` | Miniprot protein alignment overlap (RF feature) | 0.5 |
 
 ### Running the Pipeline
+
+**Toydata test (A. thaliana chr4)** — `filter_toydata.sh` sets the toydata filter config and SLURM cluster config internally, then submits per-rule jobs to SLURM:
+
+```bash
+# Dry run
+./bin/filter_toydata.sh -n
+
+# Run (head process submits per-rule jobs to SLURM)
+./bin/filter_toydata.sh
+```
+
+**Your own data:**
 
 ```bash
 # Set config (required)
