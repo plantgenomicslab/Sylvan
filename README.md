@@ -255,7 +255,7 @@ An alternative scoring pipeline (`Snakefile_filter_score`) uses logistic regress
 - `results/FILTER/scores.metrics.txt` — AUC/PR/F1 and chosen thresholds
 
 ```bash
-export SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml"
+# Toydata example — filter_score_toydata.sh sets the toydata config internally
 ./bin/filter_score_toydata.sh
 ```
 
@@ -282,7 +282,7 @@ This section describes the inputs, configuration, and commands needed to run the
 
 ```bash
 # Set config (required)
-export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
+export SYLVAN_CONFIG="config/config_annotate.yml"
 
 # Dry run
 snakemake -n --snakefile bin/Snakefile_annotate
@@ -290,23 +290,25 @@ snakemake -n --snakefile bin/Snakefile_annotate
 # Submit to SLURM
 sbatch -A [account] -p [partition] -c 1 --mem=1g \
   -J annotate -o annotate.out -e annotate.err \
-  --wrap="./bin/annotate_toydata.sh"
+  --wrap="./bin/annotate.sh"
 
 # Or run directly
-./bin/annotate_toydata.sh
+./bin/annotate.sh
 ```
 
-#### Local (no SLURM)
+#### Local (no SLURM) — toydata example
 
 ```bash
-# Set config for local execution
-export SYLVAN_CONFIG="toydata/config/config_annotate_local.yml"
+# Uses the toydata local config by default (toydata/config/config_annotate_local.yml)
 
 # Dry run
 snakemake -n --snakefile bin/Snakefile_annotate
 
 # Run locally (uses --cores instead of --cluster)
 ./bin/annotate_local.sh
+
+# For your own data, create config/config_annotate_local.yml and set:
+# export SYLVAN_CONFIG="config/config_annotate_local.yml"
 ```
 
 See [Local Execution](#local-execution-without-slurm) for details.
@@ -351,7 +353,7 @@ This section describes the inputs and commands for the filter pipeline. All inpu
 
 ```bash
 # Set config (required)
-export SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml"
+export SYLVAN_FILTER_CONFIG="config/config_filter.yml"
 
 # Dry run
 snakemake -n --snakefile bin/Snakefile_filter
@@ -359,10 +361,10 @@ snakemake -n --snakefile bin/Snakefile_filter
 # Submit to SLURM
 sbatch -A [account] -p [partition] -c 1 --mem=4g \
   -J filter -o filter.out -e filter.err \
-  --wrap="./bin/filter_toydata.sh"
+  --wrap="./bin/filter.sh"
 
 # Or run directly
-./bin/filter_toydata.sh
+./bin/filter.sh
 ```
 
 **Output:** `results/FILTER/filtered.gff3`
@@ -820,7 +822,8 @@ Sylvan can run on any Linux machine without SLURM. The `bin/annotate_local.sh` s
 ### Running
 
 ```bash
-export SYLVAN_CONFIG="toydata/config/config_annotate_local.yml"
+# Use the local config you copied and edited above
+export SYLVAN_CONFIG="toydata/config/my_local_config.yml"
 
 # Dry run
 snakemake -n --snakefile bin/Snakefile_annotate
