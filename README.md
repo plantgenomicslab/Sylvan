@@ -282,14 +282,34 @@ This section describes the inputs, configuration, and commands needed to run the
 
 #### SLURM (HPC)
 
-**Toydata test (A. thaliana chr4)** — `annotate_toydata.sh` sets the toydata config and SLURM cluster config internally, then submits per-rule jobs to SLURM:
+**Toydata test (A. thaliana chr4)** — the toy dataset (genome, RNA-seq, proteins, neighbors, SwissProt) ships with the repo under `toydata/`. Full SLURM run, starting from config setup:
 
 ```bash
-# Dry run
-./bin/annotate_toydata.sh -n
+# 1. Activate the environment
+conda activate sylvan                 # or: micromamba activate sylvan
 
-# Run (head process submits per-rule jobs to SLURM)
+# 2. Point Snakemake at the toydata config (needed for manual snakemake calls,
+#    e.g. the dry run below; without it Snakemake loads the placeholder template)
+export SYLVAN_CONFIG="toydata/config/config_annotate.yml"
+
+# 3. Dry run — validates config + inputs and lists jobs without submitting
+snakemake -n --snakefile bin/Snakefile_annotate
+
+# 4. Set your SLURM account/partition in the toydata cluster config
+#    toydata/config/cluster_annotate.yml -> __default__ (default: cpu-s1-pgl-0)
+
+# 5. Run on SLURM. annotate_toydata.sh re-exports SYLVAN_CONFIG +
+#    SYLVAN_CLUSTER_CONFIG (toydata/config/...) internally and submits each
+#    rule as its own SLURM job via --cluster.
+sbatch -A [account] -p [partition] -c 1 --mem=1g \
+  -J annotate_toy -o annotate_toy.out -e annotate_toy.err \
+  --wrap="./bin/annotate_toydata.sh"
+
+#    Or run the head process directly on a login/compute node:
 ./bin/annotate_toydata.sh
+
+#    Dry run through the wrapper also works:
+./bin/annotate_toydata.sh -n
 ```
 
 **Your own data:**
