@@ -50,7 +50,10 @@ def parse_memory_to_mb(mem_str):
 #		handlers=[RichHandler(console=Console())])
 
 # Load config file (can be overridden via SYLVAN_CONFIG environment variable)
-config_file_path = os.environ.get('SYLVAN_CONFIG', 'config_annotate.yml')
+# Default points to the in-repo template config/config_annotate.yml (run from the
+# repo root). Set SYLVAN_CONFIG to use another config, e.g.:
+#   SYLVAN_CONFIG=toydata/config/config_annotate.yml snakemake ... --snakefile bin/Snakefile_annotate
+config_file_path = os.environ.get('SYLVAN_CONFIG', 'config/config_annotate.yml')
 
 # Results directory prefix - all outputs will be placed under this directory
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -64,9 +67,17 @@ if not RESULTS_DIR.endswith("/"):
 	RESULTS_DIR += "/"
 RESULTS_DIR_ABS = os.path.abspath(RESULTS_DIR)
 EVM_DIR_ABS = os.path.join(RESULTS_DIR_ABS, "EVM")
+print(f"[Sylvan] Using config: {config_file_path}", file=sys.stderr)
 try:
 	with open(config_file_path, "r") as config_file:
 		config_dict = yaml.safe_load(config_file)
+except FileNotFoundError:
+	logging.error(
+		f"Config file not found: {config_file_path} ... "
+		"set SYLVAN_CONFIG (e.g. SYLVAN_CONFIG=toydata/config/config_annotate.yml) "
+		"or run from the repo root where config/config_annotate.yml exists."
+	)
+	sys.exit(1)
 except yaml.YAMLError as e:
 	logging.error("Could not load config file! Check config.yml ... see error below")
 	sys.exit(e)
