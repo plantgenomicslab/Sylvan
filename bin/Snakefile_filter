@@ -8,12 +8,22 @@ from pathlib import Path
 RESULTS_DIR = os.environ.get("SYLVAN_RESULTS_DIR", "results/")
 
 # Load config file (can be overridden via SYLVAN_FILTER_CONFIG environment variable)
-config_file_path = os.environ.get('SYLVAN_FILTER_CONFIG', 'config_filter.yml')
-with open(config_file_path, 'r') as config_file:
-	try:
+# Default points to the in-repo template config/config_filter.yml (run from the
+# repo root). Set SYLVAN_FILTER_CONFIG to use another config, e.g.:
+#   SYLVAN_FILTER_CONFIG=toydata/config/config_filter.yml snakemake ... --snakefile bin/Snakefile_filter
+config_file_path = os.environ.get('SYLVAN_FILTER_CONFIG', 'config/config_filter.yml')
+print(f"[Sylvan] Using config: {config_file_path}", file=sys.stderr)
+try:
+	with open(config_file_path, 'r') as config_file:
 		config_dict=yaml.safe_load(config_file)
-	except yaml.YAMLError as e:
-		sys.exit("Could not load configs! Check config.yaml ...")
+except FileNotFoundError:
+	sys.exit(
+		f"Config file not found: {config_file_path} ... "
+		"set SYLVAN_FILTER_CONFIG (e.g. SYLVAN_FILTER_CONFIG=toydata/config/config_filter.yml) "
+		"or run from the repo root where config/config_filter.yml exists."
+	)
+except yaml.YAMLError as e:
+	sys.exit("Could not load configs! Check config.yaml ...")
 
 # Check inputs
 for key in config_dict["Input"]:
