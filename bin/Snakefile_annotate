@@ -2,7 +2,8 @@ import yaml, sys, os, re, math, logging, json
 import subprocess as _subprocess
 import pandas as pd
 from subprocess import check_output
-from rich.logging import Console, RichHandler
+from rich.console import Console 
+from rich.logging import RichHandler
 from pathlib import Path
 
 def run_in_container(cmd_str, env_name="genepred", stderr_file=None):
