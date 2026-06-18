@@ -306,10 +306,16 @@ snakemake -n --snakefile bin/Snakefile_annotate
 
 ### Submit to SLURM
 
+`annotate_toydata.sh` re-exports `SYLVAN_CONFIG` + `SYLVAN_CLUSTER_CONFIG` (the `toydata/config/...` files) internally and submits each rule as its own SLURM job via `--cluster`. Set per-rule account/partition in `toydata/config/cluster_annotate.yml` (`__default__`, default `cpu-s1-pgl-0`) for your cluster.
+
 ```bash
+# Submit the head process as a SLURM job (recommended)
 sbatch -A [account] -p [partition] -c 1 --mem=1g \
   -J annotate -o annotate.out -e annotate.err \
   --wrap="./bin/annotate_toydata.sh"
+
+# Or run the head process directly on a login/compute node
+./bin/annotate_toydata.sh
 ```
 
 ### Alternative: Local Execution (no SLURM)
@@ -860,6 +866,7 @@ toydata/
 │   ├── neighbor.cds             # Combined CDS for EDTA
 │   └── neighbor.aa              # Proteins for homology
 ├── misc/
+│   ├── uniprot_sprot.fasta      # SwissProt subset (~5 MB) for PASA/EVM model comparison (swissprot)
 │   └── Viridiplantae_v4.0.fasta # RexDB plant repeat protein database
 └── EDTA/                        # Pre-computed repeat library
     └── genome.fasta.mod.EDTA.TElib.fa
@@ -976,6 +983,18 @@ Reads mapping to Chr4 were extracted:
 ```bash
 STAR --genomeDir star_index --readFilesIn sample_1.fq.gz sample_2.fq.gz
 samtools view -b -F 4 Aligned.bam | samtools fastq -1 out_1.fq -2 out_2.fq -
+```
+
+**4. SwissProt subsampling (`misc/uniprot_sprot.fasta`)**
+
+The optional `swissprot` evidence (PASA/EVM model comparison) is an even-stride
+subsample of the full UniProtKB/Swiss-Prot release — every 5th record, truncated
+on a record boundary to ~5 MB (8,720 of ~44,700 sequences; ~3,200 *Arabidopsis*).
+This keeps it small while preserving multi-species coverage relevant to the
+*A. thaliana* toy genome:
+```bash
+# keep every 5th SwissProt record from the full release (≈5 MB)
+awk '/^>/{n++} n%5==1' uniprot_sprot_full.fasta > toydata/misc/uniprot_sprot.fasta
 ```
 
 ---
