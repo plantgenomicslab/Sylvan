@@ -88,6 +88,13 @@ toydata/RNASeq/
 # 나머지 toydata는 작은 파일만 사용한다고 가정 (gff, 작은 fasta 등)
 # 필요하다면 여기서 개별 확장자를 허용/제외 조정
 
+# toydata EDTA TE library: 파이프라인 입력으로 필요 — 위 genome.* ignore 예외 (LFS 추적)
+!toydata/EDTA/genome.fasta.mod.EDTA.TElib.fa
+
+# toydata genome 입력(EDTA/genome_input): 파이프라인 입력으로 필요 — 위 genome.* ignore 예외 (LFS 추적)
+!toydata/EDTA/genome.fasta.gz
+!toydata/genome_input/genome.fasta.gz
+
 # -----------------------------------------------------------------------------
 # 4. 환경 / 빌드 산출물
 # -----------------------------------------------------------------------------
