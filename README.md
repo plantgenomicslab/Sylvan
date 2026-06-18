@@ -67,7 +67,7 @@ Perl and R scripts (`fillingEndsOfGeneModels.pl`, `filter_distributions.R`) run 
 
 ```bash
 # Create conda environment
-conda create -n sylvan -c conda-forge -c bioconda python=3.11 snakemake=7 -y
+conda create -n sylvan -c conda-forge -c bioconda python=3.11 snakemake=7 git-lfs -y
 conda activate sylvan
 
 # Download Singularity image (latest = v4, GPU-capable TensorFlow)
@@ -75,8 +75,10 @@ singularity pull --arch amd64 sylvan.sif library://wyim/sylvan/sylvan:latest
 # Or a specific version: library://wyim/sylvan/sylvan:v3 (CPU-only TF, smaller)
 
 # Clone repository (with Git LFS for toy data)
-git lfs install
+git lfs install   # one-time: registers LFS filters in ~/.gitconfig
 git clone https://github.com/plantgenomicslab/Sylvan.git
+cd Sylvan
+git lfs pull      # ensure toy-data LFS files are downloaded (not just pointers)
 ```
 
 ### Build from source (optional)
