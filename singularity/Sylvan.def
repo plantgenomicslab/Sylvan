@@ -537,6 +537,22 @@ YAMLEOF
 		/usr/local/bin/micromamba clean --all -f --yes
 	rm -rf /tmp/envs/
 
+	# ---- Pre-generate the micromamba shell hook ----
+	# Generate the bash hook ONCE at build time and source it at runtime (see
+	# %environment) instead of forking `micromamba shell hook` on every container
+	# shell startup. That per-startup fork has a hardcoded 5s timeout that gets
+	# killed under heavy cluster I/O (crashing jobs at `micromamba activate`).
+	mkdir -p /opt/mamba/etc
+	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
+		/usr/local/bin/micromamba shell hook --shell bash --root-prefix /opt/mamba \
+		> /opt/mamba/etc/mamba_hook.sh 2>/dev/null
+	# Drop the interactive completion section (the trailing top-level
+	# `if [ -n "${ZSH_VERSION...}" ]` block through EOF, covering both zsh and bash
+	# completions). It is useless for batch container execution and uses zsh /
+	# bash-array syntax that Apptainer's POSIX environment-file parser rejects with
+	# "parameter expansion requires a literal" when %environment is sourced.
+	sed -i '/^if \[ -n "${ZSH_VERSION:+x}" \]; then$/,$d' /opt/mamba/etc/mamba_hook.sh || true
+
 %startscript
 
 
@@ -570,10 +586,17 @@ YAMLEOF
 	# Set the Wise2 configuration directory (required by genewise)
 	export WISECONFIGDIR=/opt/envs/genepred/share/wise2/wisecfg
 
-	# Micromamba shell hook (so `micromamba activate` works in shell commands)
-	# Note: %environment is sourced by bash at runtime, so eval works here
+	# Micromamba shell hook (so `micromamba activate` works in shell commands).
+	# Source the hook pre-generated in %post instead of forking `micromamba shell
+	# hook` on every startup: that fork has a 5s timeout that kills jobs under heavy
+	# cluster I/O and emits a harmless zsh-completion parse error. Fall back to the
+	# live eval only if the pre-generated hook is missing (older images).
 	export MAMBA_EXE='/usr/local/bin/micromamba'
-	eval "$($MAMBA_EXE shell hook --shell bash --root-prefix $MAMBA_ROOT_PREFIX 2>/dev/null)" || alias micromamba="$MAMBA_EXE"
+	if [ -r /opt/mamba/etc/mamba_hook.sh ]; then
+		. /opt/mamba/etc/mamba_hook.sh
+	else
+		eval "$($MAMBA_EXE shell hook --shell bash --root-prefix $MAMBA_ROOT_PREFIX 2>/dev/null)" || alias micromamba="$MAMBA_EXE"
+	fi
 
 %labels
 	Author Johnny Lomas (jlomas@nevada.unr.edu)

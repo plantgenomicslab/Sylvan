@@ -160,18 +160,32 @@ if (config_dict["Input"]["geta"]["augustus_species"] != "placeholder") | (config
 singularity: config_dict.get("Input", {}).get("singularity", "") or config_dict.get("Singularity", "")
 
 # Set up micromamba shell hook for all shell commands.
-# Cache the hook output to a host-mounted file so each rule sources it
-# instead of forking `micromamba shell hook` (which has a 5s hardcoded
-# timeout and intermittently kills jobs under heavy cluster I/O).
-# Invalidate by deleting the cache file when the .sif image changes.
+# Cache the hook output to a host-mounted file so each rule sources it instead of
+# forking `micromamba shell hook` on every job. That fork has a hardcoded 5s
+# timeout in micromamba and intermittently gets killed under heavy cluster I/O,
+# which leaves the `micromamba` shell function undefined and crashes rules right
+# at `micromamba activate` (observed on fastp_PAIRED, liftoff, ... at run start).
+#
+# The cache is built under an flock so only ONE job generates it at a time (no
+# thundering herd of simultaneous forks at startup), with a few retries; every
+# other job just `source`s it. An inline `eval` fallback covers a missing/corrupt
+# cache so activation still works. Delete the cache when the .sif image changes.
 _HOOK_CACHE = f"{RESULTS_DIR}/.micromamba_hook.sh"
 shell.prefix(
-    'set +u; '
+    'set +u; export MAMBA_NO_BANNER=1; '
     f'if [ ! -s "{_HOOK_CACHE}" ]; then '
-    f'  /usr/local/bin/micromamba shell hook -s bash > "{_HOOK_CACHE}.tmp.$$" && '
-    f'  mv -n "{_HOOK_CACHE}.tmp.$$" "{_HOOK_CACHE}" || rm -f "{_HOOK_CACHE}.tmp.$$"; '
+    f'  ( if command -v flock >/dev/null 2>&1; then flock -w 120 9 || true; fi; '
+    f'    if [ ! -s "{_HOOK_CACHE}" ]; then '
+    f'      for _i in 1 2 3; do '
+    f'        if /usr/local/bin/micromamba shell hook -s bash > "{_HOOK_CACHE}.tmp.$$" 2>/dev/null && [ -s "{_HOOK_CACHE}.tmp.$$" ]; then '
+    f'          mv -f "{_HOOK_CACHE}.tmp.$$" "{_HOOK_CACHE}"; break; '
+    f'        fi; '
+    f'        rm -f "{_HOOK_CACHE}.tmp.$$"; sleep 2; '
+    f'      done; '
+    f'    fi; '
+    f'  ) 9>"{_HOOK_CACHE}.lock" || true; '
     f'fi; '
-    f'source "{_HOOK_CACHE}"; '
+    f'source "{_HOOK_CACHE}" 2>/dev/null || eval "$(/usr/local/bin/micromamba shell hook -s bash 2>/dev/null)" || true; '
     'set -u; '
 )
 
@@ -295,25 +309,35 @@ onstart:
 	print("="*80 + "\n")
 
 onerror:
-	import subprocess
 	print("\n" + "="*80)
 	print("PIPELINE ERROR - Check logs for details:")
 	print("="*80)
 	print(f"Log directory: {RESULTS_DIR}logs/")
 	print("")
-	# Try to find the most recent failed rule from log filenames
+	# Identify the rule(s) that ACTUALLY failed by parsing the Snakemake log for
+	# "Error in rule <name>" lines. Do NOT guess from the newest *.err file: with
+	# --keep-going the last rule to finish is often a SUCCESSFUL one, so the old
+	# heuristic blamed the wrong rule (e.g. genewiseGFF2GFF3 while fastp_PAIRED /
+	# liftoff / helixer were the real failures).
+	failed_rules = []
 	try:
-		result = subprocess.run(
-			f"ls -t {RESULTS_DIR}logs/*.err 2>/dev/null | head -1 | xargs -r basename | cut -d'_' -f1",
-			shell=True, capture_output=True, text=True
-		)
-		failed_rule = result.stdout.strip()
-		if failed_rule:
-			print(f"Most recent failed rule: {failed_rule}")
-			print(f"  cat {RESULTS_DIR}logs/{failed_rule}_*.err")
-			print("")
-	except:
+		if log and os.path.exists(log):
+			with open(log) as _fh:
+				_text = _fh.read()
+			failed_rules = re.findall(r"Error in rule (\S+?):", _text)
+			failed_rules += re.findall(r"Error executing rule (\S+?) ", _text)
+			failed_rules = list(dict.fromkeys(failed_rules))
+	except Exception:
 		pass
+	if failed_rules:
+		print("Failed rule(s) [from Snakemake log]: " + ", ".join(failed_rules))
+		for _r in failed_rules:
+			print(f"  cat {RESULTS_DIR}logs/{_r}_*.err")
+		print("")
+	else:
+		print("Could not determine the failed rule from the Snakemake log; inspect recent logs:")
+		print(f"  ls -lt {RESULTS_DIR}logs/*.err | head -5")
+		print("")
 	if log:
 		print(f"Snakemake log: cat {log}")
 	print("")
@@ -2367,12 +2391,21 @@ rule helixer:
 	output: f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3"
 	shell: '''
 		micromamba activate helixer
-		# TF 2.15 XLA JIT needs libdevice.10.bc + ptxas from pip-installed nvidia cuda_nvcc.
-		# cuda_nvcc is a namespace package (__file__ is None) — use __path__, not __file__.
-		CUDA_NVCC_DIR=$(python -c 'import nvidia.cuda_nvcc as m; print(list(m.__path__)[0])' 2>/dev/null || echo '')
-		if [ -n "$CUDA_NVCC_DIR" ]; then
-		    export XLA_FLAGS="--xla_gpu_cuda_data_dir=$CUDA_NVCC_DIR"
-		    export PATH="$CUDA_NVCC_DIR/bin:$PATH"
+		# Auto-detect a usable GPU; fall back to CPU when none is present (CPU-only
+		# node, or `--nv` finding no nv files). Without this, Helixer silently emits
+		# empty output on GPU-less hosts and the rule fails.
+		if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L 2>/dev/null | grep -q "GPU"; then
+		    echo "[helixer] GPU detected — running on GPU." >&2
+		    # TF 2.15 XLA JIT needs libdevice.10.bc + ptxas from pip-installed nvidia cuda_nvcc.
+		    # cuda_nvcc is a namespace package (__file__ is None) — use __path__, not __file__.
+		    CUDA_NVCC_DIR=$(python -c 'import nvidia.cuda_nvcc as m; print(list(m.__path__)[0])' 2>/dev/null || echo '')
+		    if [ -n "$CUDA_NVCC_DIR" ]; then
+		        export XLA_FLAGS="--xla_gpu_cuda_data_dir=$CUDA_NVCC_DIR"
+		        export PATH="$CUDA_NVCC_DIR/bin:$PATH"
+		    fi
+		else
+		    echo "[helixer] No GPU detected — falling back to CPU (slower, but functional)." >&2
+		    export CUDA_VISIBLE_DEVICES=-1
 		fi
 		if [ -n "{params.model_dir}" ]; then
 		    MODEL_ARG="--model-filepath {params.model_dir}/{params.l}.h5"
