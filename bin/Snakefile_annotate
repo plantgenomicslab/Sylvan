@@ -113,7 +113,7 @@ for input in config_dict["Input"]:
 						sys.exit()
 	elif input in {"prefix", "RM_species", "augustus_species", "use_augustus",
 	               "augustus_start_from", "num_evm_files", "helixer_model_dir", "helixer_subseq",
-	               "singularity", "geta_conf"}:
+	               "helixer_device", "singularity", "geta_conf"}:
 		continue
 	elif input == "evm_weights":
 		if not os.path.exists(config_dict["Input"][input]):
@@ -2387,15 +2387,27 @@ rule helixer:
 	params:
 		l = helixer_model,
 		model_dir = helixer_model_dir,
-		subseq=config_dict["Input"]["helixer_subseq"]
+		subseq=config_dict["Input"]["helixer_subseq"],
+		device = config_dict["Input"].get("helixer_device", "auto")
 	output: f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3"
 	shell: '''
 		micromamba activate helixer
-		# Auto-detect a usable GPU; fall back to CPU when none is present (CPU-only
-		# node, or `--nv` finding no nv files). Without this, Helixer silently emits
-		# empty output on GPU-less hosts and the rule fails.
-		if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L 2>/dev/null | grep -q "GPU"; then
-		    echo "[helixer] GPU detected — running on GPU." >&2
+		# GPU vs CPU is controlled by config Input/helixer_device:
+		#   auto (default) -> probe with `nvidia-smi -L`, use GPU if one is present
+		#   gpu            -> force GPU
+		#   cpu            -> force CPU (CUDA_VISIBLE_DEVICES=-1)
+		# Without this, Helixer silently emits empty output on GPU-less hosts and
+		# the rule fails.
+		HELIXER_DEVICE="{params.device}"
+		if [ "$HELIXER_DEVICE" = "auto" ]; then
+		    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L 2>/dev/null | grep -q "GPU"; then
+		        HELIXER_DEVICE=gpu
+		    else
+		        HELIXER_DEVICE=cpu
+		    fi
+		fi
+		if [ "$HELIXER_DEVICE" = "gpu" ]; then
+		    echo "[helixer] Using GPU (helixer_device={params.device})." >&2
 		    # TF 2.15 XLA JIT needs libdevice.10.bc + ptxas from pip-installed nvidia cuda_nvcc.
 		    # cuda_nvcc is a namespace package (__file__ is None) — use __path__, not __file__.
 		    CUDA_NVCC_DIR=$(python -c 'import nvidia.cuda_nvcc as m; print(list(m.__path__)[0])' 2>/dev/null || echo '')
@@ -2404,7 +2416,7 @@ rule helixer:
 		        export PATH="$CUDA_NVCC_DIR/bin:$PATH"
 		    fi
 		else
-		    echo "[helixer] No GPU detected — falling back to CPU (slower, but functional)." >&2
+		    echo "[helixer] Using CPU (helixer_device={params.device}; slower but functional)." >&2
 		    export CUDA_VISIBLE_DEVICES=-1
 		fi
 		if [ -n "{params.model_dir}" ]; then
