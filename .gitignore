@@ -1,4 +1,6 @@
 sylvan.sif
+# Singularity/Apptainer container images are multi-GB build artifacts — never commit
+*.sif
 genome.fasta.mod.EDTA.raw
 genome.fasta
 genome.fasta.mod
