@@ -2010,13 +2010,13 @@ rule clearCombined_step6:
 rule pickBetterModels:
 	input:
 		geneModels = f"{RESULTS_DIR}GETA/Augustus/training/geneModels.gff3",
-		a = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.a.gff3"
+		a = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.a.gff3",
+		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
 	output:
 		c = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.c.gff3",
 		d = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.d.gff3"
-	params: 
+	params:
 		args = config_dict["Internal"]['pickout_better_geneModels_from_evidence'],
-		g = genome,
 		results_dir = RESULTS_DIR
 	shell:"""
 		micromamba activate annotation
@@ -2039,7 +2039,7 @@ rule pickBetterModels:
 		{output.c} > {params.results_dir}GETA/CombineGeneModels/picked_evidence_geneModels.gff3
 
 		GFF3Clear \
-		--genome {params.g} \
+		--genome {input.genome_fasta} \
 		--no_attr_add {params.results_dir}GETA/CombineGeneModels/picked_evidence_geneModels.gff3 \
 		{input.a} > {output.d}
 
@@ -2049,12 +2049,13 @@ rule pickBetterModels:
 		mv -f geneModels.*.agat.log {params.results_dir}GETA/CombineGeneModels/ 2>/dev/null || true
 		"""
 rule fillingEndsOfGeneModels_ef:
-	input: d = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.d.gff3"
-	output: 
+	input:
+		d = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.d.gff3",
+		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
+	output:
 		e = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.e.gff3",
 		f = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.f.gff3"
-	params: 
-		g = genome,
+	params:
 		args  = config_dict["Internal"]["fillingEndsOfGeneModels"],
 		results_dir = RESULTS_DIR
 	shell:
@@ -2064,7 +2065,7 @@ rule fillingEndsOfGeneModels_ef:
 		{params.args} \
 		--filling_need_transcriptID {params.results_dir}GETA/CombineGeneModels/filling_need_transcriptID.txt \
 		--nonCompletedGeneModels {output.f} \
-		{params.g} \
+		{input.genome_fasta} \
 		{input.d} > {output.e} 2> {params.results_dir}GETA/CombineGeneModels/fillingEndsOfGeneModels.1.log
 		"""
 
@@ -2073,14 +2074,14 @@ rule extractTranscriptsForFilter:
 		repeat = f"{RESULTS_DIR}GETA/RepeatMasker/genome.repeat.gff3",
 		b = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.b.gff3",
 		e = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.e.gff3",
-		f = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.f.gff3"
-	output: 
+		f = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.f.gff3",
+		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
+	output:
 		ids = f"{RESULTS_DIR}GETA/CombineGeneModels/transcriptID_for_filtering.txt",
 		prots_all = f"{RESULTS_DIR}GETA/CombineGeneModels/proteins_all.fasta",
 		prots_filter = f"{RESULTS_DIR}GETA/CombineGeneModels/proteins_for_filtering.fasta"
-	params: 
+	params:
 		args = config_dict["Internal"]["GFF3_extract_TranscriptID_for_filtering"],
-		g = genome,
 		results_dir = RESULTS_DIR
 	shell:'''
 		micromamba activate base
@@ -2096,7 +2097,7 @@ rule extractTranscriptsForFilter:
 		perl -ne "print \\\"\\$1\\tFilling2Uncomplete\\n\\\" if m/ID=([^;]*\\.t\\d+);/;" {input.f} >> {output.ids}
 
 		gff3_to_protein.pl \
-		{params.g} \
+		{input.genome_fasta} \
 		{input.b} \
 		{input.f} \
 		{input.e} > \
@@ -2308,18 +2309,19 @@ rule validateTranscripts:
 		2> {params.results_dir}GETA/CombineGeneModels/get_valid_geneModels.log
 		"""
 rule fillingEndsOfGeneModels_final:
-	input: f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.h.coding.gff3"
+	input:
+		coding = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.h.coding.gff3",
+		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
 	output: f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.i.coding.gff3"
 	params:
 		args = config_dict["Internal"]["fillingEndsOfGeneModels"],
-		g = genome,
 		results_dir = RESULTS_DIR
 	shell:"""
 		micromamba activate base
 		perl $(pwd)/bin/fillingEndsOfGeneModels.pl \
 		{params.args} \
-		{params.g} \
-		{input} > {output} \
+		{input.genome_fasta} \
+		{input.coding} > {output} \
 		2> {params.results_dir}GETA/CombineGeneModels/fillingEndsOfGeneModels.2.log
 		"""
 #Step 7. GETA output
@@ -2327,12 +2329,12 @@ rule fillingEndsOfGeneModels_final:
 rule GETA_output:
 	input:
 		i = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.i.coding.gff3",
-		h = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.h.lncRNA.gff3"
+		h = f"{RESULTS_DIR}GETA/CombineGeneModels/geneModels.h.lncRNA.gff3",
+		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
 	output:
 		gm = f"{RESULTS_DIR}GETA/geta.geneModels.gff3",
 		bgm = f"{RESULTS_DIR}GETA/geta.bestGeneModels.gff3"
 	params:
-		g = genome,
 		prefix = "geta",
 		results_dir = RESULTS_DIR
 	shell:
@@ -2342,7 +2344,7 @@ rule GETA_output:
 		  --GFF3_source GETA \
 		  --gene_prefix GETA \
 		  --gene_code_length 6 \
-		  --genome {params.g} \
+		  --genome {input.genome_fasta} \
 		  {input.i} \
 		  > {output.gm}
 
@@ -2354,22 +2356,22 @@ rule GETA_output:
 		  --GFF3_source GETA \
 		  --gene_prefix getancGene  \
 		  --gene_code_length 6 \
-		  --genome {params.g} \
+		  --genome {input.genome_fasta} \
 		  --no_attr_add {input.h} \
 		  > {params.results_dir}GETA/{params.prefix}.geneModels_lncRNA.gff3
 		
 		gff3ToGtf.pl \
-		  {params.g} {output.gm} \
+		  {input.genome_fasta} {output.gm} \
 		  > {params.results_dir}GETA/{params.prefix}.geneModels.gtf
 
 		gff3ToGtf.pl \
-		  {params.g} \
+		  {input.genome_fasta} \
 		  {output.bgm} \
 		  > {params.results_dir}GETA/{params.prefix}.bestGeneModels.gtf
 
 		eukaryotic_gene_model_statistics.pl \
 		  {params.results_dir}GETA/{params.prefix}.bestGeneModels.gtf \
-		  {params.g} \
+		  {input.genome_fasta} \
 		  {params.prefix} &> {params.results_dir}GETA/{params.prefix}.geneModels.stats
 
 		# Clean up files created in root directory by eukaryotic_gene_model_statistics.pl
