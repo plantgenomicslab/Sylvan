@@ -16,8 +16,35 @@ except yaml.YAMLError as e:
 # Singularity container with pre-built micromamba environments
 singularity: config_dict.get("Input", {}).get("singularity", "") or config_dict.get("Singularity", "")
 
-# Set up micromamba shell hook for all shell commands
-shell.prefix("set +u; eval \"$(/usr/local/bin/micromamba shell hook -s bash)\"; set -u; ")
+# Set up micromamba shell hook for all shell commands.
+# Cache the hook output to a host-mounted file so each rule sources it instead of
+# forking `micromamba shell hook` on every job. That fork has a hardcoded 5s
+# timeout in micromamba and intermittently gets killed under heavy cluster I/O,
+# which leaves the `micromamba` shell function undefined and crashes rules right
+# at `micromamba activate` (observed on blastRex, calculateRSEMExpression_PAIRED).
+#
+# The cache is built under an flock so only ONE job generates it at a time (no
+# thundering herd of simultaneous forks at startup), with a few retries; every
+# other job just `source`s it. An inline `eval` fallback covers a missing/corrupt
+# cache so activation still works. Delete the cache when the .sif image changes.
+_HOOK_CACHE = f"{RESULTS_DIR}/.micromamba_hook.sh"
+shell.prefix(
+    'set +u; export MAMBA_NO_BANNER=1; '
+    f'if [ ! -s "{_HOOK_CACHE}" ]; then '
+    f'  ( if command -v flock >/dev/null 2>&1; then flock -w 120 9 || true; fi; '
+    f'    if [ ! -s "{_HOOK_CACHE}" ]; then '
+    f'      for _i in 1 2 3; do '
+    f'        if /usr/local/bin/micromamba shell hook -s bash > "{_HOOK_CACHE}.tmp.$$" 2>/dev/null && [ -s "{_HOOK_CACHE}.tmp.$$" ]; then '
+    f'          mv -f "{_HOOK_CACHE}.tmp.$$" "{_HOOK_CACHE}"; break; '
+    f'        fi; '
+    f'        rm -f "{_HOOK_CACHE}.tmp.$$"; sleep 2; '
+    f'      done; '
+    f'    fi; '
+    f'  ) 9>"{_HOOK_CACHE}.lock" || true; '
+    f'fi; '
+    f'source "{_HOOK_CACHE}" 2>/dev/null || eval "$(/usr/local/bin/micromamba shell hook -s bash 2>/dev/null)" || true; '
+    'set -u; '
+)
 
 # Derive prefix from anot_gff
 pep_string = re.sub(r"\.fa.*$", "", config_dict["Input"]["anot_gff"] + ".fa")
