@@ -15,6 +15,7 @@ Sylvan is a comprehensive genome annotation pipeline that combines EVM/PASA, GET
 - **Local execution**: Run without SLURM on any Linux machine with `bin/annotate_local.sh`
 - **Customizable cluster command**: `sbatch` template lives in the config YAML — no shell script edits needed
 - **TidyGFF**: Format annotations for public distribution
+- **Post-filter curation & AS reconstruction**: optional helpers to derive a high-confidence curated annotation (`curate_genes.py`) and recover RNA-seq-supported alternative isoforms (StringTie + gffcompare + TransDecoder)
 - **Cleanup utility**: Remove intermediate files after pipeline completion
 
 ---
@@ -49,7 +50,7 @@ The toy data experiment uses *A. thaliana* chromosome 4 with 12 paired-end RNA-s
 
 ### Dependencies
 
-Most bioinformatics tools (STAR, Augustus, GeneWise, PASA, EVM, BLAST, BUSCO, etc.) are bundled inside the Singularity container. The host environment needs:
+Most bioinformatics tools (STAR, Augustus, GeneWise, PASA, EVM, BLAST, BUSCO, StringTie, gffcompare, TransDecoder, etc.) are bundled inside the Singularity container. The host environment needs:
 
 | Package | Purpose |
 |---------|---------|
@@ -258,6 +259,28 @@ An alternative scoring pipeline (`Snakefile_filter_score`) uses logistic regress
 export SYLVAN_FILTER_CONFIG="toydata/config/config_filter.yml"
 ./bin/filter_score_toydata.sh
 ```
+
+### Post-Filter: Gene Curation and Alternative-Splicing Reconstruction
+
+These optional post-processing steps run **after** the filter phase, on `results/FILTER/filtered.gff3`. They are standalone helpers, not wired Snakemake rules.
+
+- **Gene curation** (`bin/curate_genes.py`) — produces a reduced, higher-confidence "curated" annotation from the filtered models. It keeps every gene the random forest labelled `Keep`, plus `None`-labelled genes that still carry independent evidence (by default a Helixer or Miniprot overlap, or coverage above `--cov-thresh`). It is driven by the per-gene label/evidence table (`keep_data.tsv`); kept genes, transcripts, and CDS are copied through unchanged. The exact historical curation procedure was not recorded — this is a documented, label-based approximation.
+
+  ```bash
+  python bin/curate_genes.py \
+    --filtered results/FILTER/filtered.gff3 \
+    --features results/FILTER/keep_data.tsv \
+    --evidence HELIXER,MINIPROT \
+    --out results/FILTER/Sylvan.curated.gff3
+  ```
+
+- **Alternative-splicing (AS) reconstruction** — because the curated annotation collapses most loci to a single isoform, RNA-seq–supported isoforms can be recovered with the tools bundled in the container:
+  1. Reassemble transcripts genome-guided with **StringTie** (`-G <curated.gff3>`).
+  2. Classify the assembled transcripts against the curated models with **gffcompare** (retain class codes `j/k/m/n/c`).
+  3. Predict coding regions on the selected transcripts with **TransDecoder** (`--single_best_only`) and map them back to genome coordinates.
+  4. Graft the resulting protein-coding isoforms onto the matching curated loci as additional `mRNA` records — curated gene/mRNA/CDS are left untouched, isoforms are added only; duplicate or strand-inconsistent structures are dropped.
+
+  `gffcompare` was added to the container in the `Sylvan_20260629` build for step 2; StringTie and TransDecoder were already bundled. The merge/graft glue is project-specific and is not shipped as a pipeline rule.
 
 ---
 
