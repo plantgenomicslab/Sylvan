@@ -18,11 +18,16 @@ def getID(attr:str) -> str:
 	return m.group(1)
 
 def findChroms(chrom: str, chrom_regex = False) -> str:
+	pre = ""
 	if chrom_regex:
 		if re.search(chrom_regex, chrom):
 			pre = re.search(chrom_regex, chrom).group(0)
 	elif re.search("(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)", chrom):
 		pre = re.search("(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)", chrom).group(0)
+	# No prefix matched (e.g. ptg/scaffold contigs not covered by the regex):
+	# return the name unchanged instead of crashing on an undefined 'pre'.
+	if not pre:
+		return chrom
 	return re.sub(pre, "", chrom)
 
 def replaceParent(id: str, attr: str) -> str:
