@@ -86,6 +86,7 @@ dependencies:
   - fastp
   - minimap2
   - stringtie
+  - gffcompare
   - mosdepth
   - bedtools
 YAMLEOF
