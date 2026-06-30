@@ -104,6 +104,7 @@ dependencies:
   - mmseqs2
   - liftoff
   - transdecoder
+  - perl-uri
   - psiclass
   - seqkit
   - pblat
