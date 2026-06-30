@@ -577,6 +577,7 @@ rule STAR_single:
 		--outSAMtype BAM SortedByCoordinate \
 		--outSAMattributes XS \
 		--outSAMstrandField intronMotif \
+		--limitBAMsortRAM 216000000000 \
 		--outFileNamePrefix {params.results_dir}GETA/STAR/single/STAR_single.{wildcards.run}.bam \
 		--readFilesCommand zcat \
 		-c \
@@ -2445,7 +2446,7 @@ rule gmapPrep:
 		micromamba activate annotation
 		mkdir -p {params.results_dir}TRANSCRIPT/Gmap
 		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || touch {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3
-		bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || touch {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta
+		/opt/envs/alignment/bin/bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || touch {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta
 		gmap_build -D {params.results_dir}TRANSCRIPT/Gmap -d DB {input.genome_fasta}
 		"""
 
