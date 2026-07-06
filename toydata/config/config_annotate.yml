@@ -6,7 +6,7 @@
 
 Input:
   prefix: ath4_toydata                   # [!!!!REQUIRED!!!!:name] output files will be prefixed with this name
-  genome: toydata/genome_input/genome.fasta.gz  # [!!!!REQUIRED!!!!:file] genome assembly fasta file (.fa, .fasta, .fna, .fa.gz, .fasta.gz, or .fna.gz)
+  genome: toydata/genome/ath4.fasta.gz  # [!!!!REQUIRED!!!!:file] genome assembly fasta file (.fa, .fasta, .fna, .fa.gz, .fasta.gz, or .fna.gz)
   rna_seq: toydata/RNASeq          # [!!!!REQUIRED!!!!:directory] folder containing RNA-seq data. Files should be gzipped
                                 # fastq (i.e. fastq.gz)
   proteins: toydata/cds_aa/neighbor.aa         # [!!!!REQUIRED!!!!:file] Comma separated list of protein fasta files for homology search
@@ -22,7 +22,7 @@ Input:
   helixer_device: auto            # [optional] GPU policy for Helixer: auto (detect via nvidia-smi, default), gpu (force GPU), or cpu (force CPU)
   geta:
     RM_species: Embryophyta       # [!!!!REQUIRED!!!!:value] chose a Repeat Modeler species (i.e. Embryophyta)
-    RM_lib: toydata/EDTA/genome.fasta.mod.EDTA.TElib.fa  # [!!!!REQUIRED!!!!:file] Repeat nucleotide FASTA file (e.g., from EDTA)
+    RM_lib: placeholder  # [!!!!REQUIRED!!!!:file] Repeat nucleotide FASTA file (e.g., from EDTA). placeholder = skip EDTA lib, use RepeatModeler de novo
     dfam_lib: placeholder         # [optional:file] the DFAM lib
     geta_conf: big                # [!!!!REQUIRED!!!!:value] chose a geta configuration mode (big/small)
     pfamdb: /usr/local/src/Pfam-A.hmm  # [!!!!REQUIRED!!!!:file] pfam database file (pre-installed in container)
@@ -38,7 +38,7 @@ Input:
                                       # See: https://github.com/Gaius-Augustus/Augustus/tree/master/config/species
   evm_weights: toydata/config/evm_weights.txt  # [!!!!REQUIRED!!!!:file] EVM weights file (included in Sylvan/config/)
   num_evm_files: 126              # [optional:value] Number of EVM splits (default: 126)
-  swissprot: "toydata/misc/uniprot_sprot.fasta"  # [optional:file] SwissProt reviewed FASTA for PASA/EVM model comparison
+  swissprot: placeholder  # [optional:file] SwissProt reviewed FASTA for PASA/EVM model comparison (placeholder = skip; uniprot_sprot.fasta not provided in toydata)
 
 ###############################################################################################
 #

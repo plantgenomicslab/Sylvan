@@ -86,6 +86,7 @@ dependencies:
   - fastp
   - minimap2
   - stringtie
+  - gffcompare
   - mosdepth
   - bedtools
 YAMLEOF
@@ -103,6 +104,7 @@ dependencies:
   - mmseqs2
   - liftoff
   - transdecoder
+  - perl-uri
   - psiclass
   - seqkit
   - pblat
