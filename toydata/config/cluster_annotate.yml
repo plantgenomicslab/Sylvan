@@ -1,6 +1,6 @@
 __default__:
-  account: cpu-s1-pgl-0
-  partition: cpu-s1-pgl-0
+  account: cpu-s2-pgl-0
+  partition: cpu-s2-core-0
   memory: 4g
   ncpus: 1
   nodes: 1
