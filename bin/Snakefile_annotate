@@ -2503,8 +2503,26 @@ rule gmapPrep:
 		"""
 		micromamba activate annotation
 		mkdir -p {params.results_dir}TRANSCRIPT/Gmap
-		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || touch {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3
-		/opt/envs/alignment/bin/bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || touch {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta
+		# grep exits 1 when the liftover annotation carries no exon lines. That is a real
+		# possibility, not an error, so tolerate exactly 1 -- but let a genuine grep error
+		# (exit 2) abort the rule.
+		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || [ $? -eq 1 ]
+		# Do NOT fall back to `touch` here. An empty liftoffExon.fasta still lets gmapPrep
+		# exit 0, so Snakemake records the rule complete and its output is newer than its
+		# input: neither --rerun-incomplete nor --rerun-triggers mtime will ever redo it.
+		# gmapExon then aligns an empty FASTA and the whole GMAP liftover-exon evidence
+		# track disappears from the EVM consensus without one error message. That happened
+		# on the B. tournefortii run when bedtools was missing from $PATH (see d190fcc).
+		# The only legitimate way to an empty FASTA is an empty BED.
+		if [ -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 ]; then
+			/opt/envs/alignment/bin/bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3
+			if [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta ]; then
+				echo "gmapPrep: bedtools getfasta produced an empty liftoffExon.fasta from a non-empty BED" >&2
+				exit 1
+			fi
+		else
+			: > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta
+		fi
 		gmap_build -D {params.results_dir}TRANSCRIPT/Gmap -d DB {input.genome_fasta}
 		"""
 
