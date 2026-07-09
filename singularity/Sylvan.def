@@ -554,6 +554,15 @@ YAMLEOF
 	# bash-array syntax that Apptainer's POSIX environment-file parser rejects with
 	# "parameter expansion requires a literal" when %environment is sourced.
 	sed -i '/^if \[ -n "${ZSH_VERSION:+x}" \]; then$/,$d' /opt/mamba/etc/mamba_hook.sh || true
+	# Fail the build rather than ship an image whose hook is empty or truncated:
+	# an unusable hook would leave `micromamba` undefined in every container. The
+	# function is emitted indented inside a `case`, so do not anchor the pattern.
+	if [ ! -s /opt/mamba/etc/mamba_hook.sh ] \
+		|| ! grep -q 'micromamba()' /opt/mamba/etc/mamba_hook.sh \
+		|| ! grep -q '__mamba_wrap' /opt/mamba/etc/mamba_hook.sh; then
+		echo "FATAL: /opt/mamba/etc/mamba_hook.sh is empty or does not define micromamba()" >&2
+		exit 1
+	fi
 
 %startscript
 
@@ -592,9 +601,10 @@ YAMLEOF
 	# Source the hook pre-generated in %post instead of forking `micromamba shell
 	# hook` on every startup: that fork has a 5s timeout that kills jobs under heavy
 	# cluster I/O and emits a harmless zsh-completion parse error. Fall back to the
-	# live eval only if the pre-generated hook is missing (older images).
+	# live eval only if the pre-generated hook is missing (older images). Test -s,
+	# not -r: an empty hook is readable, and would silently skip the fallback.
 	export MAMBA_EXE='/usr/local/bin/micromamba'
-	if [ -r /opt/mamba/etc/mamba_hook.sh ]; then
+	if [ -s /opt/mamba/etc/mamba_hook.sh ]; then
 		. /opt/mamba/etc/mamba_hook.sh
 	else
 		eval "$($MAMBA_EXE shell hook --shell bash --root-prefix $MAMBA_ROOT_PREFIX 2>/dev/null)" || alias micromamba="$MAMBA_EXE"

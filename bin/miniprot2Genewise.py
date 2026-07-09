@@ -24,11 +24,28 @@ with open(miniprot_file, 'r') as file:
 			target = m.group(1)
 			#if "|" in target:
 			#	target = target.split("|")[1]
+
+			# miniprot emits one mRNA per alignment, ranked best-first (Rank=1).
+			# Only one region per protein is passed to GeneWise, so keep the best
+			# one rather than whichever line happens to come last in the file.
+			rank_match = re.search(r"Rank=(\d+)", line[8])
+			rank = int(rank_match.group(1)) if rank_match else 1
+			try:
+				score = float(line[5])
+			except ValueError:
+				score = 0.0
+
+			best = miniprot_regions.get(target)
+			if best is not None and (rank, -score) >= (best["rank"], -best["score"]):
+				continue
+
 			miniprot_regions[target] = {
 				"chr": line[0],
 				"start": line[3],
 				"end": line[4],
-				"strand": line[6]
+				"strand": line[6],
+				"rank": rank,
+				"score": score
 			}
 
 

@@ -14,7 +14,7 @@ parser.add_argument("--cds", type = str, default = "", help = "Filter a fasta fi
 args = parser.parse_args()
 
 scores = pd.read_csv(args.scores, sep="\t", usecols=["#acc", "score_1"])
-scores = scores[scores["#acc"].str.contains("\.p1$")].reset_index(drop=True)
+scores = scores[scores["#acc"].str.contains(r"\.p1$")].reset_index(drop=True)
 scores.loc[:, "gene"] = scores.loc[:, "#acc"].str[:-6]
 scores.loc[:, "transcript"] = scores.loc[:, "#acc"].str[:-3]
 
@@ -43,7 +43,7 @@ if args.gff != "":
 			line = line.split("\t")
 
 			if line[2] == "mRNA":
-				m = re.search("ID=([a-zA-Z\_\-\d\.]+);", line[8])
+				m = re.search(r"ID=([a-zA-Z\_\-\d\.]+);", line[8])
 				if not m:
 					out.write("\t".join(line) + "\n")
 					continue
