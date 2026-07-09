@@ -6,13 +6,13 @@ import subprocess
 import pandas as pd
 
 def getParent(attr: str) -> str:
-	m = re.search("Parent=([a-zA-Z\d\\.\-_:]*);{0,1}", attr)
+	m = re.search(r"Parent=([a-zA-Z\d\.\-_:]*);{0,1}", attr)
 	if not m:
 		raise ValueError(f"No Parent= found in attribute string: {attr}")
 	return m.group(1)
 
 def getID(attr:str) -> str:
-	m = re.search("ID=([a-zA-Z\d\\.\-_:]*);{0,1}", attr)
+	m = re.search(r"ID=([a-zA-Z\d\.\-_:]*);{0,1}", attr)
 	if not m:
 		raise ValueError(f"No ID= found in attribute string: {attr}")
 	return m.group(1)
@@ -22,8 +22,8 @@ def findChroms(chrom: str, chrom_regex = False) -> str:
 	if chrom_regex:
 		if re.search(chrom_regex, chrom):
 			pre = re.search(chrom_regex, chrom).group(0)
-	elif re.search("(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)", chrom):
-		pre = re.search("(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)", chrom).group(0)
+	elif re.search(r"(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)", chrom):
+		pre = re.search(r"(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)", chrom).group(0)
 	# No prefix matched (e.g. ptg/scaffold contigs not covered by the regex):
 	# return the name unchanged instead of crashing on an undefined 'pre'.
 	if not pre:
@@ -32,12 +32,12 @@ def findChroms(chrom: str, chrom_regex = False) -> str:
 
 def replaceParent(id: str, attr: str) -> str:
 	replace = f"Parent={id};"
-	return re.sub("Parent=[a-zA-Z\d\.\-\_]*;{0,1}", replace, attr)
+	return re.sub(r"Parent=[a-zA-Z\d\.\-\_]*;{0,1}", replace, attr)
 
 def replaceID(id: str, attr: str, suf: str) -> str:
 	replace = f"ID={id}{suf};"
-	replace = re.sub("ID=[a-zA-Z\d\.\-\_]*;{0,1}", replace, attr)
-	old = re.search("ID=([a-zA-Z\d\.\-\_]*);{0,1}", attr).group(1)
+	replace = re.sub(r"ID=[a-zA-Z\d\.\-\_]*;{0,1}", replace, attr)
+	old = re.search(r"ID=([a-zA-Z\d\.\-\_]*);{0,1}", attr).group(1)
 	return replace, old
 
 def printData(out, item, children):
@@ -70,13 +70,13 @@ def upgradeChromosome(chrom: str, just: int, chrom_regex = False, contig_regex =
 		chrom_num = int(chrom.replace(m[0], ""))
 		new_name = str(chrom_num).zfill(just) + "G"
 		return(new_name)
-	elif re.search("^\d", chrom):
+	elif re.search(r"^\d", chrom):
 		new_name = chrom.zfill(just) + "G"
 		return(new_name)
-	
+
 	if contig_regex:
 		if re.search(contig_regex[0], chrom):
-			contig_num = re.search("[\d\_\-]+", chrom)[0]
+			contig_num = re.search(r"[\d\_\-]+", chrom)[0]
 			new_name = contig_regex[1] + str(contig_num) + "G"
 			return(new_name)
 	
@@ -87,7 +87,7 @@ def getSuffix(feature_id: str) -> str:
 	suf = ["cds", "exon", "intron", "utr5p", "utr3p", "five_prime_utr", "three_prime_utr"]
 	for suffix in suf:
 		if re.search(suffix, feature_id):
-			return(re.search(f"{suffix}\.{{0,1}}\d*", feature_id)[0].lower())
+			return(re.search(rf"{suffix}\.{{0,1}}\d*", feature_id)[0].lower())
 
 def loadGFF(gff: str) -> dict:
 	with open(gff, 'r') as infile:
@@ -187,9 +187,9 @@ def sortGFF(gff_dict: dict, output: str, chrom_regex = False, contig_regex = Fal
 	outfile = open(output, 'w')
 
 	if not chrom_regex:
-		chrom_regex = "(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)"
+		chrom_regex = r"(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)"
 	if not contig_regex:
-		contig_regex = "(?! (^Chr)|(^chr)|(^LG)|(^Ch)|(^\d))"
+		contig_regex = r"(?! (^Chr)|(^chr)|(^LG)|(^Ch)|(^\d))"
 	else: 
 		contig_regex = contig_regex.split(",")[0]
 	
@@ -260,7 +260,7 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 		if chrom_regex:
 			total_chroms = sorted.loc[sorted.seqid.str.contains(chrom_regex), "seqid"].unique()
 		else:
-			total_chroms = sorted.loc[sorted.seqid.str.contains('(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)'), "seqid"].unique()
+			total_chroms = sorted.loc[sorted.seqid.str.contains(r'(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)'), "seqid"].unique()
 		total_chroms = max([int(re.sub("[A-Za-z]+", "", i)) for i in total_chroms])
 		if total_chroms >= 10: 
 			chrom_just = 2
@@ -299,7 +299,7 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 			line[1] = source
 
 		if names:
-			line[8] = re.sub("Name=[a-zA-Z\d\.\-\_\%]*;{0,1}", "", line[8])
+			line[8] = re.sub(r"Name=[a-zA-Z\d\.\-\_\%]*;{0,1}", "", line[8])
 
 		if line[2] == "gene":
 			if no_chrom_id:
@@ -343,8 +343,8 @@ if __name__ == "__main__":
 	ap.add_argument('--justify', type=int, default=8, help="Number of digits in each gene ID")
 	ap.add_argument('--no-chrom-id', action='store_true', help="If set, gene IDs will not be numbered based on chromosome")
 	ap.add_argument('--sort', action='store_true', help="Perform sorting by chromosome and start coordinates")
-	ap.add_argument('--chrom-regex', default=False, help="Provide regex for chromosome prefixes. Prefixes Chr, chr, LG, Ch, ^\d are automatically detected.")
-	ap.add_argument('--contig-regex', default=False, help="Provide regex for contig/scaffold prefixes and the desired gene name prefix. e.g 'HiC_scaffold_(\d+$),Scaf' results in prefixScaf(\$d+)G000010")
+	ap.add_argument('--chrom-regex', default=False, help=r"Provide regex for chromosome prefixes. Prefixes Chr, chr, LG, Ch, ^\d are automatically detected.")
+	ap.add_argument('--contig-regex', default=False, help=r"Provide regex for contig/scaffold prefixes and the desired gene name prefix. e.g 'HiC_scaffold_(\d+$),Scaf' results in prefixScaf(\$d+)G000010")
 	ap.add_argument('--source', type=str, default=None, help="Value for GFF column 2")
 	args = ap.parse_args()
 

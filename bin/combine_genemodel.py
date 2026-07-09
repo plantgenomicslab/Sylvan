@@ -153,7 +153,7 @@ for i,file in enumerate(file_list):
             if line.startswith("#") or line.isspace():
                 continue
             if "gene" in line and "ID=" in line:
-                m = re.search("ID=([^;\s]+)", line)
+                m = re.search(r"ID=([^;\s]+)", line)
                 if not m:
                     continue
                 feature_id = m.group(1)
@@ -162,7 +162,7 @@ for i,file in enumerate(file_list):
                 geneRegion.setdefault(key, {})[feature_id] = 1
             if i==0:
                 if "mRNA" in line and "ID=" in line:
-                    m = re.search("ID=([^;\s]+)", line)
+                    m = re.search(r"ID=([^;\s]+)", line)
                     if not m:
                         continue
                     feature_id = m.group(1)
