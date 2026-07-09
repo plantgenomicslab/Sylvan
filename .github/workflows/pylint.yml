@@ -42,3 +42,9 @@ jobs:
           --disable=W0612,W0613 \
           --max-line-length=120 \
           --exit-zero
+
+    # pylint runs with --exit-zero and so can never fail the build. This step can.
+    # The test was dead for its whole life -- its fixture used label values the
+    # filter does not recognise -- because nothing ever executed it.
+    - name: Run unit tests
+      run: python bin/test_feature_importance.py
