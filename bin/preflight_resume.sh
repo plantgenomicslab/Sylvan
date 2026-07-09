@@ -165,7 +165,7 @@ if [ "$APPLY" != yes ]; then
 	[ "${#STALE[@]}" -gt 0 ] && say "  * move ${#STALE[@]} artifact(s) into results/_preflight_backup_<stamp>/"
 	say ""
 	say "Then, from $RUN:"
-	say "  $RESUME -n     # dry run: confirm Helixer/STAR are NOT rescheduled"
+	say "  $RESUME -n     # dry run: Helixer must NOT appear; the missing STAR_paired jobs must"
 	say "  $RESUME"
 	exit 0
 fi
@@ -175,7 +175,7 @@ if [ "${#STALE[@]}" -eq 0 ] && [ "$SIF_OK" = yes ]; then
 	say "nothing to do -- this run is already prepared"
 	say ""
 	say "From $RUN:"
-	say "  $RESUME -n     # dry run: confirm Helixer/STAR are NOT rescheduled"
+	say "  $RESUME -n     # dry run: Helixer must NOT appear; the missing STAR_paired jobs must"
 	say "  $RESUME"
 	exit 0
 fi
