@@ -144,8 +144,15 @@ fi
 if [ -d "$GW_TMP" ]; then
 	FAA=$(find "$GW_TMP" -maxdepth 1 -name '*.faa' | wc -l)
 	GFF=$(find "$GW_TMP" -maxdepth 1 -name '*.gff' | wc -l)
-	if [ "$GFF" -eq 0 ] && [ "$FAA" -gt 0 ]; then
+	if [ "$FAA" -eq 0 ]; then
+		# An empty leftover. Snakemake removes a directory() output before re-running its
+		# rule, so this needs no help. Do not send the operator to rerun_genewise.sh.
+		say "  geneRegion_genewise.tmp: empty -- nothing to do"
+	elif [ "$GFF" -eq 0 ]; then
 		add_stale "$GW_TMP" "partial checkpoint: $FAA groups, 0 GeneWise GFFs"
+	elif [ "$GFF" -lt "$FAA" ]; then
+		say "  geneRegion_genewise.tmp: $FAA groups / $GFF GFFs -- GeneWise stopped partway. Neither this"
+		say "                           script nor bin/rerun_genewise.sh handles that; resolve it first."
 	else
 		say "  geneRegion_genewise.tmp: $FAA groups / $GFF GFFs -- GeneWise has run; use bin/rerun_genewise.sh instead"
 	fi
@@ -178,6 +185,19 @@ if [ "${#STALE[@]}" -eq 0 ] && [ "$SIF_OK" = yes ]; then
 	say "  $RESUME -n     # dry run: Helixer must NOT appear; the missing STAR_paired jobs must"
 	say "  $RESUME"
 	exit 0
+fi
+
+# Check the image BEFORE moving anything: a bad image should leave the run untouched.
+if [ "$SIF_OK" = no ]; then
+	if [ -f "$PUBLISHED_SIF.sha256" ]; then
+		say "verify  $(basename "$PUBLISHED_SIF") against its .sha256 (10 GB, about a minute)"
+		if ! ( cd "$(dirname "$PUBLISHED_SIF")" && sha256sum -c "$(basename "$PUBLISHED_SIF").sha256" >/dev/null 2>&1 ); then
+			die "sha256 mismatch for $PUBLISHED_SIF -- refusing to touch this run"
+		fi
+		say "verify  OK"
+	else
+		say "verify  no .sha256 beside $PUBLISHED_SIF -- skipping the integrity check"
+	fi
 fi
 
 BK="$RUN/results/_preflight_backup_$(date +%Y%m%d-%H%M%S)"
