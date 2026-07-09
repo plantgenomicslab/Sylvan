@@ -96,6 +96,9 @@ else
 fi
 
 # ---- 3. protect what must survive -------------------------------------------
+# Existing BAMs are never touched. Missing ones are NOT an error: a run stopped by
+# the old image's container-startup kill typically has a mix, and STAR_paired will
+# simply be rescheduled for the missing samples on the new image.
 head2 "STAR alignments (never touched)"
 BAM_N=0; BAM_EMPTY=0
 if [ -d "$RUN/results/GETA/STAR/paired" ]; then
@@ -104,7 +107,23 @@ if [ -d "$RUN/results/GETA/STAR/paired" ]; then
 		[ -s "$bam" ] || BAM_EMPTY=$((BAM_EMPTY + 1))
 	done < <(find "$RUN/results/GETA/STAR/paired" -maxdepth 1 -name '*.bam')
 fi
-say "paired BAMs     : $BAM_N ($BAM_EMPTY empty)"
+
+EXPECT_N=0
+FASTP="$RUN/results/GETA/fastp/paired"
+if [ -d "$FASTP" ]; then
+	EXPECT_N=$(find "$FASTP" -maxdepth 1 -name '*_1.fastq.gz' | wc -l)
+fi
+
+if [ "$EXPECT_N" -gt 0 ]; then
+	say "paired samples  : $EXPECT_N"
+	say "paired BAMs     : $BAM_N present, $((EXPECT_N - BAM_N)) missing ($BAM_EMPTY zero-byte)"
+	if [ "$BAM_N" -lt "$EXPECT_N" ]; then
+		say "                  -> STAR_paired will re-run for the $((EXPECT_N - BAM_N)) missing sample(s)."
+		say "                     That is expected: the old image killed them at container start."
+	fi
+else
+	say "paired BAMs     : $BAM_N present ($BAM_EMPTY zero-byte)"
+fi
 [ "$BAM_EMPTY" -eq 0 ] || die "$BAM_EMPTY zero-byte BAM(s) -- that is the STAR sort-RAM bug, not this script's job. Fix those first."
 
 # ---- 4. scan for the artifacts that block a correct resume -------------------
