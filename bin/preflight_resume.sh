@@ -157,8 +157,25 @@ if [ -d "$GW_TMP" ]; then
 		say "  geneRegion_genewise.tmp: $FAA groups / $GFF GFFs -- GeneWise has run; use bin/rerun_genewise.sh instead"
 	fi
 fi
-if [ "$SIF_OK" = no ] && [ -f "$HOOK" ]; then
-	add_stale "$HOOK" "built by the old image"
+# The Snakemake-side hook cache is generated inside the container by the first rule to
+# run and rebuilt only when absent, so it belongs to whichever image produced it. It is
+# stale whenever that is not the image this run is about to use.
+#
+# Do NOT key this off SIF_OK. An operator who repoints the image by hand -- which is
+# exactly what HANDOFF_2026-07-08 §3.2 tells them to do -- leaves SIF_OK=yes and a hook
+# cache from the previous image, and this script used to call that run prepared.
+HOOK_STALE=no
+if [ -f "$HOOK" ]; then
+	if [ ! -e "$CFG_SIF" ]; then
+		HOOK_STALE=yes
+		add_stale "$HOOK" "the configured image is missing; the cache cannot be trusted"
+	elif [ "$SIF_OK" = no ]; then
+		HOOK_STALE=yes
+		add_stale "$HOOK" "built by the image this script is about to replace"
+	elif [ "$HOOK" -ot "$CFG_SIF" ]; then
+		HOOK_STALE=yes
+		add_stale "$HOOK" "older than the image in use -- built by an earlier one"
+	fi
 fi
 [ "${#STALE[@]}" -gt 0 ] || say "  none"
 
@@ -190,7 +207,7 @@ fi
 # Check the image BEFORE moving anything: a bad image should leave the run untouched.
 if [ "$SIF_OK" = no ]; then
 	if [ -f "$PUBLISHED_SIF.sha256" ]; then
-		say "verify  $(basename "$PUBLISHED_SIF") against its .sha256 (10 GB, about a minute)"
+		say "verify  $(basename "$PUBLISHED_SIF") against its .sha256 (a 10 GB image takes about a minute)"
 		if ! ( cd "$(dirname "$PUBLISHED_SIF")" && sha256sum -c "$(basename "$PUBLISHED_SIF").sha256" >/dev/null 2>&1 ); then
 			die "sha256 mismatch for $PUBLISHED_SIF -- refusing to touch this run"
 		fi
@@ -208,8 +225,12 @@ for f in ${STALE[@]+"${STALE[@]}"}; do
 	say "moved   ${f#"$RUN"/}"
 done
 
-if [ "$SIF_OK" = no ]; then
+# The flock file belongs to the cache we just moved out; the Snakefile recreates both.
+if [ "$HOOK_STALE" = yes ]; then
 	rm -f "$HOOK.lock"
+fi
+
+if [ "$SIF_OK" = no ]; then
 	if [ -e "$CFG_SIF" ] && [ ! -L "$CFG_SIF" ]; then
 		mv "$CFG_SIF" "$BK/$(basename "$CFG_SIF").old"
 		say "moved   ${CFG_SIF#"$RUN"/} (old image)"
