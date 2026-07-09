@@ -1,8 +1,14 @@
 import gzip
 
 
-def readFasta(path: str, sep=" ", index=0) -> dict:
-    """Read a FASTA file (plain or gzipped) into a dictionary of {id: sequence}."""
+def readFasta(path: str, sep=None, index=0) -> dict:
+    """Read a FASTA file (plain or gzipped) into a dictionary of {id: sequence}.
+
+    The record ID is the first whitespace-delimited token of the header. Aligners
+    such as miniprot report that same token (e.g. `Target=<id>`), so splitting on
+    spaces alone would mis-key headers whose fields are tab-delimited. Pass
+    `sep`/`index` to slice the token further, e.g. sep="|", index=1.
+    """
     seq = {}
     seq_id = None
     lines = []
@@ -20,11 +26,13 @@ def readFasta(path: str, sep=" ", index=0) -> dict:
             if line.startswith('>'):
                 if lines:
                     seq[seq_id] = "".join(lines)
-                seq_id = line[1:]
-                try:
-                    seq_id = seq_id.split(sep)[index].strip()
-                except (IndexError, ValueError):
-                    seq_id = seq_id.split(" ")[0]
+                header = line[1:].split()
+                seq_id = header[0] if header else ""
+                if sep is not None:
+                    try:
+                        seq_id = seq_id.split(sep)[index]
+                    except IndexError:
+                        pass
                 lines = []
             else:
                 lines.append(line)

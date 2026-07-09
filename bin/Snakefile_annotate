@@ -2516,7 +2516,12 @@ rule gmapExon:
 	shell:
 		"""
 		micromamba activate annotation
-		gmapl -D {params.results_dir}TRANSCRIPT/Gmap -d DB -t {threads}  --min-identity=0.7 \
+		# GMAP ships two binaries and each refuses the other's size class: `gmapl`
+		# only takes genomes >= 2^32 bp, `gmap` only takes smaller ones. Pick from
+		# the genome length, summed from column 3 of the GMAP index's chromosome file.
+		GENOME_BP=$(awk '{{s+=$3}} END{{printf "%.0f", s+0}}' {input})
+		if [ "$GENOME_BP" -ge 4294967296 ]; then GMAP_BIN=gmapl; else GMAP_BIN=gmap; fi
+		$GMAP_BIN -D {params.results_dir}TRANSCRIPT/Gmap -d DB -t {threads}  --min-identity=0.7 \
 		--min-trimmed-coverage=0.85 --cross-species \
 		--max-intronlength-middle=0  \
 		--max-intronlength-ends=0 --mapexons -p 1 -f 3 \

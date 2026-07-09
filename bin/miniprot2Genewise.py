@@ -18,7 +18,7 @@ with open(miniprot_file, 'r') as file:
 		line = line.strip().split("\t")
 
 		if line[2] == "mRNA":
-			m = re.search("Target=(\S+)", line[8])
+			m = re.search(r"Target=(\S+)", line[8])
 			if not m:
 				continue
 			target = m.group(1)
