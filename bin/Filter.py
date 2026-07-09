@@ -371,6 +371,12 @@ def semiSupRandomForest(data, predictors, busco_table, num_trees,
 		model.fit(x_train, y_train.to_numpy().reshape(-1,))
 		process["OOB"].append(1 - model.oob_score_)
 
+		# Nothing is unlabeled -- either the heuristic decided every gene, or the
+		# previous iteration recycled the last of them. sklearn rejects a 0-row
+		# matrix, so stop before predicting rather than raise.
+		if x_test.empty:
+			break
+
 		# Predict unlabeled genes
 		yhat = pd.DataFrame({
 			"prediction": model.predict(x_test),
