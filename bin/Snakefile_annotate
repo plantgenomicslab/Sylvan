@@ -2510,17 +2510,36 @@ rule gmapPrep:
 		# disappears from the EVM consensus without one error message. Four of the fifteen
 		# fleet runs are carrying exactly that state toward EVM, which has run on none of them.
 		#
-		# grep exits 1 when there is no match, which is not a shell error; exit 2 is. Matching
-		# on `\texon\t` rather than a field index is deliberate: a TAB inside the source column
-		# shifts the type field, so `awk '$3=="exon"'` under-counts silently.
-		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || [ $? -eq 1 ]
+		# There is NO errexit here. `shell.prefix` only toggles `-u`, and Snakemake adds no
+		# strict mode of its own -- despite the "snakemake uses bash strict mode!" line in its
+		# own failure boilerplate. So a failing command in the middle of this block does not
+		# abort it, and the rule's exit status is whatever the LAST command returns. Every
+		# failure below therefore has to `exit 1` explicitly. Do not write `cmd || [ $? -eq 1 ]`
+		# and expect it to abort: it evaluates, returns non-zero, and execution carries on.
+		#
+		# Matching on `\texon\t` rather than a field index is deliberate: a TAB inside the
+		# source column shifts the type field, so `awk '$3=="exon"'` under-counts silently.
+		# grep exits 1 when there is simply no match; anything above that is a real error.
+		grep_rc=0
+		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || grep_rc=$?
+		if [ "$grep_rc" -gt 1 ]; then
+			echo "gmapPrep: grep exited $grep_rc reading {input.combined_gff}" >&2
+			exit 1
+		fi
+
+		# Failure 0: combined.gff3 is empty or absent. prepare_liftoff concatenates the
+		# neighbour GFFs into it, so an empty one means that rule produced nothing.
+		if [ ! -s {input.combined_gff} ]; then
+			echo "gmapPrep: {input.combined_gff} is empty -- prepare_liftoff produced nothing" >&2
+			exit 1
+		fi
 
 		# Failure 1: the liftover GFF carries no `exon` features at all. Many PLAZA and
 		# Phytozome annotations are CDS-only, and LiftOff propagates whatever the reference
 		# had. This rule exists to extract exon sequence, so there is nothing to extract and
 		# the evidence track cannot be built -- say so rather than emit an empty FASTA.
 		# (Observed on the Svi_B run, whose neighbours Osa and Bdi both have 0 exon rows.)
-		if [ -s {input.combined_gff} ] && [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 ]; then
+		if [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 ]; then
 			echo "gmapPrep: {input.combined_gff} has no 'exon' features, so GMAP has nothing to align." >&2
 			echo "          Rebuild the liftover GFF with exons (e.g. agat_convert_sp_gxf2gxf.pl derives" >&2
 			echo "          them from CDS), or drop the GMAP exon evidence source deliberately." >&2
@@ -2533,17 +2552,15 @@ rule gmapPrep:
 		# refuses them. Seen on Ahy_C and Spe_C (10 fields, from Zma) and Spe_B (12, from
 		# Ccan); the healthy runs' rows are all 9. `touch` does not truncate, so the 0-byte
 		# output was bedtools' own empty file. Normalise the neighbour GFF to 9 columns --
-		# run_scripts/normalize_gff_for_gemoma.sh does exactly this for GeMoMa.
-		if [ -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 ]; then
-			/opt/envs/alignment/bin/bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3
-			if [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta ]; then
-				echo "gmapPrep: bedtools getfasta produced an empty liftoffExon.fasta from a non-empty BED" >&2
-				exit 1
-			fi
-		else
-			# Reachable only when combined.gff3 is itself empty; the upstream LiftOff rule
-			# has already failed in that case.
-			: > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta
+		# run_scripts/normalize_gff_for_gemoma.sh does exactly this, but only for files whose
+		# extra tabs are in `source`; it refuses the rest rather than corrupt them.
+		#
+		# By here the BED is known non-empty, so an empty FASTA is always an error. There is
+		# no `else` branch: every path out of this rule is a real FASTA or a loud failure.
+		/opt/envs/alignment/bin/bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3
+		if [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta ]; then
+			echo "gmapPrep: bedtools getfasta produced an empty liftoffExon.fasta from a non-empty BED" >&2
+			exit 1
 		fi
 		gmap_build -D {params.results_dir}TRANSCRIPT/Gmap -d DB {input.genome_fasta}
 		"""
