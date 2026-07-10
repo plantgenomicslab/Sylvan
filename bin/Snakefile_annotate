@@ -2503,17 +2503,31 @@ rule gmapPrep:
 		"""
 		micromamba activate annotation
 		mkdir -p {params.results_dir}TRANSCRIPT/Gmap
-		# grep exits 1 when the liftover annotation carries no exon lines. That is a real
-		# possibility, not an error, so tolerate exactly 1 -- but let a genuine grep error
-		# (exit 2) abort the rule.
-		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || [ $? -eq 1 ]
-		# Do NOT fall back to `touch` here. An empty liftoffExon.fasta still lets gmapPrep
+		# Nothing below may end in `|| touch`. An empty liftoffExon.fasta still lets gmapPrep
 		# exit 0, so Snakemake records the rule complete and its output is newer than its
 		# input: neither --rerun-incomplete nor --rerun-triggers mtime will ever redo it.
-		# gmapExon then aligns an empty FASTA and the whole GMAP liftover-exon evidence
-		# track disappears from the EVM consensus without one error message. That happened
-		# on the B. tournefortii run when bedtools was missing from $PATH (see d190fcc).
-		# The only legitimate way to an empty FASTA is an empty BED.
+		# gmapExon then aligns an empty FASTA and the whole GMAP liftover-exon evidence track
+		# disappears from the EVM consensus without one error message. Four of the fifteen
+		# fleet runs reached EVM in exactly that state.
+		#
+		# grep exits 1 when there is no match, which is not a shell error; exit 2 is.
+		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || [ $? -eq 1 ]
+
+		# Failure 1: the liftover GFF carries no `exon` features at all. Many PLAZA and
+		# Phytozome annotations are CDS-only, and LiftOff propagates whatever the reference
+		# had. This rule exists to extract exon sequence, so there is nothing to extract and
+		# the evidence track cannot be built -- say so rather than emit an empty FASTA.
+		# (Observed on the Svi_B run, whose neighbours Osa and Bdi both have 0 exon rows.)
+		if [ -s {input.combined_gff} ] && [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 ]; then
+			echo "gmapPrep: {input.combined_gff} has no 'exon' features, so GMAP has nothing to align." >&2
+			echo "          Rebuild the liftover GFF with exons (e.g. agat_convert_sp_gxf2gxf.pl derives" >&2
+			echo "          them from CDS), or drop the GMAP exon evidence source deliberately." >&2
+			exit 1
+		fi
+
+		# Failure 2: bedtools wrote nothing from a non-empty BED. `touch` does not truncate,
+		# so a 0-byte output means bedtools created the file and died before writing to it.
+		# (Observed on Ahy_C, Spe_B and Spe_C: 48-69 MB BED, matching seqids, valid .fai.)
 		if [ -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 ]; then
 			/opt/envs/alignment/bin/bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3
 			if [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta ]; then
@@ -2521,6 +2535,8 @@ rule gmapPrep:
 				exit 1
 			fi
 		else
+			# Reachable only when combined.gff3 is itself empty; the upstream LiftOff rule
+			# has already failed in that case.
 			: > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta
 		fi
 		gmap_build -D {params.results_dir}TRANSCRIPT/Gmap -d DB {input.genome_fasta}
