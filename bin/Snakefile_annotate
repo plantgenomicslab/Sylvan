@@ -2503,14 +2503,16 @@ rule gmapPrep:
 		"""
 		micromamba activate annotation
 		mkdir -p {params.results_dir}TRANSCRIPT/Gmap
-		# Nothing below may end in `|| touch`. An empty liftoffExon.fasta still lets gmapPrep
-		# exit 0, so Snakemake records the rule complete and its output is newer than its
-		# input: neither --rerun-incomplete nor --rerun-triggers mtime will ever redo it.
+		# Nothing below may fall back to a bare `touch`. An empty liftoffExon.fasta still lets
+		# gmapPrep exit 0, so Snakemake records the rule complete and its output is newer than
+		# its input: neither --rerun-incomplete nor --rerun-triggers mtime will ever redo it.
 		# gmapExon then aligns an empty FASTA and the whole GMAP liftover-exon evidence track
 		# disappears from the EVM consensus without one error message. Four of the fifteen
-		# fleet runs reached EVM in exactly that state.
+		# fleet runs are carrying exactly that state toward EVM, which has run on none of them.
 		#
-		# grep exits 1 when there is no match, which is not a shell error; exit 2 is.
+		# grep exits 1 when there is no match, which is not a shell error; exit 2 is. Matching
+		# on `\texon\t` rather than a field index is deliberate: a TAB inside the source column
+		# shifts the type field, so `awk '$3=="exon"'` under-counts silently.
 		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || [ $? -eq 1 ]
 
 		# Failure 1: the liftover GFF carries no `exon` features at all. Many PLAZA and
