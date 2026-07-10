@@ -2525,9 +2525,13 @@ rule gmapPrep:
 			exit 1
 		fi
 
-		# Failure 2: bedtools wrote nothing from a non-empty BED. `touch` does not truncate,
-		# so a 0-byte output means bedtools created the file and died before writing to it.
-		# (Observed on Ahy_C, Spe_B and Spe_C: 48-69 MB BED, matching seqids, valid .fai.)
+		# Failure 2: bedtools rejected the BED and wrote nothing. The usual cause is a
+		# malformed liftover GFF: several PLAZA/Phytozome annotations carry a TAB *inside*
+		# the source column, so their rows have 10 or 12 fields instead of 9 and bedtools
+		# refuses them. Seen on Ahy_C and Spe_C (10 fields, from Zma) and Spe_B (12, from
+		# Ccan); the healthy runs' rows are all 9. `touch` does not truncate, so the 0-byte
+		# output was bedtools' own empty file. Normalise the neighbour GFF to 9 columns --
+		# run_scripts/normalize_gff_for_gemoma.sh does exactly this for GeMoMa.
 		if [ -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 ]; then
 			/opt/envs/alignment/bin/bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3
 			if [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta ]; then
