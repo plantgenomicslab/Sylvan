@@ -2763,8 +2763,20 @@ rule stringtie_STAR:
 			-t \
 			-c 1.5 \
 			-f 0.05
-		gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/StringTie/stringtie.star.gtf > {output}
+		# gtf_to_alignment_gff3.pl ships with TransDecoder, which lives in the genepred env,
+		# not in alignment. Called bare it was `command not found`, the `>` redirect had
+		# already created a 0-byte {output}, and the trailing `sed` -- the rule's last
+		# command -- succeeded on it, so Snakemake recorded the job complete. The 0-byte
+		# output is newer than its input and carries no incomplete marker, so neither
+		# --rerun-incomplete nor --rerun-triggers mtime ever rebuilds it, and
+		# combineEVMInputs consumes an empty StringTie track. Eight of the fifteen fleet
+		# runs are in that state. Pin the path, and refuse to hand on an empty file.
+		/opt/envs/genepred/bin/gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/StringTie/stringtie.star.gtf > {output}
 		sed -i 's/Cufflinks/StringTie/' {output}
+		if [ ! -s {output} ]; then
+			echo "stringtie_STAR: {output} is empty -- gtf_to_alignment_gff3.pl produced nothing" >&2
+			exit 1
+		fi
 		"""
 
 # PsiClass seems to have a multithreading bug in classes when subexon count gets large
@@ -2783,8 +2795,14 @@ rule psiClass_STAR:
 			-p {threads} \
 			-c 0.05
 			
-			gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gtf > {output}
+			# Same as stringtie_STAR: the TransDecoder util lives in the genepred env, and a
+			# bare call left a 0-byte {output} that the trailing `sed` blessed with exit 0.
+			/opt/envs/genepred/bin/gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gtf > {output}
 			sed -i 's/Cufflinks/PsiClass/' {output}
+			if [ ! -s {output} ]; then
+				echo "psiClass_STAR: {output} is empty -- gtf_to_alignment_gff3.pl produced nothing" >&2
+				exit 1
+			fi
 
 			rm {input}.filtered.bam
 			"""
