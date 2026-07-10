@@ -95,23 +95,50 @@ else
 	say "status          : NOT the published image -- will be repointed"
 fi
 
+# ---- 2b. never touch a run that Snakemake is holding -------------------------
+# .snakemake/locks is non-empty exactly while a Snakemake process owns the directory.
+# Moving artifacts out from under a live run corrupts it; even the dry run's numbers
+# are meaningless mid-flight, because STAR's in-progress files come and go.
+LOCKS="$RUN/.snakemake/locks"
+if [ -d "$LOCKS" ] && [ -n "$(ls -A "$LOCKS" 2>/dev/null)" ]; then
+	if [ "$APPLY" = yes ]; then
+		die "$RUN is locked by a running Snakemake ($(ls -A "$LOCKS" | tr '\n' ' ')). Stop it first."
+	fi
+	say ""
+	say "WARNING: this run is locked by a running Snakemake. The figures below are a"
+	say "         snapshot of a moving target, and --apply will refuse to touch it."
+fi
+
 # ---- 3. protect what must survive -------------------------------------------
 # Existing BAMs are never touched. Missing ones are NOT an error: a run stopped by
 # the old image's container-startup kill typically has a mix, and STAR_paired will
 # simply be rescheduled for the missing samples on the new image.
+#
+# Count the RULE's outputs, `STAR_paired.<sample>.bam`, and nothing else. STAR is
+# handed `--outFileNamePrefix …/STAR_paired.<sample>.bam`, so while it runs it also
+# leaves `STAR_paired.<sample>.bamAligned.sortedByCoord.out.bam` beside them -- which
+# a bare `*.bam` glob picks up, and which is 0 bytes until STAR finishes. That made
+# this script abort on a healthy live run with a bogus "STAR sort-RAM bug". Derive the
+# names from the fastp inputs instead of globbing.
 head2 "STAR alignments (never touched)"
-BAM_N=0; BAM_EMPTY=0
-if [ -d "$RUN/results/GETA/STAR/paired" ]; then
+BAM_N=0; BAM_EMPTY=0; EXPECT_N=0
+FASTP="$RUN/results/GETA/fastp/paired"
+PAIRED="$RUN/results/GETA/STAR/paired"
+
+if [ -d "$FASTP" ]; then
+	while IFS= read -r fq; do
+		EXPECT_N=$((EXPECT_N + 1))
+		sample=$(basename "$fq"); sample=${sample%_1.fastq.gz}
+		bam="$PAIRED/STAR_paired.$sample.bam"
+		[ -e "$bam" ] || continue
+		BAM_N=$((BAM_N + 1))
+		[ -s "$bam" ] || BAM_EMPTY=$((BAM_EMPTY + 1))
+	done < <(find "$FASTP" -maxdepth 1 -name '*_1.fastq.gz')
+elif [ -d "$PAIRED" ]; then
 	while IFS= read -r bam; do
 		BAM_N=$((BAM_N + 1))
 		[ -s "$bam" ] || BAM_EMPTY=$((BAM_EMPTY + 1))
-	done < <(find "$RUN/results/GETA/STAR/paired" -maxdepth 1 -name '*.bam')
-fi
-
-EXPECT_N=0
-FASTP="$RUN/results/GETA/fastp/paired"
-if [ -d "$FASTP" ]; then
-	EXPECT_N=$(find "$FASTP" -maxdepth 1 -name '*_1.fastq.gz' | wc -l)
+	done < <(find "$PAIRED" -maxdepth 1 -name 'STAR_paired.*.bam' ! -name '*.bamAligned.sortedByCoord.out.bam')
 fi
 
 if [ "$EXPECT_N" -gt 0 ]; then
@@ -184,9 +211,15 @@ RESUME="SYLVAN_CONFIG=${CONFIG#"$RUN"/} ./bin/annotate.sh --rerun-triggers mtime
 
 if [ "$APPLY" != yes ]; then
 	head2 "DRY RUN -- nothing changed"
-	say "Re-run with --apply to:"
-	[ "$SIF_OK" = no ] && say "  * repoint ${CFG_SIF#"$RUN"/} at the published image"
-	[ "${#STALE[@]}" -gt 0 ] && say "  * move ${#STALE[@]} artifact(s) into results/_preflight_backup_<stamp>/"
+	if [ "$SIF_OK" = yes ] && [ "${#STALE[@]}" -eq 0 ]; then
+		# Say so, rather than printing "Re-run with --apply to:" above an empty list.
+		# The "nothing to do" message below lives past the --apply gate.
+		say "This run is already prepared. --apply would change nothing."
+	else
+		say "Re-run with --apply to:"
+		[ "$SIF_OK" = no ] && say "  * repoint ${CFG_SIF#"$RUN"/} at the published image"
+		[ "${#STALE[@]}" -gt 0 ] && say "  * move ${#STALE[@]} artifact(s) into results/_preflight_backup_<stamp>/"
+	fi
 	say ""
 	say "Then, from $RUN:"
 	say "  $RESUME -n     # dry run: Helixer must NOT appear; the missing STAR_paired jobs must"
