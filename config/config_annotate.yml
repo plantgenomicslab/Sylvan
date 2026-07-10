@@ -37,6 +37,12 @@ Input:
                                       # See: https://github.com/Gaius-Augustus/Augustus/tree/master/config/species
   evm_weights: config/evm_weights.txt  # [!!!!REQUIRED!!!!:file] EVM weights file (included in Sylvan/config/)
   num_evm_files: 126              # [optional:value] Number of EVM splits (default: 126)
+  allow_missing_gmap_exon: false   # [optional:bool] Default false. gmapPrep fails when the liftover
+                                  # GFF has no `exon` features, because an empty GMAP exon track
+                                  # otherwise disappears into the EVM consensus without an error.
+                                  # Set true ONLY to exclude that evidence source deliberately (e.g.
+                                  # CDS-only references), and remove `TRANSCRIPT gmap.exon_match`
+                                  # from the EVM weights so the empty track contributes nothing.
   swissprot: "toydata/misc/uniprot_sprot.fasta"  # [optional:file] SwissProt reviewed FASTA for PASA/EVM model comparison
                                   # Download: curl -o swissprot_viridiplantae.fasta.gz "https://rest.uniprot.org/uniprotkb/stream?query=(taxonomy_id:33090)+AND+(reviewed:true)&format=fasta&compressed=true" && gunzip swissprot_viridiplantae.fasta.gz
 

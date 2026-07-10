@@ -2498,7 +2498,13 @@ rule gmapPrep:
 		f"{RESULTS_DIR}TRANSCRIPT/Gmap/liftoffExon.fasta",
 		f"{RESULTS_DIR}TRANSCRIPT/Gmap/DB/DB.chromosome"
 	params:
-		results_dir = RESULTS_DIR
+		results_dir = RESULTS_DIR,
+		# Opt-in escape hatch for references that genuinely have no exon features (many
+		# PLAZA/Phytozome annotations are CDS-only). Default false: an exon-less liftover
+		# GFF is an error, because that is how the track vanished silently in the first
+		# place. Setting it true is a deliberate, recorded exclusion -- pair it with
+		# removing `TRANSCRIPT gmap.exon_match` from config/evm_weights.txt.
+		allow_no_exon = "1" if config_dict.get("Input", {}).get("allow_missing_gmap_exon", False) else "0"
 	shell:
 		"""
 		micromamba activate annotation
@@ -2538,11 +2544,26 @@ rule gmapPrep:
 		# Phytozome annotations are CDS-only, and LiftOff propagates whatever the reference
 		# had. This rule exists to extract exon sequence, so there is nothing to extract and
 		# the evidence track cannot be built -- say so rather than emit an empty FASTA.
-		# (Observed on the Svi_B run, whose neighbours Osa and Bdi both have 0 exon rows.)
+		# (Observed on the Svi_B run, whose neighbours Osa and Bdi both have 0 exon rows,
+		# and on the finished Deschampsia run, whose reference is CDS-only.)
+		#
+		# `Input.allow_missing_gmap_exon: true` turns this into a deliberate, recorded
+		# exclusion instead of an error. It stays off by default: an empty track that
+		# nobody asked for is exactly the failure this rule now exists to prevent.
 		if [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 ]; then
+			if [ "{params.allow_no_exon}" = "1" ]; then
+				echo "gmapPrep: WARNING -- {input.combined_gff} has no 'exon' features." >&2
+				echo "          Proceeding with an EMPTY GMAP exon track because" >&2
+				echo "          Input.allow_missing_gmap_exon is set. Remove 'TRANSCRIPT gmap.exon_match'" >&2
+				echo "          from the EVM weights so the empty track contributes nothing." >&2
+				: > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta
+				gmap_build -D {params.results_dir}TRANSCRIPT/Gmap -d DB {input.genome_fasta}
+				exit 0
+			fi
 			echo "gmapPrep: {input.combined_gff} has no 'exon' features, so GMAP has nothing to align." >&2
 			echo "          Rebuild the liftover GFF with exons (e.g. agat_convert_sp_gxf2gxf.pl derives" >&2
-			echo "          them from CDS), or drop the GMAP exon evidence source deliberately." >&2
+			echo "          them from CDS), or set Input.allow_missing_gmap_exon: true to exclude the" >&2
+			echo "          GMAP exon evidence source deliberately." >&2
 			exit 1
 		fi
 
