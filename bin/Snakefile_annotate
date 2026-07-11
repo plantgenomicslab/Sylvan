@@ -2834,7 +2834,7 @@ rule stringtie_STAR:
 		# --rerun-incomplete nor --rerun-triggers mtime ever rebuilds it, and
 		# combineEVMInputs consumes an empty StringTie track. Eight of the fifteen fleet
 		# runs are in that state. Pin the path, and refuse to hand on an empty file.
-		/opt/envs/genepred/bin/gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/StringTie/stringtie.star.gtf > {output}
+		/opt/envs/genepred/opt/transdecoder/util/gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/StringTie/stringtie.star.gtf > {output}
 		sed -i 's/Cufflinks/StringTie/' {output}
 		if [ ! -s {output} ]; then
 			echo "stringtie_STAR: {output} is empty -- gtf_to_alignment_gff3.pl produced nothing" >&2
@@ -2860,7 +2860,7 @@ rule psiClass_STAR:
 			
 			# Same as stringtie_STAR: the TransDecoder util lives in the genepred env, and a
 			# bare call left a 0-byte {output} that the trailing `sed` blessed with exit 0.
-			/opt/envs/genepred/bin/gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gtf > {output}
+			/opt/envs/genepred/opt/transdecoder/util/gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gtf > {output}
 			sed -i 's/Cufflinks/PsiClass/' {output}
 			if [ ! -s {output} ]; then
 				echo "psiClass_STAR: {output} is empty -- gtf_to_alignment_gff3.pl produced nothing" >&2
