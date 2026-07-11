@@ -16,7 +16,32 @@ def run_in_container(cmd_str, env_name="genepred", stderr_file=None):
     sif = globals().get("config_dict", {}).get("Input", {}).get("singularity", "")
     sing_args = os.environ.get("SNAKEMAKE_SINGULARITY_ARGS", "--nv").split()
     if sif:
-        inner = f'eval "$(/usr/local/bin/micromamba shell hook -s bash)"; micromamba activate /opt/mamba/envs/{env_name} && {cmd_str}'
+        # Source the cached `micromamba shell hook` (see _HOOK_CACHE / shell.prefix
+        # below) instead of forking it inline on every run: block. The inline fork
+        # has a hardcoded 5s timeout in micromamba and intermittently gets SIGKILLed
+        # under heavy cluster I/O ("command basename ... was killed after 5s timeout"),
+        # which left the `micromamba` shell function undefined and crashed
+        # geneRegion2Genewise at `micromamba activate`. shell.prefix already fixed
+        # this for shell: blocks; run: blocks (this helper) went through the inline
+        # fork and were still affected. Build under flock with retries; inline-eval
+        # fallback covers a missing/corrupt cache.
+        _hc = globals().get("_HOOK_CACHE", f"{globals().get('RESULTS_DIR', 'results/')}.micromamba_hook.sh")
+        hook = (
+            f'if [ ! -s "{_hc}" ]; then '
+            f'  ( if command -v flock >/dev/null 2>&1; then flock -w 120 9 || true; fi; '
+            f'    if [ ! -s "{_hc}" ]; then '
+            f'      for _i in 1 2 3; do '
+            f'        if /usr/local/bin/micromamba shell hook -s bash > "{_hc}.tmp.$$" 2>/dev/null && [ -s "{_hc}.tmp.$$" ]; then '
+            f'          mv -f "{_hc}.tmp.$$" "{_hc}"; break; '
+            f'        fi; '
+            f'        rm -f "{_hc}.tmp.$$"; sleep 2; '
+            f'      done; '
+            f'    fi; '
+            f'  ) 9>"{_hc}.lock" || true; '
+            f'fi; '
+            f'source "{_hc}" 2>/dev/null || eval "$(/usr/local/bin/micromamba shell hook -s bash 2>/dev/null)" || true; '
+        )
+        inner = f'{hook} micromamba activate /opt/mamba/envs/{env_name} && {cmd_str}'
         fh = open(stderr_file, 'w') if stderr_file else None
         try:
             _subprocess.run(
