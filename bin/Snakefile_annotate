@@ -590,7 +590,7 @@ rule STAR_paired:
   			--outReadsUnmapped Fastx \
   			--genomeDir {params.results_dir}GETA/STAR \
 			--outSAMtype BAM SortedByCoordinate \
-			--limitBAMsortRAM 216000000000 \
+			--limitBAMsortRAM 105000000000 \
 			--outBAMsortingBinsN 200 \
 			--outSAMattributes XS \
 			--outSAMstrandField intronMotif \
@@ -637,7 +637,7 @@ rule STAR_single:
 		--outSAMtype BAM SortedByCoordinate \
 		--outSAMattributes XS \
 		--outSAMstrandField intronMotif \
-		--limitBAMsortRAM 216000000000 \
+		--limitBAMsortRAM 105000000000 \
 		--outFileNamePrefix {params.results_dir}GETA/STAR/single/STAR_single.{wildcards.run}.bam \
 		--readFilesCommand zcat \
 		-c \
