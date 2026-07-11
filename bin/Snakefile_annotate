@@ -2523,13 +2523,91 @@ rule gmapPrep:
 		f"{RESULTS_DIR}TRANSCRIPT/Gmap/liftoffExon.fasta",
 		f"{RESULTS_DIR}TRANSCRIPT/Gmap/DB/DB.chromosome"
 	params:
-		results_dir = RESULTS_DIR
+		results_dir = RESULTS_DIR,
+		# Opt-in escape hatch for references that genuinely have no exon features (many
+		# PLAZA/Phytozome annotations are CDS-only). Default false: an exon-less liftover
+		# GFF is an error, because that is how the track vanished silently in the first
+		# place. Setting it true is a deliberate, recorded exclusion -- pair it with
+		# removing `TRANSCRIPT gmap.exon_match` from config/evm_weights.txt.
+		allow_no_exon = "1" if config_dict.get("Input", {}).get("allow_missing_gmap_exon", False) else "0"
 	shell:
 		"""
 		micromamba activate annotation
 		mkdir -p {params.results_dir}TRANSCRIPT/Gmap
-		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || touch {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3
-		/opt/envs/alignment/bin/bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || touch {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta
+		# Nothing below may fall back to a bare `touch`. An empty liftoffExon.fasta still lets
+		# gmapPrep exit 0, so Snakemake records the rule complete and its output is newer than
+		# its input: neither --rerun-incomplete nor --rerun-triggers mtime will ever redo it.
+		# gmapExon then aligns an empty FASTA and the whole GMAP liftover-exon evidence track
+		# disappears from the EVM consensus without one error message. Four of the fifteen
+		# fleet runs are carrying exactly that state toward EVM, which has run on none of them.
+		#
+		# There is NO errexit here. `shell.prefix` only toggles `-u`, and Snakemake adds no
+		# strict mode of its own -- despite the "snakemake uses bash strict mode!" line in its
+		# own failure boilerplate. So a failing command in the middle of this block does not
+		# abort it, and the rule's exit status is whatever the LAST command returns. Every
+		# failure below therefore has to `exit 1` explicitly. Do not write `cmd || [ $? -eq 1 ]`
+		# and expect it to abort: it evaluates, returns non-zero, and execution carries on.
+		#
+		# Matching on `\texon\t` rather than a field index is deliberate: a TAB inside the
+		# source column shifts the type field, so `awk '$3=="exon"'` under-counts silently.
+		# grep exits 1 when there is simply no match; anything above that is a real error.
+		grep_rc=0
+		grep -P '\texon\t' {input.combined_gff} > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 || grep_rc=$?
+		if [ "$grep_rc" -gt 1 ]; then
+			echo "gmapPrep: grep exited $grep_rc reading {input.combined_gff}" >&2
+			exit 1
+		fi
+
+		# Failure 0: combined.gff3 is empty or absent. prepare_liftoff concatenates the
+		# neighbour GFFs into it, so an empty one means that rule produced nothing.
+		if [ ! -s {input.combined_gff} ]; then
+			echo "gmapPrep: {input.combined_gff} is empty -- prepare_liftoff produced nothing" >&2
+			exit 1
+		fi
+
+		# Failure 1: the liftover GFF carries no `exon` features at all. Many PLAZA and
+		# Phytozome annotations are CDS-only, and LiftOff propagates whatever the reference
+		# had. This rule exists to extract exon sequence, so there is nothing to extract and
+		# the evidence track cannot be built -- say so rather than emit an empty FASTA.
+		# (Observed on the Svi_B run, whose neighbours Osa and Bdi both have 0 exon rows,
+		# and on the finished Deschampsia run, whose reference is CDS-only.)
+		#
+		# `Input.allow_missing_gmap_exon: true` turns this into a deliberate, recorded
+		# exclusion instead of an error. It stays off by default: an empty track that
+		# nobody asked for is exactly the failure this rule now exists to prevent.
+		if [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3 ]; then
+			if [ "{params.allow_no_exon}" = "1" ]; then
+				echo "gmapPrep: WARNING -- {input.combined_gff} has no 'exon' features." >&2
+				echo "          Proceeding with an EMPTY GMAP exon track because" >&2
+				echo "          Input.allow_missing_gmap_exon is set. Remove 'TRANSCRIPT gmap.exon_match'" >&2
+				echo "          from the EVM weights so the empty track contributes nothing." >&2
+				: > {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta
+				gmap_build -D {params.results_dir}TRANSCRIPT/Gmap -d DB {input.genome_fasta}
+				exit 0
+			fi
+			echo "gmapPrep: {input.combined_gff} has no 'exon' features, so GMAP has nothing to align." >&2
+			echo "          Rebuild the liftover GFF with exons (e.g. agat_convert_sp_gxf2gxf.pl derives" >&2
+			echo "          them from CDS), or set Input.allow_missing_gmap_exon: true to exclude the" >&2
+			echo "          GMAP exon evidence source deliberately." >&2
+			exit 1
+		fi
+
+		# Failure 2: bedtools rejected the BED and wrote nothing. The usual cause is a
+		# malformed liftover GFF: several PLAZA/Phytozome annotations carry a TAB *inside*
+		# the source column, so their rows have 10 or 12 fields instead of 9 and bedtools
+		# refuses them. Seen on Ahy_C and Spe_C (10 fields, from Zma) and Spe_B (12, from
+		# Ccan); the healthy runs' rows are all 9. `touch` does not truncate, so the 0-byte
+		# output was bedtools' own empty file. Normalise the neighbour GFF to 9 columns --
+		# run_scripts/normalize_gff_for_gemoma.sh does exactly this, but only for files whose
+		# extra tabs are in `source`; it refuses the rest rather than corrupt them.
+		#
+		# By here the BED is known non-empty, so an empty FASTA is always an error. There is
+		# no `else` branch: every path out of this rule is a real FASTA or a loud failure.
+		/opt/envs/alignment/bin/bedtools getfasta -fi {input.combined_fasta} -fo {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta -bed {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.gff3
+		if [ ! -s {params.results_dir}TRANSCRIPT/Gmap/liftoffExon.fasta ]; then
+			echo "gmapPrep: bedtools getfasta produced an empty liftoffExon.fasta from a non-empty BED" >&2
+			exit 1
+		fi
 		gmap_build -D {params.results_dir}TRANSCRIPT/Gmap -d DB {input.genome_fasta}
 		"""
 
@@ -2748,8 +2826,20 @@ rule stringtie_STAR:
 			-t \
 			-c 1.5 \
 			-f 0.05
-		gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/StringTie/stringtie.star.gtf > {output}
+		# gtf_to_alignment_gff3.pl ships with TransDecoder, which lives in the genepred env,
+		# not in alignment. Called bare it was `command not found`, the `>` redirect had
+		# already created a 0-byte {output}, and the trailing `sed` -- the rule's last
+		# command -- succeeded on it, so Snakemake recorded the job complete. The 0-byte
+		# output is newer than its input and carries no incomplete marker, so neither
+		# --rerun-incomplete nor --rerun-triggers mtime ever rebuilds it, and
+		# combineEVMInputs consumes an empty StringTie track. Eight of the fifteen fleet
+		# runs are in that state. Pin the path, and refuse to hand on an empty file.
+		/opt/envs/genepred/bin/gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/StringTie/stringtie.star.gtf > {output}
 		sed -i 's/Cufflinks/StringTie/' {output}
+		if [ ! -s {output} ]; then
+			echo "stringtie_STAR: {output} is empty -- gtf_to_alignment_gff3.pl produced nothing" >&2
+			exit 1
+		fi
 		"""
 
 # PsiClass seems to have a multithreading bug in classes when subexon count gets large
@@ -2768,8 +2858,14 @@ rule psiClass_STAR:
 			-p {threads} \
 			-c 0.05
 			
-			gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gtf > {output}
+			# Same as stringtie_STAR: the TransDecoder util lives in the genepred env, and a
+			# bare call left a 0-byte {output} that the trailing `sed` blessed with exit 0.
+			/opt/envs/genepred/bin/gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gtf > {output}
 			sed -i 's/Cufflinks/PsiClass/' {output}
+			if [ ! -s {output} ]; then
+				echo "psiClass_STAR: {output} is empty -- gtf_to_alignment_gff3.pl produced nothing" >&2
+				exit 1
+			fi
 
 			rm {input}.filtered.bam
 			"""

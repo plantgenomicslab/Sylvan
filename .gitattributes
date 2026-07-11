@@ -16,3 +16,9 @@
 # Explicitly keep EVM weight files out of LFS
 toydata/config/evm_weights.txt !filter !diff !merge text
 config/evm_weights.txt !filter !diff !merge text
+
+# The toy genome is committed as a raw blob, not an LFS pointer, so that
+# `bin/annotate_toydata.sh` works in a clone made without git-lfs. Without this
+# exception the *.fasta.gz rule above makes the file permanently dirty: the clean
+# filter rewrites the 5.6 MB worktree copy to a 132-byte pointer at diff time.
+toydata/genome/ath4.fasta.gz !filter !diff !merge -text
