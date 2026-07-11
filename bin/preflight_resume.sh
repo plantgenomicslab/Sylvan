@@ -95,23 +95,50 @@ else
 	say "status          : NOT the published image -- will be repointed"
 fi
 
+# ---- 2b. never touch a run that Snakemake is holding -------------------------
+# .snakemake/locks is non-empty exactly while a Snakemake process owns the directory.
+# Moving artifacts out from under a live run corrupts it; even the dry run's numbers
+# are meaningless mid-flight, because STAR's in-progress files come and go.
+LOCKS="$RUN/.snakemake/locks"
+if [ -d "$LOCKS" ] && [ -n "$(ls -A "$LOCKS" 2>/dev/null)" ]; then
+	if [ "$APPLY" = yes ]; then
+		die "$RUN is locked by a running Snakemake ($(ls -A "$LOCKS" | tr '\n' ' ')). Stop it first."
+	fi
+	say ""
+	say "WARNING: this run is locked by a running Snakemake. The figures below are a"
+	say "         snapshot of a moving target, and --apply will refuse to touch it."
+fi
+
 # ---- 3. protect what must survive -------------------------------------------
 # Existing BAMs are never touched. Missing ones are NOT an error: a run stopped by
 # the old image's container-startup kill typically has a mix, and STAR_paired will
 # simply be rescheduled for the missing samples on the new image.
+#
+# Count the RULE's outputs, `STAR_paired.<sample>.bam`, and nothing else. STAR is
+# handed `--outFileNamePrefix …/STAR_paired.<sample>.bam`, so while it runs it also
+# leaves `STAR_paired.<sample>.bamAligned.sortedByCoord.out.bam` beside them -- which
+# a bare `*.bam` glob picks up, and which is 0 bytes until STAR finishes. That made
+# this script abort on a healthy live run with a bogus "STAR sort-RAM bug". Derive the
+# names from the fastp inputs instead of globbing.
 head2 "STAR alignments (never touched)"
-BAM_N=0; BAM_EMPTY=0
-if [ -d "$RUN/results/GETA/STAR/paired" ]; then
+BAM_N=0; BAM_EMPTY=0; EXPECT_N=0
+FASTP="$RUN/results/GETA/fastp/paired"
+PAIRED="$RUN/results/GETA/STAR/paired"
+
+if [ -d "$FASTP" ]; then
+	while IFS= read -r fq; do
+		EXPECT_N=$((EXPECT_N + 1))
+		sample=$(basename "$fq"); sample=${sample%_1.fastq.gz}
+		bam="$PAIRED/STAR_paired.$sample.bam"
+		[ -e "$bam" ] || continue
+		BAM_N=$((BAM_N + 1))
+		[ -s "$bam" ] || BAM_EMPTY=$((BAM_EMPTY + 1))
+	done < <(find "$FASTP" -maxdepth 1 -name '*_1.fastq.gz')
+elif [ -d "$PAIRED" ]; then
 	while IFS= read -r bam; do
 		BAM_N=$((BAM_N + 1))
 		[ -s "$bam" ] || BAM_EMPTY=$((BAM_EMPTY + 1))
-	done < <(find "$RUN/results/GETA/STAR/paired" -maxdepth 1 -name '*.bam')
-fi
-
-EXPECT_N=0
-FASTP="$RUN/results/GETA/fastp/paired"
-if [ -d "$FASTP" ]; then
-	EXPECT_N=$(find "$FASTP" -maxdepth 1 -name '*_1.fastq.gz' | wc -l)
+	done < <(find "$PAIRED" -maxdepth 1 -name 'STAR_paired.*.bam' ! -name '*.bamAligned.sortedByCoord.out.bam')
 fi
 
 if [ "$EXPECT_N" -gt 0 ]; then
@@ -144,14 +171,38 @@ fi
 if [ -d "$GW_TMP" ]; then
 	FAA=$(find "$GW_TMP" -maxdepth 1 -name '*.faa' | wc -l)
 	GFF=$(find "$GW_TMP" -maxdepth 1 -name '*.gff' | wc -l)
-	if [ "$GFF" -eq 0 ] && [ "$FAA" -gt 0 ]; then
+	if [ "$FAA" -eq 0 ]; then
+		# An empty leftover. Snakemake removes a directory() output before re-running its
+		# rule, so this needs no help. Do not send the operator to rerun_genewise.sh.
+		say "  geneRegion_genewise.tmp: empty -- nothing to do"
+	elif [ "$GFF" -eq 0 ]; then
 		add_stale "$GW_TMP" "partial checkpoint: $FAA groups, 0 GeneWise GFFs"
+	elif [ "$GFF" -lt "$FAA" ]; then
+		say "  geneRegion_genewise.tmp: $FAA groups / $GFF GFFs -- GeneWise stopped partway. Neither this"
+		say "                           script nor bin/rerun_genewise.sh handles that; resolve it first."
 	else
 		say "  geneRegion_genewise.tmp: $FAA groups / $GFF GFFs -- GeneWise has run; use bin/rerun_genewise.sh instead"
 	fi
 fi
-if [ "$SIF_OK" = no ] && [ -f "$HOOK" ]; then
-	add_stale "$HOOK" "built by the old image"
+# The Snakemake-side hook cache is generated inside the container by the first rule to
+# run and rebuilt only when absent, so it belongs to whichever image produced it. It is
+# stale whenever that is not the image this run is about to use.
+#
+# Do NOT key this off SIF_OK. An operator who repoints the image by hand -- which is
+# exactly what HANDOFF_2026-07-08 §3.2 tells them to do -- leaves SIF_OK=yes and a hook
+# cache from the previous image, and this script used to call that run prepared.
+HOOK_STALE=no
+if [ -f "$HOOK" ]; then
+	if [ ! -e "$CFG_SIF" ]; then
+		HOOK_STALE=yes
+		add_stale "$HOOK" "the configured image is missing; the cache cannot be trusted"
+	elif [ "$SIF_OK" = no ]; then
+		HOOK_STALE=yes
+		add_stale "$HOOK" "built by the image this script is about to replace"
+	elif [ "$HOOK" -ot "$CFG_SIF" ]; then
+		HOOK_STALE=yes
+		add_stale "$HOOK" "older than the image in use -- built by an earlier one"
+	fi
 fi
 [ "${#STALE[@]}" -gt 0 ] || say "  none"
 
@@ -160,9 +211,15 @@ RESUME="SYLVAN_CONFIG=${CONFIG#"$RUN"/} ./bin/annotate.sh --rerun-triggers mtime
 
 if [ "$APPLY" != yes ]; then
 	head2 "DRY RUN -- nothing changed"
-	say "Re-run with --apply to:"
-	[ "$SIF_OK" = no ] && say "  * repoint ${CFG_SIF#"$RUN"/} at the published image"
-	[ "${#STALE[@]}" -gt 0 ] && say "  * move ${#STALE[@]} artifact(s) into results/_preflight_backup_<stamp>/"
+	if [ "$SIF_OK" = yes ] && [ "${#STALE[@]}" -eq 0 ]; then
+		# Say so, rather than printing "Re-run with --apply to:" above an empty list.
+		# The "nothing to do" message below lives past the --apply gate.
+		say "This run is already prepared. --apply would change nothing."
+	else
+		say "Re-run with --apply to:"
+		[ "$SIF_OK" = no ] && say "  * repoint ${CFG_SIF#"$RUN"/} at the published image"
+		[ "${#STALE[@]}" -gt 0 ] && say "  * move ${#STALE[@]} artifact(s) into results/_preflight_backup_<stamp>/"
+	fi
 	say ""
 	say "Then, from $RUN:"
 	say "  $RESUME -n     # dry run: Helixer must NOT appear; the missing STAR_paired jobs must"
@@ -180,6 +237,19 @@ if [ "${#STALE[@]}" -eq 0 ] && [ "$SIF_OK" = yes ]; then
 	exit 0
 fi
 
+# Check the image BEFORE moving anything: a bad image should leave the run untouched.
+if [ "$SIF_OK" = no ]; then
+	if [ -f "$PUBLISHED_SIF.sha256" ]; then
+		say "verify  $(basename "$PUBLISHED_SIF") against its .sha256 (a 10 GB image takes about a minute)"
+		if ! ( cd "$(dirname "$PUBLISHED_SIF")" && sha256sum -c "$(basename "$PUBLISHED_SIF").sha256" >/dev/null 2>&1 ); then
+			die "sha256 mismatch for $PUBLISHED_SIF -- refusing to touch this run"
+		fi
+		say "verify  OK"
+	else
+		say "verify  no .sha256 beside $PUBLISHED_SIF -- skipping the integrity check"
+	fi
+fi
+
 BK="$RUN/results/_preflight_backup_$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BK"
 
@@ -188,8 +258,12 @@ for f in ${STALE[@]+"${STALE[@]}"}; do
 	say "moved   ${f#"$RUN"/}"
 done
 
-if [ "$SIF_OK" = no ]; then
+# The flock file belongs to the cache we just moved out; the Snakefile recreates both.
+if [ "$HOOK_STALE" = yes ]; then
 	rm -f "$HOOK.lock"
+fi
+
+if [ "$SIF_OK" = no ]; then
 	if [ -e "$CFG_SIF" ] && [ ! -L "$CFG_SIF" ]; then
 		mv "$CFG_SIF" "$BK/$(basename "$CFG_SIF").old"
 		say "moved   ${CFG_SIF#"$RUN"/} (old image)"

@@ -9,7 +9,7 @@ Sylvan is a two-phase genome annotation pipeline for plant and other eukaryotic 
 ## Environment Setup
 
 - **Interactive shell**: `micromamba activate sylvan`
-- **Non-interactive (Claude Code Bash / CI)**: `micromamba run -n sylvan <command>` or use the env Python absolute path `/Users/wyim/micromamba/envs/sylvan/bin/python`
+- **Non-interactive (Claude Code Bash / CI)**: `micromamba run -n sylvan <command>`. `micromamba activate` is a shell function and does not survive into a non-interactive subshell, so prefer `run`. The env prefix differs per host (`micromamba env list` to find it); on Pronghorn it is `/data/gpfs/assoc/pgl/bin/conda/conda_envs/sylvan`.
 
 ## Common Commands
 
@@ -31,8 +31,10 @@ Sylvan is a two-phase genome annotation pipeline for plant and other eukaryotic 
 
 ### Run unit tests
 ```bash
-python bin/test_feature_importance.py
+micromamba run -n sylvan python bin/test_feature_importance.py
 ```
+The bare `python` on PATH has no pandas/scikit-learn, so the test needs the env. CI runs
+this test too, and unlike pylint (`--exit-zero`) it can fail the build.
 
 ### Run pylint (matches CI configuration)
 ```bash
@@ -122,4 +124,4 @@ Semi-supervised random forest filtering of draft gene models:
 
 ## CI
 
-GitHub Actions runs pylint on Python 3.10 and 3.11 for all `bin/*.py` files on pushes/PRs to `main` and `develop`.
+GitHub Actions runs pylint and then `bin/test_feature_importance.py` on Python 3.10 and 3.11, for pushes/PRs to `main` and `develop` that touch any `.py` file. pylint runs with `--exit-zero` and is advisory; the unit test is the gate.

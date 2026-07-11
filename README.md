@@ -17,6 +17,7 @@ Sylvan is a comprehensive genome annotation pipeline that combines EVM/PASA, GET
 - **TidyGFF**: Format annotations for public distribution
 - **Post-filter curation & AS reconstruction**: optional helpers to derive a high-confidence curated annotation (`curate_genes.py`) and recover RNA-seq-supported alternative isoforms (StringTie + gffcompare + TransDecoder)
 - **Cleanup utility**: Remove intermediate files after pipeline completion
+- **Resume tooling**: `bin/preflight_resume.sh` prepares an interrupted run for a correct restart; `bin/rerun_genewise.sh` redoes GeneWise on a run that finished it with the pre-`5bc3325` locus bug. Both are dry-run by default and move rather than delete
 
 ---
 
@@ -81,6 +82,35 @@ git clone https://github.com/plantgenomicslab/Sylvan.git
 cd Sylvan
 git lfs pull      # ensure toy-data LFS files are downloaded (not just pointers)
 ```
+
+#### Image and code must be in lockstep
+
+`bin/` is bind-mounted into the container, so Python and Snakefile changes take effect
+from a `git pull` alone. Container-level changes do not: an image predating
+[`v2.1.0`](https://github.com/plantgenomicslab/Sylvan/releases/tag/v2.1.0) lacks the
+pre-generated micromamba hook (without it, Apptainer kills the `%environment` command
+substitution after 5 s under heavy I/O and the container never starts) and `perl-uri`
+(without it `TransDecoder.LongOrfs` dies at Perl `BEGIN`-time). Build from this repo's
+`singularity/Sylvan.def` — `%post` fails the build if the hook comes out empty, which is
+what keeps the two in step.
+
+To check which def an image was built from, without needing `singularity` at all:
+
+```bash
+head -c 1000000 image.sif | grep -a mamba_hook   # 0 hits => predates v2.1.0
+```
+
+PGL / Pronghorn users should link to the published image rather than copy 10 GB:
+
+```bash
+ln -sfn /data/gpfs/assoc/pgl/singularity/Sylvan/Sylvan_20260708b.sif singularity/sylvan.sif
+
+# The .sha256 sidecar names the image relatively, so verify from its own directory.
+( cd /data/gpfs/assoc/pgl/singularity/Sylvan && sha256sum -c Sylvan_20260708b.sif.sha256 )
+```
+
+> The same directory also holds a `sylvan.sif` from 2025-05-05. It is **not** the v2.1.0
+> image. Always reference the dated filename.
 
 ### Build from source (optional)
 
@@ -922,6 +952,46 @@ snakemake -n --snakefile bin/Snakefile_annotate
 | Helixer GPU/CUDA mismatch | Container CUDA version must match host driver. If mismatched, Helixer produces empty output (pipeline continues). |
 | `run:` blocks execute on host | Already handled by `run_in_container()` helper in Snakefile_annotate. |
 | Container `/bin/sh` is dash | Avoid `&>` in shell commands inside container; use `> file 2>&1` instead. |
+
+---
+
+## Resuming an Interrupted Run
+
+Do not simply re-run `./bin/annotate.sh`. Snakemake 7's default `--rerun-triggers`
+includes `code`, so any rule whose body changed between your run's commit and the current
+one is re-executed — `helixer` among them, which means a GPU re-run and everything
+downstream of it, for no benefit. Resume with `--rerun-triggers mtime`.
+
+That is necessary but not sufficient. A run interrupted before `v2.1.0` can also hold
+artifacts that **no rerun trigger will regenerate**, because the rule that produced them
+exited 0. Deleting the output is the only way to force such a rule.
+
+`bin/preflight_resume.sh` finds them, repoints the container, and tells you what it will
+do before it does anything:
+
+```bash
+bin/preflight_resume.sh <run-dir> --config <config.yml>          # dry run: reads only
+bin/preflight_resume.sh <run-dir> --config <config.yml> --apply  # backs up, then acts
+
+SYLVAN_CONFIG=<config.yml> ./bin/annotate.sh --rerun-triggers mtime -n   # confirm the plan
+SYLVAN_CONFIG=<config.yml> ./bin/annotate.sh --rerun-triggers mtime      # go
+```
+
+It takes the run directory as an argument, so the dry run can be driven from any v2.1.0
+checkout — useful when the run directory belongs to someone else. Nothing is deleted:
+everything it touches is moved into `results/_preflight_backup_<stamp>/`. It refuses to
+run against a `bin/` that predates v2.1.0, and refuses if any paired BAM is zero-byte
+(that is the STAR sort-RAM bug, a different problem).
+
+`bin/rerun_genewise.sh` is a **different** tool, for a run that already *finished*
+GeneWise before `5bc3325` and therefore built it from miniprot's worst locus for every
+multi-hit protein. Do it before the EVM consensus step consumes that evidence, or you
+throw away the EVM work too.
+
+The full root-cause write-up for the five defects fixed in `v2.1.0`, and a verified
+resume procedure, are in [`docs/HANDOFF_2026-07-09.md`](docs/HANDOFF_2026-07-09.md)
+(which supersedes the procedure in `docs/HANDOFF_2026-07-08.md`; that document still
+holds the diagnosis).
 
 ---
 
