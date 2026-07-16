@@ -750,6 +750,7 @@ rule Sam2Transfrag:
 		micromamba activate base
 		sam2transfrag \
 			--no_strand_specific \
+			--no_PE_sequencing \
 			{params.args} \
 			--intron_info_out {params.results_dir}GETA/transcript/splited_sam_out/{wildcards.splited}.intron \
 			--base_depth_out {params.results_dir}GETA/transcript/splited_sam_out/{wildcards.splited}.base_depth \
