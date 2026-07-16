@@ -148,6 +148,11 @@ for input in config_dict["Input"]:
 		if config_dict["Input"][input] not in ["land_plant", "fungi", "vertebrate"]:
 			logging.error(f"Invalid value for {input}! Check Input/{input} in config.yml ...")
 			sys.exit()
+	elif input == "swissprot":
+		# swissprot is [optional]; "placeholder" means skip (PASA/EVM run without it).
+		if config_dict["Input"][input] != "placeholder" and not os.path.exists(config_dict["Input"][input]):
+			logging.error(f"Could not find {config_dict['Input'][input]}! Check Input/{input} in config.yml ...")
+			sys.exit()
 	elif not os.path.exists(config_dict["Input"][input]):
 		logging.error(f"Could not find {config_dict['Input'][input]}! Check Input/{input} in config.yml ...")
 		sys.exit()
@@ -211,7 +216,10 @@ shell.prefix(
     f'  ) 9>"{_HOOK_CACHE}.lock" || true; '
     f'fi; '
     f'source "{_HOOK_CACHE}" 2>/dev/null || eval "$(/usr/local/bin/micromamba shell hook -s bash 2>/dev/null)" || true; '
-    'set -u; '
+    'set -euo pipefail; '  # #17: strict mode for rule bodies. Hook setup above is
+    # errexit-safe (runs under set +u with `|| true` guards); errexit/pipefail apply
+    # only to the rule's own shell commands, so a mid-block failure aborts the rule
+    # instead of the last command's status masking it. Validated on toydata first.
 )
 
 # Get inputs
