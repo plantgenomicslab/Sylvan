@@ -2070,11 +2070,11 @@ rule pickBetterModels:
 		perl -p -e 's/(=[^;]+)\\.t1/\\$1.t01/g;' {input.geneModels} > {output.c}
 
 		agat_convert_sp_gxf2gxf.pl \
-		-gff {input.a} \
+		--gff {input.a} \
 		-o {params.results_dir}GETA/CombineGeneModels/geneModels.a.clean.gff3
 
 		agat_convert_sp_gxf2gxf.pl \
-		-gff {output.c} \
+		--gff {output.c} \
 		-o {params.results_dir}GETA/CombineGeneModels/geneModels.c.clean.gff3
 
 		mv {params.results_dir}GETA/CombineGeneModels/geneModels.a.clean.gff3 {input.a}
