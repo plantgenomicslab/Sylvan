@@ -2660,7 +2660,6 @@ rule bam2Fasta:
 	shell:"""
 		micromamba activate alignment
 		samtools fasta \
-		  -f 0x40 \
 		  -F 0x904 \
 		  --threads {threads} \
 		  {input} > {output} 
