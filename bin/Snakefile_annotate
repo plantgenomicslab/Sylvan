@@ -2862,33 +2862,51 @@ rule stringtie_STAR:
 		fi
 		"""
 
-# PsiClass seems to have a multithreading bug in classes when subexon count gets large
-# Set threads to 1 for safety
-rule psiClass_STAR:
-	input:  f"{RESULTS_DIR}GETA/STAR/STAR.sorted.bam"
-	output: f"{RESULTS_DIR}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gff"
-	threads: config_dict["psiClass_STAR"]["threads"]
+# PsiClass hangs in the multithreaded `classes` step on high-subexon regions
+# (#25). Assemble per bin single-threaded instead: prepPsiClass_STAR bins the
+# genome (big chromosomes individually, small scaffolds packed to ~the smallest
+# chromosome), psiClass_bin runs each bin in parallel with -p 1, and psiClass_STAR
+# concatenates the per-bin votes. psiclass ids carry the sequence name
+# (gene_id "Chr8.1") and bins partition the sequences, so votes concatenate
+# without id collision.
+def aggregate_psiclass_bins(wildcards):
+	ckpt = checkpoints.prepPsiClass_STAR.get().output[0]
+	binids = glob_wildcards(os.path.join(ckpt, "bin_{binid}.bam")).binid
+	return expand(f"{RESULTS_DIR}TRANSCRIPT/PsiClass/bins/{{binid}}/psi_vote.gtf", binid=binids)
+
+rule psiClass_bin:
+	input:  f"{RESULTS_DIR}TRANSCRIPT/PsiClass/splitBam/bin_{{binid}}.bam"
+	output: f"{RESULTS_DIR}TRANSCRIPT/PsiClass/bins/{{binid}}/psi_vote.gtf"
+	threads: config_dict["psiClass_bin"]["threads"]
 	params: results_dir = RESULTS_DIR
 	shell: """
-			micromamba activate alignment
-			samtools view -bq 10 {input} > {input}.filtered.bam
+		micromamba activate alignment
+		bindir={params.results_dir}TRANSCRIPT/PsiClass/bins/{wildcards.binid}
+		mkdir -p $bindir
+		samtools view -bq 10 {input} > $bindir/filtered.bam
+		if [ "$(samtools view -c $bindir/filtered.bam)" -gt 0 ]; then
+			psiclass -b $bindir/filtered.bam -o $bindir/psi -p {threads} -c 0.05
+		fi
+		# psiclass writes psi_vote.gtf on success; an empty bin (no reads/transcripts) has none.
+		[ -f {output} ] || : > {output}
+		rm -f $bindir/filtered.bam
+		"""
 
-			psiclass -b {input}.filtered.bam \
-			-o {params.results_dir}TRANSCRIPT/PsiClass/psiclass.STAR \
-			-p {threads} \
-			-c 0.05
-			
-			# Same as stringtie_STAR: the TransDecoder util lives in the genepred env, and a
-			# bare call left a 0-byte {output} that the trailing `sed` blessed with exit 0.
-			/opt/envs/genepred/bin/perl /opt/envs/genepred/opt/transdecoder/util/gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gtf > {output}
-			sed -i 's/Cufflinks/PsiClass/' {output}
-			if [ ! -s {output} ]; then
-				echo "psiClass_STAR: {output} is empty -- gtf_to_alignment_gff3.pl produced nothing" >&2
-				exit 1
-			fi
-
-			rm {input}.filtered.bam
-			"""
+rule psiClass_STAR:
+	input:  aggregate_psiclass_bins
+	output: f"{RESULTS_DIR}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gff"
+	params: results_dir = RESULTS_DIR
+	shell: """
+		micromamba activate alignment
+		cat {input} > {params.results_dir}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gtf
+		# gtf_to_alignment_gff3.pl lives in the genepred env, not alignment.
+		/opt/envs/genepred/bin/perl /opt/envs/genepred/opt/transdecoder/util/gtf_to_alignment_gff3.pl {params.results_dir}TRANSCRIPT/PsiClass/psiclass.STAR_vote.gtf > {output}
+		sed -i 's/Cufflinks/PsiClass/' {output}
+		if [ ! -s {output} ]; then
+			echo "psiClass_STAR: {output} is empty -- no per-bin transcripts merged" >&2
+			exit 1
+		fi
+		"""
 
 rule convertToEvmFormat:
 	input: 
