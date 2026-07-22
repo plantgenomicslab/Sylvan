@@ -137,10 +137,13 @@ stringtie_HiSat:
   ncpus: 32
   threads: 32
   memory: 128g
-psiClass_STAR:
-  ncpus: 48
-  threads: 48
-  memory: 192g
+psiClass_STAR:            # aggregation: cat per-bin votes + gtf_to_alignment (light)
+  ncpus: 2
+  memory: 16g
+psiClass_bin:             # per-chromosome-bin psiClass worker, single-threaded (#25)
+  ncpus: 2
+  threads: 1
+  memory: 96g
 stringtie_STAR:
   ncpus: 32
   threads: 32
