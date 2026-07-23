@@ -2825,11 +2825,13 @@ rule pasa:
 checkpoint prepPsiClass_STAR:
 	input: f"{RESULTS_DIR}GETA/STAR/STAR.sorted.bam"
 	output: directory(f"{RESULTS_DIR}TRANSCRIPT/PsiClass/splitBam")
-	params: results_dir = RESULTS_DIR
+	params:
+		results_dir = RESULTS_DIR,
+		max_region_span = config_dict.get("psiClass_bin", {}).get("max_region_span", 5000000)
 	shell: """
 		micromamba activate alignment
 		mkdir -p {output}
-		python bin/splitBam.py {input} {params.results_dir}TRANSCRIPT/PsiClass/splitBam
+		python bin/splitBam.py {input} {params.results_dir}TRANSCRIPT/PsiClass/splitBam {params.max_region_span}
 	"""
 
 rule stringtie_STAR:
@@ -2862,13 +2864,16 @@ rule stringtie_STAR:
 		fi
 		"""
 
-# PsiClass hangs in the multithreaded `classes` step on high-subexon regions
-# (#25). Assemble per bin single-threaded instead: prepPsiClass_STAR bins the
-# genome (big chromosomes individually, small scaffolds packed to ~the smallest
-# chromosome), psiClass_bin runs each bin in parallel with -p 1, and psiClass_STAR
-# concatenates the per-bin votes. psiclass ids carry the sequence name
-# (gene_id "Chr8.1") and bins partition the sequences, so votes concatenate
-# without id collision.
+# PsiClass's `classes` assembler enumerates candidate transcript paths through each
+# component's subexon graph and counts them in an int32 (`atCnt`); a whole chromosome
+# arm reaches 40k+ subexons, atCnt overflows 2^31 (Ath Chr1: atCnt=-1601035960,
+# seCnt=46679) and the DP never terminates (#25). prepPsiClass_STAR bins the genome
+# (big chromosomes individually; densest arms further split into <=max_region_span
+# sub-regions at zero-coverage gaps, or at local coverage minima where an arm is
+# gaplessly covered), psiClass_bin runs each bin single-threaded (-p 1), and
+# psiClass_STAR concatenates the per-bin votes. Because same-chromosome sub-regions now
+# land in separate bins, psiClass_bin prefixes each bin's gene_id/transcript_id with the
+# binid so the concatenated votes stay collision-free.
 def aggregate_psiclass_bins(wildcards):
 	ckpt = checkpoints.prepPsiClass_STAR.get().output[0]
 	binids = glob_wildcards(os.path.join(ckpt, "bin_{binid}.bam")).binid
@@ -2886,6 +2891,12 @@ rule psiClass_bin:
 		samtools view -bq 10 {input} > $bindir/filtered.bam
 		if [ "$(samtools view -c $bindir/filtered.bam)" -gt 0 ]; then
 			psiclass -b $bindir/filtered.bam -o $bindir/psi -p {threads} -c 0.05
+		fi
+		# psiclass restarts gene/transcript numbering per bin, so sub-regions of the same
+		# chromosome (bin_{{seq}}_r0, _r1, ...) would emit colliding ids (Chr1.1 in each).
+		# Prefix ids with the binid to keep the concatenated whole-genome vote collision-free.
+		if [ -f $bindir/psi_vote.gtf ]; then
+			sed -i -E 's/gene_id "([^"]*)"/gene_id "{wildcards.binid}.\\1"/g; s/transcript_id "([^"]*)"/transcript_id "{wildcards.binid}.\\1"/g' $bindir/psi_vote.gtf
 		fi
 		# psiclass writes psi_vote.gtf on success; an empty bin (no reads/transcripts) has none.
 		[ -f {output} ] || : > {output}
