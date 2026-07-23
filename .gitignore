@@ -154,3 +154,6 @@ desktop.ini
 *.swp
 *.swo
 
+
+# RepeatMasker tool cache (run artifact — not for git)
+.RepeatMaskerCache/
