@@ -144,6 +144,11 @@ psiClass_bin:             # per-chromosome-bin psiClass worker, single-threaded 
   ncpus: 2
   threads: 1
   memory: 96g
+  # Densest chromosome arms are split into sub-regions no wider than this (bp) so each
+  # psiClass component stays under the int32 atCnt overflow / DP-hang ceiling (#25).
+  # ~5Mb keeps even ~5000 subexons/Mb regions under ~25k subexons (Ath Chr4 completed at
+  # 31445). Lower it if a bin still hangs; raise it to reduce bin count on sparse genomes.
+  max_region_span: 5000000
 stringtie_STAR:
   ncpus: 32
   threads: 32
