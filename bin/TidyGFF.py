@@ -245,7 +245,13 @@ def sortGFF(gff_dict: dict, output: str, chrom_regex = False, contig_regex = Fal
 
 
 def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int, no_chrom_id: bool, sort: bool, chrom_regex = False, contig_regex = False, source = None):
-	
+
+	# Guard against a path/directory being passed as the ID prefix (issue #10):
+	# a '/' in `pre` lands inside every gene ID (e.g. "results/FILTER00000010"),
+	# breaking downstream tools that use IDs as filenames/keys.
+	if pre is None or "/" in str(pre):
+		raise ValueError(f"TidyGFF prefix (pre) must be a non-path token, got: {pre!r}")
+
 	if sort:
 		sortGFF(loadGFF(gff), "preSort.tidyGFF.gff", chrom_regex, contig_regex)
 	

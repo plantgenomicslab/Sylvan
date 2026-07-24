@@ -283,6 +283,40 @@ def _format_gene_id(transcript_id):
 	return match.group(1) if match else transcript_id
 
 
+def _derive_id_prefix(explicit_prefix, chrom_regex):
+	"""Return a clean, path-safe gene-ID prefix for TidyGFF.
+
+	TidyGFF's first positional argument is the ID *prefix* (``pre``): with
+	``no_chrom_id=True`` every gene ID becomes ``f"{pre}{count}0"``. Passing a
+	path like ``results/FILTER`` here (issue #10) produces IDs such as
+	``results/FILTER00000010`` — a literal ``/`` in the ID, identical across
+	every run, breaking downstream tools and cross-run comparison.
+
+	Priority:
+	  1. Explicit ``--prefix`` (sanitized), if provided.
+	  2. A species tag extracted from a simple single-species ``chrom_regex``
+	     such as ``(^Osa_)`` -> ``Osa``. Multi-alternation defaults like
+	     ``(^Chr)|(^chr)|...`` are skipped (no single species tag).
+	  3. Fallback constant ``Sylvan``.
+
+	A trailing ``G`` (gene marker, plantgenomicslab locus convention) is
+	appended. Any character outside ``[A-Za-z0-9]`` is stripped, so the prefix
+	can never contain ``/`` and the resulting IDs are filesystem/tool-safe.
+	"""
+	tag = ""
+	if explicit_prefix:
+		tag = re.sub(r"[^A-Za-z0-9]", "", str(explicit_prefix))
+	if not tag and chrom_regex and "|" not in chrom_regex:
+		m = re.search(r"\^([A-Za-z][A-Za-z0-9]*)", chrom_regex)
+		if m:
+			tag = m.group(1)
+	if not tag:
+		tag = "Sylvan"
+	if not tag.endswith("G"):
+		tag += "G"
+	return tag
+
+
 # ---------------------------------------------------------------------------
 # RF feature preparation
 # ---------------------------------------------------------------------------
@@ -506,6 +540,9 @@ if __name__ == "__main__":
 	parser.add_argument("--max-iter", type=int, default=5, help="Max RF re-training iterations (Default: 5)")
 	parser.add_argument("--seed", type=int, default=123, help="Random seed (Default: 123)")
 	parser.add_argument("--chromRegex", type=str, default="", help="Regex for chromosome name filtering")
+	parser.add_argument("--prefix", type=str, default="",
+	                    help="Gene-ID prefix for output IDs (e.g. 'Osa'). "
+	                         "If omitted, derived from --chromRegex (e.g. '(^Osa_)' -> 'OsaG').")
 	parser.add_argument("--output", type=str, default="filtered.gff3", help="Output GFF3 path")
 	parser.add_argument("--output-dir", type=str, default="FILTER", help="Output directory for data files")
 	args = parser.parse_args()
@@ -528,8 +565,12 @@ if __name__ == "__main__":
 	)
 	pprint(report)
 
-	# Reformat GFF with standardized IDs via TidyGFF
-	TidyGFF.tidyGFF(output_dir, args.gff, True, "tidy.gff", "t", 8, True, True,
+	# Reformat GFF with standardized IDs via TidyGFF.
+	# NB: the first positional arg is the ID *prefix* (pre), NOT a directory.
+	# Passing output_dir here corrupted every gene ID (issue #10); derive a
+	# clean per-species prefix instead.
+	id_prefix = _derive_id_prefix(args.prefix, args.chromRegex)
+	TidyGFF.tidyGFF(id_prefix, args.gff, True, "tidy.gff", "t", 8, True, True,
 	                chrom_regex=args.chromRegex)
 	map_file = pd.read_csv(
 		f"{os.path.basename(args.gff)}.map", sep="\t",
