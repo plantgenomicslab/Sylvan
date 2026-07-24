@@ -100,6 +100,7 @@ class genome:
 		
 		with open(file, 'r') as gff:
 			skipFlag = False
+			mrnaSkipFlag = False
 			gene_id = None
 			mRNA_id = None
 			locus_id = None
@@ -121,12 +122,13 @@ class genome:
 					strand = line[6]
 					attr = line[8]
 					if line[7] == '.': phase = 0
-					else: phase = line[7]
+					else: phase = int(line[7])
 					if line[5] == '.': score = float(0)
 					else: score = float(line[5])
 				
 				if typ == "gene":
 					skipFlag = False
+					mrnaSkipFlag = False
 					m = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);{0,1}", attr)
 					if not m:
 						skipFlag = True
@@ -144,34 +146,38 @@ class genome:
 					if overlaps.empty:
 						# Generate new loci
 						con.sql(f"INSERT INTO loci (chromosome, start, fin, strand) VALUES ('{chr}',{start},{end},'{strand}');")
-						locus_id = con.sql("SELECT currval('seq') AS seq;").df().loc[0,'seq']
+						locus_id = int(con.sql("SELECT currval('seq') AS seq;").df().loc[0,'seq'])
 					else:
-						try:
-							if max([0, min([int(overlaps['fin']), end]) - max([int(overlaps['start']), start])])/glen < 0.5: #50% overlap threshold for new loci creation
-								# Generate new loci
-								# troublesome spot = Chr4:10,449,966-10,456,188
-								con.sql(f"INSERT INTO loci (chromosome, start, fin, strand) VALUES ('{chr}',{start},{end},'{strand}');")
-								locus_id = con.sql("SELECT LAST_INSERT_ROWID();")
-							else:
-								# Add to existing loci
-								overlaps = overlaps.iloc[0] #TODO: what if more than one overlapping locus?
-								locus_id = overlaps['locus']
-								
-								## Update loci coordinates if necesary
-
-								if start < overlaps['start']:
-									con.sql(f"UPDATE loci SET start = {start} WHERE locus = {locus_id};")
-								if end > overlaps['fin']:
-									con.sql(f"UPDATE loci SET fin = {end} WHERE locus = {locus_id};")
-
-						except Exception:
-							#TODO: how to handle loci like Chr4:10,449,966-10,456,188?
-							skipFlag = True
-							continue
+						# Evaluate the overlap against the FIRST overlapping locus.
+						# `overlaps` is a DataFrame; the old code did int(Series),
+						# which raised TypeError whenever >1 locus matched, and the
+						# bare `except Exception` swallowed it and dropped the gene
+						# silently. Reduce to scalars first, no try/except needed.
+						first = overlaps.iloc[0]  # TODO: what if more than one overlapping locus?
+						locus_start = int(first['start'])
+						locus_fin = int(first['fin'])
+						overlap_bp = max(0, min(locus_fin, end) - max(locus_start, start))
+						if overlap_bp / glen < 0.5:  # <50% overlap -> new locus
+							con.sql(f"INSERT INTO loci (chromosome, start, fin, strand) VALUES ('{chr}',{start},{end},'{strand}');")
+							# DuckDB has no LAST_INSERT_ROWID(); read the sequence
+							# value that populated loci.locus (as the empty branch does).
+							locus_id = int(con.sql("SELECT currval('seq') AS seq;").df().loc[0, 'seq'])
+						else:
+							# Add to existing locus, extending coordinates if needed.
+							locus_id = int(first['locus'])
+							if start < locus_start:
+								con.sql(f"UPDATE loci SET start = {start} WHERE locus = {locus_id};")
+							if end > locus_fin:
+								con.sql(f"UPDATE loci SET fin = {end} WHERE locus = {locus_id};")
 					
 					if not skipFlag:
-						con.sql("INSERT INTO annotations (chromosome, source, type, start, fin, score, strand, phase, attr, gene_id, mrna_id, feature_id, locus) "
-							f"VALUES ('{chr}', '{source}', '{typ}', {start}, {end}, {score}, '{strand}', {phase}, '{attr}','{gene_id}', NULL, '{gene_id}', {locus_id})")
+						# Parameterised: attr is raw GFF text and may contain single
+						# quotes, which broke the previous f-string INSERT.
+						con.execute(
+							"INSERT INTO annotations (chromosome, source, type, start, fin, score, strand, phase, attr, gene_id, mrna_id, feature_id, locus) "
+							"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+							[chr, source, typ, start, end, score, strand, phase, attr, gene_id, gene_id, locus_id],
+						)
 								
 				elif typ == 'ncRNA_gene':
 					skipFlag = True
@@ -180,22 +186,36 @@ class genome:
 					continue
 
 				elif typ == "mRNA":
-					if "primary=False" in attr: # Skipping Mikado alternative transcripts
-						skipFlag = True
+					# Skip Mikado alternative transcripts at the mRNA level only.
+					# The old code set the gene-level skipFlag, which then skipped
+					# every following primary mRNA/feature until the next gene.
+					mrnaSkipFlag = False
+					if "primary=False" in attr:
+						mrnaSkipFlag = True
 						continue
-					m = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);", attr)
+					m = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);?", attr)
 					if not m:
 						continue
 					mRNA_id = m[1]
-					con.sql("INSERT INTO annotations (chromosome, source, type, start, fin, score, strand, phase, attr, gene_id, mrna_id, feature_id, locus) "
-							f"VALUES ('{chr}', '{source}', '{typ}', {start}, {end}, {score}, '{strand}', {phase}, '{attr}', '{gene_id}', '{mRNA_id}', '{mRNA_id}', {locus_id})")
+					con.execute(
+						"INSERT INTO annotations (chromosome, source, type, start, fin, score, strand, phase, attr, gene_id, mrna_id, feature_id, locus) "
+						"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+						[chr, source, typ, start, end, score, strand, phase, attr, gene_id, mRNA_id, mRNA_id, locus_id],
+					)
 				elif typ in ['CDS', 'exon', 'five_prime_UTR', 'three_prime_UTR']:
-					m = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);", attr)
+					if mrnaSkipFlag:  # child of a skipped (non-primary) mRNA
+						continue
+					# Anchor the ID regex without a mandatory trailing ';', which
+					# previously dropped features whose ID= was the last attribute.
+					m = re.search(r"ID=([a-zA-Z0-9\.\-\_]+);?", attr)
 					if not m:
 						continue
 					feat_id = m[1]
-					con.sql("INSERT INTO annotations (chromosome, source, type, start, fin, score, strand, phase, attr, gene_id, mrna_id, feature_id, locus) "
-							f"VALUES ('{chr}', '{source}', '{typ}', {start}, {end}, {score}, '{strand}', {phase}, '{attr}', '{gene_id}', '{mRNA_id}', '{feat_id}', {locus_id})")
+					con.execute(
+						"INSERT INTO annotations (chromosome, source, type, start, fin, score, strand, phase, attr, gene_id, mrna_id, feature_id, locus) "
+						"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+						[chr, source, typ, start, end, score, strand, phase, attr, gene_id, mRNA_id, feat_id, locus_id],
+					)
 		
 		# TODO: why are some whole gene models duplicated in annotations table?
 		con.close()
@@ -342,7 +362,11 @@ class genome:
 		try:
 			con.sql("ALTER TABLE data ADD COLUMN score FLOAT;")
 		except duckdb.CatalogException:
-			con.sql("UPDATE data SET score = 0;")
+			pass
+		# Always initialise to 0. A freshly ADDed column is NULL, and the
+		# accumulation below (score = score + LOG(ev) + 1) propagates NULL
+		# forever if score starts NULL -> every score would end up NULL.
+		con.sql("UPDATE data SET score = 0;")
 
 		try:
 			con.sql('DROP TABLE isoform_scores;')
@@ -404,16 +428,28 @@ class genome:
 			''')
 
 			print("Selecting loci...", file=sys.stderr)
-			# Select the annotation at each locus with maximal score 
+			# Select the single best source per locus. GROUP BY (locus, source)
+			# returned one row PER source, so a multi-source locus yielded N rows
+			# with the same locus -> the scalar subquery in the UPDATE below
+			# ("SELECT sel.selected ... WHERE loci.locus = sel.locus") raised
+			# "scalar subquery can only return a single value". Rank sources by
+			# their best isoform norm_score and keep only the top one.
 			con.sql('''
-				CREATE TABLE sel AS 
-				SELECT loci.locus, loci.start, loci.fin, loci.chromosome, loci.strand, sel.selected
+				CREATE TABLE sel AS
+				SELECT loci.locus, loci.start, loci.fin, loci.chromosome, loci.strand, best.selected
 				FROM loci
 				JOIN (
-					SELECT max(sc.norm_score), sc.locus, sc.source AS selected
-					FROM isoform_scores sc
-					GROUP BY sc.locus, sc.source) sel
-				ON loci.locus = sel.locus
+					SELECT locus, source AS selected FROM (
+						SELECT sc.locus, sc.source,
+							ROW_NUMBER() OVER (
+								PARTITION BY sc.locus
+								ORDER BY sc.norm_score DESC, sc.source
+							) AS rn
+						FROM isoform_scores sc
+					) ranked
+					WHERE rn = 1
+				) best
+				ON loci.locus = best.locus
 				''')
 			
 			print("Updating loci table with selected annotations...", file=sys.stderr)
