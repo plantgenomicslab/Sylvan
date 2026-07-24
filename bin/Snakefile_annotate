@@ -1483,6 +1483,23 @@ rule BGM2AT:
 			flanking_length = 200
 			
 		# Copy Augustus config from genepred env into the run directory
+		# Sanitize training GFF3s first: drop models whose CDS layout yields
+		# non-positive-length introns (tracker wyim-pgl/Sylvan-EGAPx#31) so
+		# AUGUSTUS GBProcessor doesn't re-log ~9k errors across 5 rounds x
+		# 12-fold CV. sanitize_gff is pure-python, no container needed.
+		sys.path.insert(0, os.path.dirname(workflow.snakefile))
+		from sanitize_training_gff import sanitize_gff
+		san = {}
+		for key, path in (("one", input.one), ("two", input.two)):
+			with open(path) as fh:
+				cleaned, dropped = sanitize_gff(fh.read().splitlines())
+			if dropped:
+				san[key] = f"{path}.sanitized.gff3"
+				with open(san[key], "w") as fh:
+					fh.write("\n".join(cleaned) + "\n")
+				print(f"BGM2AT sanitize: dropped {len(dropped)} invalid mRNAs from {path}: {sorted(dropped)}")
+			else:
+				san[key] = path
 		run_in_container(
 			f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training && "
 			f"rm -rf {params.results_dir}GETA/Augustus/config/* && "
@@ -1493,7 +1510,7 @@ rule BGM2AT:
 			f"{params.args} "
 			f"--flanking_length {flanking_length} "
 			f"--CPU {threads} "
-			f"--onlytrain_GFF3 {input.one} {input.two} "
+			f"--onlytrain_GFF3 {san['one']} {san['two']} "
 			f"{input.genome_fasta} "
 			f"{params.a_species}"
 		)
