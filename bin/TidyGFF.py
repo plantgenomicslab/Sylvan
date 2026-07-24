@@ -284,6 +284,26 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 	chrom = None
 	seq_count = 1
 	transcript_count = 1
+	feature_counts = {}   # per-transcript {feature_type: count}, reset at each mRNA
+	seen_ids = set()      # global ID uniqueness guard (GFF3 requires unique feature IDs)
+
+	def _register(full_id):
+		"""Track emitted IDs and guarantee global uniqueness (issue #11).
+
+		Child features are numbered per (transcript, type) so collisions cannot
+		normally occur, but if one ever does (e.g. malformed input) append a
+		numeric disambiguator instead of emitting a duplicate ID.
+		"""
+		if full_id not in seen_ids:
+			seen_ids.add(full_id)
+			return full_id
+		n = 2
+		while f"{full_id}_{n}" in seen_ids:
+			n += 1
+		dedup = f"{full_id}_{n}"
+		print(f"WARNING: duplicate feature ID {full_id!r} -> {dedup!r}")
+		seen_ids.add(dedup)
+		return dedup
 
 	if contig_regex:
 		contig_regex = contig_regex.split(",")
@@ -315,6 +335,7 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 				seq = f"{pre}{new_chrom}{str(seq_count).zfill(justify)}0"
 			seq_count += 1
 			transcript_count = 1
+			seq = _register(seq)
 			line[8], old_id = replaceID(seq, line[8], "")
 			map_file.write("\t".join(["gene", old_id, seq]) + "\n")
 		elif line[2] == "mRNA":
@@ -322,14 +343,23 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 			line[8] = replaceParent(seq, line[8])
 			transcript_seq = seq + f".{splice}{transcript_count}"
 			transcript_count += 1
+			feature_counts = {}   # restart child numbering for this transcript
+			transcript_seq = _register(transcript_seq)
 			line[8], old_id = replaceID(transcript_seq, line[8], "")
 			map_file.write("\t".join(["mRNA", old_id, transcript_seq]) + "\n")
 		else:
 			line[8] = replaceParent(transcript_seq, line[8])
-			feature_id = getID(line[8])
-			suffix = "." + getSuffix(feature_id)
-			line[8], old_id= replaceID(transcript_seq, line[8], suffix)
-			map_file.write("\t".join([line[2], old_id, transcript_seq + suffix]) + "\n")
+			# Number each child feature per (transcript, type) from the authoritative
+			# type column, e.g. .cds1/.cds2/.exon1 (issue #11). The former getSuffix
+			# path derived the suffix from the source ID and gave every CDS of a
+			# multi-CDS mRNA the identical ".cds" (167k duplicate IDs in the wild),
+			# and crashed with TypeError when the source ID lacked a cds/exon/utr marker.
+			ftype = line[2].lower()
+			feature_counts[ftype] = feature_counts.get(ftype, 0) + 1
+			full_id = _register(f"{transcript_seq}.{ftype}{feature_counts[ftype]}")
+			suffix = full_id[len(transcript_seq):]
+			line[8], old_id = replaceID(transcript_seq, line[8], suffix)
+			map_file.write("\t".join([line[2], old_id, full_id]) + "\n")
 
 		out_file.write("\t".join(line) + "\n")
 
