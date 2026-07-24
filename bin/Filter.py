@@ -65,6 +65,21 @@ def read_abInitio_cov(file_path):
 	return pd.read_csv(file_path, header=None, sep="\t", usecols=[4, 8])
 
 
+def _all_transcript_ids(gff_path):
+	"""Return every mRNA ID in a GFF3, in file order (transcript universe)."""
+	ids = []
+	with open(gff_path) as fh:
+		for line in fh:
+			if line.startswith("#") or not line.strip():
+				continue
+			cols = line.rstrip("\n").split("\t")
+			if len(cols) >= 9 and cols[2] == "mRNA":
+				m = re.search(r"(?:^|;)ID=([^;\s]+)", cols[8])
+				if m:
+					ids.append(m.group(1))
+	return ids
+
+
 # ---------------------------------------------------------------------------
 # Evidence integration and initial labeling
 # ---------------------------------------------------------------------------
@@ -96,11 +111,20 @@ def filter_genes(gff_path, tpm_cutoff, cov_cutoff, augustus_cutoff, helixer_cuto
 		DataFrame with columns: transcript_id, evidence values, and label (Keep/Discard/None)
 	"""
 	# --- RSEM expression ---
+	# Guard the RSEM file like miniprot (issue #20.3): if it is missing, treat
+	# TPM as all-missing rather than crashing. The transcript universe is then
+	# seeded from the GFF so the downstream evidence merges still have keys.
 	rsem_file = os.path.join(output_dir, "rsem_outdir", "RSEM.isoforms.results")
-	rsem_data = read_rsem_file(rsem_file)
-	filter_df = rsem_data.loc[:, ("transcript_id", "TPM")].copy()
-	data = rsem_data.loc[:, ("transcript_id", "TPM")].copy()
-	filter_df["TPM"] = rsem_data["TPM"] > float(tpm_cutoff)
+	if os.path.exists(rsem_file):
+		rsem_data = read_rsem_file(rsem_file)
+		filter_df = rsem_data.loc[:, ("transcript_id", "TPM")].copy()
+		data = rsem_data.loc[:, ("transcript_id", "TPM")].copy()
+		filter_df["TPM"] = rsem_data["TPM"] > float(tpm_cutoff)
+	else:
+		print(f"WARNING: RSEM file {rsem_file} not found; treating all TPM as missing.")
+		all_tx = _all_transcript_ids(gff_path)
+		data = pd.DataFrame({"transcript_id": all_tx, "TPM": np.nan})
+		filter_df = pd.DataFrame({"transcript_id": all_tx, "TPM": False})
 
 	# --- BLASTp homology ---
 	blast_file = os.path.join(output_dir, "BLASTP.OUT.TMP")
@@ -259,7 +283,14 @@ def filter_gff(gff_data, keep):
 	names = keep['New_ID']
 	# Include gene-level IDs (strip .tN suffix only) to match gene features
 	names = pd.concat([names, names.str.replace(r'\.t\d+$', '', regex=True)])
-	to_keep = gff_data["transcript_id"].isin(names) | gff_data["parent_id"].isin(names)
+	name_set = set(names.dropna())
+	tid_match = gff_data["transcript_id"].isin(name_set)
+	# A feature may list multiple parents (Parent=t1,t2 — e.g. an exon shared by
+	# two isoforms). Keep it if ANY listed parent is kept, otherwise shared exons
+	# of kept genes are silently dropped (issue #20.5).
+	pid_match = gff_data["parent_id"].apply(
+		lambda p: bool(p) and any(x in name_set for x in p.split(",")))
+	to_keep = tid_match | pid_match
 	return gff_data[to_keep], gff_data[~to_keep]
 
 
@@ -342,7 +373,7 @@ def prepare_features(df, feature_cols):
 RF_RESCUE_THRESHOLD = 0.6  # Minimum RF Keep probability to rescue undecided genes
 
 def semiSupRandomForest(data, predictors, busco_table, num_trees,
-                        seed=None, recycle_prob=0.95, maxiter=5):
+                        seed=None, recycle_prob=0.95, maxiter=5, repeat_cutoff=0.5):
 	"""Iterative semi-supervised random forest for gene model classification.
 
 	Starting from heuristic Keep/Discard seed labels, trains an RF and
@@ -381,6 +412,14 @@ def semiSupRandomForest(data, predictors, busco_table, num_trees,
 
 	process = {"kept": [], "discarded": [], "kept_buscos": [], "discarded_buscos": [], "OOB": []}
 
+	# Entry guards for degenerate label sets (issue #20.4). Without these,
+	# maxiter=0 leaves `model`/`kept` undefined (NameError in the rescue block),
+	# and an empty seed set makes sklearn's fit() raise on a 0-row matrix.
+	maxiter = max(1, maxiter)
+	if x_train.empty:
+		print("WARNING: no heuristic seed labels; keeping all transcripts unfiltered.")
+		return pd.DataFrame(data["transcript_id"].tolist(), columns=["transcript_id"]), process
+
 	for iteration in range(maxiter):
 		discarded = y_train[y_train["label"] == "Discard"].index
 		kept = y_train[y_train["label"] == "Keep"].index
@@ -400,6 +439,7 @@ def semiSupRandomForest(data, predictors, busco_table, num_trees,
 			max_features=predictors,
 			random_state=seed,
 			oob_score=True,
+			n_jobs=-1,   # issue #20.12: parallelise RF over ~48k genes x maxiter
 		)
 		model.fit(x_train, y_train.to_numpy().reshape(-1,))
 		process["OOB"].append(1 - model.oob_score_)
@@ -462,7 +502,7 @@ def semiSupRandomForest(data, predictors, busco_table, num_trees,
 		pfam_rescue = []
 		if "PFAM" in evidence.columns and "REPEAT" in evidence.columns:
 			has_pfam = evidence["PFAM"] == True
-			not_repeat = evidence["REPEAT"].fillna(0) <= 0.5
+			not_repeat = evidence["REPEAT"].fillna(0) <= repeat_cutoff  # issue #20.6: honour --repcov
 			no_rexdb = ~(evidence["rex_pident"].fillna(0) > 0) if "rex_pident" in evidence.columns else True
 			pfam_rescue = evidence[has_pfam & not_repeat & no_rexdb].index.tolist()
 
@@ -483,6 +523,22 @@ def semiSupRandomForest(data, predictors, busco_table, num_trees,
 		      f"BUSCO rescue: {len(busco_rescue)}, "
 		      f"TE excluded: {len(te_genes)}, "
 		      f"total kept: {len(rescued)}, discarded: {undecided_disc})")
+
+	# BUSCO safety net over the FULL result (issue #20.2): the in-loop Tier-3
+	# rescue only reached undecided genes, so a Complete/Duplicated-BUSCO gene
+	# that the heuristic *seeded* as Discard was never rescued — contradicting
+	# "never discard a gene with a Complete BUSCO hit". Force them back in here.
+	kept = list(kept)
+	kept_set = set(kept)
+	busco_complete_ids = set(
+		busco.loc[busco["status"].isin(["Complete", "Duplicated"]), "transcript_id"]
+	)
+	present_ids = set(data["transcript_id"])
+	forced = [g for g in busco_complete_ids if g in present_ids and g not in kept_set]
+	if forced:
+		print(f"BUSCO safety net: rescued {len(forced)} Complete/Duplicated-BUSCO "
+		      f"genes that were seeded/predicted Discard.")
+		kept.extend(forced)
 
 	return pd.DataFrame(kept, columns=["transcript_id"]), process
 
@@ -562,6 +618,7 @@ if __name__ == "__main__":
 	keep, report = semiSupRandomForest(
 		data, args.predictors, args.busco, args.trees,
 		seed=args.seed, recycle_prob=args.recycle, maxiter=args.max_iter,
+		repeat_cutoff=args.repcov,
 	)
 	pprint(report)
 
@@ -598,14 +655,21 @@ if __name__ == "__main__":
 		discard_data[["discard_reason"]].reset_index(),
 		on="transcript_id", how="left",
 	)
-	# Map both mRNA ID and gene ID (mRNA minus .tN suffix)
+	# Map both mRNA ID and gene ID (mRNA minus .tN suffix). Derive the gene ID
+	# with an anchored regex, not a `".t" in new_id` substring test which would
+	# misfire on any ID merely containing ".t" (issue #20.12). For the gene-level
+	# reason, resolve multi-isoform collisions deterministically by priority
+	# (TE_related > lncRNA > pseudogene) instead of last-writer-wins.
+	_reason_priority = {"TE_related": 2, "lncRNA": 1, "pseudogene": 0}
 	reason_lookup = {}
 	for _, row in discard_map.iterrows():
 		new_id = row["New_ID"]
 		reason = row["discard_reason"]
 		reason_lookup[new_id] = reason
-		gene_id = new_id.rsplit(".", 1)[0] if ".t" in new_id else new_id
-		reason_lookup[gene_id] = reason
+		gene_id = re.sub(r"\.t\d+$", "", new_id)
+		existing = reason_lookup.get(gene_id)
+		if existing is None or _reason_priority.get(reason, 0) > _reason_priority.get(existing, 0):
+			reason_lookup[gene_id] = reason
 
 	# Annotate discard GFF3 column 9 with discard_reason attribute
 	def _add_reason_attr(row):
