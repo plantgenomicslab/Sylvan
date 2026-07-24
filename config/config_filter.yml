@@ -100,13 +100,13 @@ __default__:
   name: "{rule}.{wildcards}"
   ncpus: 4
   nodes: 1
-  time: "7-00:00:00"
+  time: "1-00:00:00"
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
   extra_args: ""                          # Extra sbatch flags (e.g., "--export=ALL")
 PfamScan:
   ncpus: 48
-  memory: 192g
+  memory: 64g       # hmmscan on ~48k proteins uses tens of GB, not 192g; refine from sacct MaxRSS
 RSEM:
   ncpus: 32
   memory: 128g
@@ -154,7 +154,12 @@ prepRSEM:
   memory: 64g
 lncRNA_pred:
   ncpus: 48
-  memory: 192g
+  memory: 64g       # lncDC on ~48k transcripts uses tens of GB, not 192g; refine from sacct MaxRSS
 STAR_index:
   ncpus: 12
+  memory: 48g
+filter:
+  # Semi-supervised random forest over ~tens of thousands of proteins; needs tens
+  # of GB, not the 192g heavy rules use. Explicit block so it no longer inherits
+  # the __default__ (ncpus falls back to __default__). Refine from sacct MaxRSS.
   memory: 48g
