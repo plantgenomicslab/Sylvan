@@ -6,13 +6,16 @@ import subprocess
 import pandas as pd
 
 def getParent(attr: str) -> str:
-	m = re.search(r"Parent=([a-zA-Z\d\.\-_:]*);{0,1}", attr)
+	# Anchor to start/';' and accept any non-';'/space char (issue #20.9): the old
+	# [a-zA-Z\d.\-_:] class truncated IDs containing '|' etc. and mismatched
+	# replaceParent's class.
+	m = re.search(r"(?:^|;)Parent=([^;\s]+)", attr)
 	if not m:
 		raise ValueError(f"No Parent= found in attribute string: {attr}")
 	return m.group(1)
 
 def getID(attr:str) -> str:
-	m = re.search(r"ID=([a-zA-Z\d\.\-_:]*);{0,1}", attr)
+	m = re.search(r"(?:^|;)ID=([^;\s]+)", attr)
 	if not m:
 		raise ValueError(f"No ID= found in attribute string: {attr}")
 	return m.group(1)
@@ -32,12 +35,15 @@ def findChroms(chrom: str, chrom_regex = False) -> str:
 
 def replaceParent(id: str, attr: str) -> str:
 	replace = f"Parent={id};"
-	return re.sub(r"Parent=[a-zA-Z\d\.\-\_]*;{0,1}", replace, attr)
+	# count=1: only the real Parent= is rewritten, never a 'Parent=' substring
+	# inside a Note. Broadened char class matches getParent (issue #20.9).
+	return re.sub(r"Parent=[^;\s]*;?", replace, attr, count=1)
 
 def replaceID(id: str, attr: str, suf: str) -> str:
 	replace = f"ID={id}{suf};"
-	replace = re.sub(r"ID=[a-zA-Z\d\.\-\_]*;{0,1}", replace, attr)
-	old = re.search(r"ID=([a-zA-Z\d\.\-\_]*);{0,1}", attr).group(1)
+	replace = re.sub(r"ID=[^;\s]*;?", replace, attr, count=1)
+	old_m = re.search(r"ID=([^;\s]*);?", attr)
+	old = old_m.group(1) if old_m else ""
 	return replace, old
 
 def printData(out, item, children):
@@ -67,8 +73,13 @@ def upgradeChromosome(chrom: str, just: int, chrom_regex = False, contig_regex =
 			return(new_name)
 	elif re.search("(^Chr)|(^chr)|(^LG)|(^Ch)", chrom):
 		m = re.search("(^Chr)|(^chr)|(^LG)|(^Ch)", chrom)
-		chrom_num = int(chrom.replace(m[0], ""))
-		new_name = str(chrom_num).zfill(just) + "G"
+		remainder = chrom.replace(m[0], "", 1)
+		# Fallback for non-numeric chromosomes (organellar ChrM/ChrC, suffixes):
+		# int("M") would crash (issue #20.11); keep the remainder as-is instead.
+		if remainder.isdigit():
+			new_name = str(int(remainder)).zfill(just) + "G"
+		else:
+			new_name = (remainder or chrom) + "G"
 		return(new_name)
 	elif re.search(r"^\d", chrom):
 		new_name = chrom.zfill(just) + "G"
@@ -92,94 +103,104 @@ def getSuffix(feature_id: str) -> str:
 def loadGFF(gff: str) -> dict:
 	with open(gff, 'r') as infile:
 		gff_dict = {}
-		missing_parent = False
+		# Resolve a feature to its mRNA's gene via a recorded map instead of the
+		# last-seen gene, so an interleaved GFF does not attach features to the
+		# wrong parent (issue #20.8). None => mRNA stored at chromosome top level.
+		mrna_to_gene = {}
+		protein_coding = True
 
 		for line in infile:
 			if line.startswith("#") or not line.strip():
 				continue
 
 			line = line.strip().split("\t")
+			# Normalise field count (issue #20.8): a literal TAB inside an
+			# attribute value (seen in the wild, e.g. Spe Note=) splits column 9
+			# into several fields and silently truncates it. Skip lines with too
+			# few fields; rejoin any surplus into column 9 with a space.
+			if len(line) < 9:
+				continue
+			if len(line) > 9:
+				line = line[:8] + [" ".join(line[8:])]
 
 			#### For loading mikado output ###
 			if (line[2] == "superlocus"):
 				continue
-			
+
 			if (line[2] == "ncRNA_gene"):
 				protein_coding = False
 			##################################
-			
+
 			chrom = line[0]
 			feature_id = getID(line[8])
 			feature_data = {"seqid":chrom,
-							"source":line[1], 
-							"type":line[2], 
+							"source":line[1],
+							"type":line[2],
 							"start":line[3],
 							"end":line[4],
 							"score": line[5],
-							"strand":line[6], 
-							"phase":line[7], 
+							"strand":line[6],
+							"phase":line[7],
 							"attributes":line[8]}
 
 			if chrom not in gff_dict.keys():
 				gff_dict[chrom] = {}
 
 			if line[2] == "gene":
-				cur_gene = feature_id
 				gff_dict[chrom][feature_id] = {"data":feature_data}
 				protein_coding = True # Support for mikado
 			elif line[2] == "mRNA":
-				cur_mrna = feature_id
 				gene = getParent(line[8])
-				missing_parent = False
-		
+
 				if gene not in gff_dict[chrom].keys():
 					print(f"WARNING: mRNA with id {feature_id} missing parent {gene}")
 					gff_dict[chrom][feature_id] = {"data":feature_data}
-					missing_parent = True
+					mrna_to_gene[(chrom, feature_id)] = None
 				else:
-					if gene != cur_gene:
-						print(f"WARNING: Could not parse parents for {line[2]} type feature with id {feature_id}")
-
 					gff_dict[chrom][gene][feature_id] = {"data":feature_data}
+					mrna_to_gene[(chrom, feature_id)] = gene
 			else:
 				if not protein_coding: #Support for mikado
 					continue
 				mrna = getParent(line[8])
-				if missing_parent:
-					# Handle duplicate feature IDs (e.g., CDS segments sharing one ID)
-					orig_id = feature_id
-					suffix = 2
-					while feature_id in gff_dict[chrom][mrna]:
-						feature_id = f"{orig_id}_{suffix}"
-						suffix += 1
-					gff_dict[chrom][mrna][feature_id] = {"data":feature_data}
+				if (chrom, mrna) not in mrna_to_gene:
+					print(f"WARNING: feature {feature_id} references unknown parent mRNA {mrna}; skipping")
+					continue
+				parent_gene = mrna_to_gene[(chrom, mrna)]
+				if parent_gene is None:
+					parent_dict = gff_dict[chrom][mrna]
 				else:
-					gene = getParent(gff_dict[chrom][gene][mrna]["data"]["attributes"])
-					if (mrna != cur_mrna) or (gene != cur_gene):
-						print(f"WARNING: Could not parse parents for {line[2]} type feature with id {feature_id}")
-
-					# Handle duplicate feature IDs (e.g., CDS segments sharing one ID)
-					parent_dict = gff_dict[chrom][gene][mrna]
-					orig_id = feature_id
-					suffix = 2
-					while feature_id in parent_dict:
-						feature_id = f"{orig_id}_{suffix}"
-						suffix += 1
-					parent_dict[feature_id] = {"data":feature_data}
+					parent_dict = gff_dict[chrom][parent_gene][mrna]
+				# Handle duplicate feature IDs (e.g., CDS segments sharing one ID)
+				orig_id = feature_id
+				suffix = 2
+				while feature_id in parent_dict:
+					feature_id = f"{orig_id}_{suffix}"
+					suffix += 1
+				parent_dict[feature_id] = {"data":feature_data}
 	return(gff_dict)
 
 def singleExonGenes(gff_dict):
+	# Count EXON features, not CDS (issue #20.1). A transcript with a single CDS
+	# but additional non-coding (UTR) exons is multi-exon; counting CDS mislabels
+	# it single-exon and biases the RF seed labels. Fall back to CDS count only
+	# when a transcript has no exon features at all (CDS-only GFF).
 	singleExons = []
 	for chrom in gff_dict:
 		for gene in gff_dict[chrom]:
 			mrna_ids = [i for i in gff_dict[chrom][gene].keys() if i != "data"]
 			for mrna in mrna_ids:
+				exon = 0
 				cds = 0
 				feature_ids = [i for i in gff_dict[chrom][gene][mrna].keys() if i != "data"]
 				for feature in feature_ids:
-					if gff_dict[chrom][gene][mrna][feature]["data"]["type"] == "CDS":
-						cds +=1
-				if cds <= 1:
+					ftype = gff_dict[chrom][gene][mrna][feature]["data"]["type"]
+					if ftype == "exon":
+						exon += 1
+					elif ftype == "CDS":
+						cds += 1
+				count = exon if exon > 0 else cds
+				if count <= 1:
 					singleExons.append(mrna)
 	return(pd.DataFrame(singleExons, columns=["transcript_id"]))
 			
@@ -267,10 +288,13 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 			total_chroms = sorted.loc[sorted.seqid.str.contains(chrom_regex), "seqid"].unique()
 		else:
 			total_chroms = sorted.loc[sorted.seqid.str.contains(r'(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)'), "seqid"].unique()
-		total_chroms = max([int(re.sub("[A-Za-z]+", "", i)) for i in total_chroms])
-		if total_chroms >= 10: 
+		# Extract the numeric part of each chromosome name, skipping names with no
+		# digits (ChrM/ChrC) or suffixes so int("") does not crash (issue #20.11).
+		chrom_nums = [int(re.sub(r"\D", "", i)) for i in total_chroms if re.sub(r"\D", "", i)]
+		total_chroms = max(chrom_nums) if chrom_nums else 1
+		if total_chroms >= 10:
 			chrom_just = 2
-		else: 
+		else:
 			chrom_just = 1
 
 	if sort:
@@ -313,9 +337,15 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 		line = line.strip()
 		if not line or line.startswith("#"):
 			continue
-	
+
 		line = line.split("\t")
-		
+		# 9-field normalisation, matching loadGFF (issue #20.8): rejoin a column-9
+		# value that an embedded TAB split into extra fields; skip short lines.
+		if len(line) < 9:
+			continue
+		if len(line) > 9:
+			line = line[:8] + [" ".join(line[8:])]
+
 		if not no_chrom_id:
 			if chrom != line[0]:
 				seq_count = 1
