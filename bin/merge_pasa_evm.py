@@ -45,7 +45,7 @@ def parse_genes(gff3_path):
             if parts[2] == "gene":
                 if current_gene:
                     genes.append(current_gene + (current_lines,))
-                gene_id = re.search(r"ID=([^;]+)", parts[8])
+                gene_id = re.search(r"(?:^|;)ID=([^;]+)", parts[8])
                 gid = gene_id.group(1) if gene_id else f"unknown_{len(genes)}"
                 current_gene = (parts[0], int(parts[3]), int(parts[4]), parts[6], gid)
                 current_lines = [line]
@@ -74,7 +74,7 @@ def get_mrna_ids(lines):
     for line in lines:
         parts = line.strip().split("\t")
         if len(parts) >= 9 and parts[2] == "mRNA":
-            m = re.search(r"ID=([^;]+)", parts[8])
+            m = re.search(r"(?:^|;)ID=([^;]+)", parts[8])
             if m:
                 mrna_ids.append(m.group(1))
     return mrna_ids
@@ -98,7 +98,7 @@ def get_mrna_spans(lines):
         if parts[2] == "mRNA":
             if current_mrna:
                 mrnas.append(current_mrna + (current_mrna_lines,))
-            mrna_id = re.search(r"ID=([^;]+)", parts[8])
+            mrna_id = re.search(r"(?:^|;)ID=([^;]+)", parts[8])
             mid = mrna_id.group(1) if mrna_id else "unknown"
             current_mrna = (int(parts[3]), int(parts[4]), mid)
             current_mrna_lines = [line]
@@ -133,14 +133,25 @@ def batch_extract_proteins(gene_groups, genome_fa, tmpdir, prefix):
                 f.write(line)
 
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["gffread", gff_tmp, "-g", genome_fa, "-y", pep_tmp],
             capture_output=True, timeout=120
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        # Do not swallow the failure silently (issue #17 defect 3): a gffread
+        # outage would otherwise make every conflict a no-hit "tie".
+        print(f"WARNING: gffread protein extraction failed for '{prefix}': {exc}",
+              file=sys.stderr)
         return {}
 
+    if result.returncode != 0:
+        err = result.stderr.decode(errors="replace")[:500] if result.stderr else ""
+        print(f"WARNING: gffread returned {result.returncode} for '{prefix}': {err}",
+              file=sys.stderr)
+
     if not os.path.exists(pep_tmp) or os.path.getsize(pep_tmp) == 0:
+        print(f"WARNING: gffread produced no proteins for '{prefix}' — "
+              "conflicts on this side become no-hit.", file=sys.stderr)
         return {}
 
     proteins = {}
@@ -333,8 +344,10 @@ def main():
     print(f"Found {len(conflicts)} structural conflicts to resolve", file=sys.stderr)
 
     # Second pass: resolve conflicts via DIAMOND
-    # pasa_replaced[pidx] = merged_lines  — PASA gene replaced by EVM+PASA_isoforms
-    pasa_replaced = {}
+    # pasa_replaced[pidx] = [evm_block, ...]  — a single PASA gene may be replaced
+    # by MULTIPLE EVM genes when a chimeric PASA merge spanned several EVM genes
+    # (issue #17 defect 1: a plain dict overwrote all but the last, losing genes).
+    pasa_replaced = defaultdict(list)
     stats = {"evm_wins": 0, "pasa_wins": 0, "tie": 0, "grafted_isoforms": 0}
 
     if conflicts and use_diamond:
@@ -388,21 +401,24 @@ def main():
                     pasa_hit = pasa_hits.get(f"pasa_{ci}")
                     winner = compare_diamond(evm_hit, pasa_hit)
 
-                    if winner == "pasa":
-                        # PASA clearly better — keep PASA
-                        stats["pasa_wins"] += 1
-                    else:
-                        # EVM wins or tie — use EVM gene (preserves CDS accuracy),
-                        # graft PASA isoforms within EVM range
-                        if winner == "evm":
-                            stats["evm_wins"] += 1
-                        else:
-                            stats["tie"] += 1
+                    if winner == "evm":
+                        # EVM clearly better — use EVM gene (preserves CDS
+                        # accuracy), graft PASA isoforms within EVM range.
+                        stats["evm_wins"] += 1
                         chrom, start, end, strand, gid, lines = evm_info
                         merged_lines, n_grafted = build_evm_gene_with_pasa_isoforms(
                             lines, pasa_info[3], start, end, gid)
-                        pasa_replaced[pidx] = merged_lines
+                        pasa_replaced[pidx].append(merged_lines)
                         stats["grafted_isoforms"] += n_grafted
+                    else:
+                        # PASA wins OR tie -> keep PASA, per the module docstring
+                        # (issue #17 defect 2). A "tie" includes the common
+                        # both-sides-no-DIAMOND-hit case, so this stops PASA
+                        # models being replaced by EVM with zero evidence.
+                        if winner == "pasa":
+                            stats["pasa_wins"] += 1
+                        else:
+                            stats["tie"] += 1
 
     elif conflicts and not use_diamond:
         print("No DIAMOND DB — keeping PASA for all conflicts", file=sys.stderr)
@@ -413,9 +429,11 @@ def main():
         f.write("##gff-version 3\n")
         for i, (_, _, _, _, _, lines) in enumerate(pasa_genes):
             if i in pasa_replaced:
-                # Write the EVM gene + grafted PASA isoforms
-                for line in pasa_replaced[i]:
-                    f.write(line)
+                # One PASA gene may be replaced by several EVM genes (chimeric
+                # merge); write every EVM block, not just the last (issue #17).
+                for block in pasa_replaced[i]:
+                    for line in block:
+                        f.write(line)
             else:
                 for line in lines:
                     f.write(line)
@@ -424,10 +442,11 @@ def main():
             for line in rescued_lines:
                 f.write(line)
 
-    total_genes = len(pasa_genes) + rescued_count
+    evm_blocks_emitted = sum(len(v) for v in pasa_replaced.values())
+    total_genes = len(pasa_genes) - len(pasa_replaced) + evm_blocks_emitted + rescued_count
     print(f"\nResults:", file=sys.stderr)
-    print(f"  PASA genes: {len(pasa_genes)} ({len(pasa_replaced)} replaced by EVM)",
-          file=sys.stderr)
+    print(f"  PASA genes: {len(pasa_genes)} ({len(pasa_replaced)} replaced by "
+          f"{evm_blocks_emitted} EVM genes)", file=sys.stderr)
     print(f"  Rescued EVM genes: {rescued_count}", file=sys.stderr)
     print(f"  Total genes: {total_genes}", file=sys.stderr)
     print(f"  Conflicts: {len(conflicts)} — EVM wins: {stats['evm_wins']}, "
