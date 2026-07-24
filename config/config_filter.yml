@@ -9,7 +9,7 @@ Singularity: singularity/sylvan.sif      # Singularity image (pre-built micromam
 
 Input:
   genome: results/GETA/genome.fasta            # [path] genome fasta file (GETA/genome.fasta)
-  rna_seq: toydata/RNASeq                      # [path] Directory with paired-end RNAseq data
+  rna_seq: toydata/RNASeq                      # [path] Directory with RNA-seq fastq.gz (paired-end _1/_2 | _R1/_R2, or single-end)
   protein: results/PROTEIN/merged_rmdup_proteins.fasta  # [path] Homolg protein FASTA (PROTEIN/merged_rmdup_proteins.fasta)
   anot_gff: results/PREFILTER/Sylvan.gff3      # [path] Annotated gff (PREFILTER/Sylvan.gff3)
   augustus_gff: results/GETA/Augustus/augustus.gff3     # [path] Augustus annotation (GETA/Augustus/augustus.gff3)
