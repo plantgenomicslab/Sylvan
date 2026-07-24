@@ -14,6 +14,10 @@ export SYLVAN_FILTER_CONFIG="${SYLVAN_FILTER_CONFIG:-config/config_filter.yml}"
 # Defaults to SYLVAN_FILTER_CONFIG for single-file mode. Set to a separate cluster YAML to split concerns.
 export SYLVAN_FILTER_CLUSTER_CONFIG="${SYLVAN_FILTER_CLUSTER_CONFIG:-$SYLVAN_FILTER_CONFIG}"
 
+# Run tag for child job names: cluster_submit.py appends it to -J. Fleet runs share
+# rule names, so the tag makes every child attributable to its run in squeue/sacct.
+export SYLVAN_RUN_NAME="${SYLVAN_RUN_NAME:-$(basename "$(pwd)")}"
+
 # Singularity args: --nv enables NVIDIA GPU passthrough (safe to include even without GPU)
 SINGULARITY_ARGS="${SYLVAN_SINGULARITY_ARGS:---nv -B /data/gpfs}"
 

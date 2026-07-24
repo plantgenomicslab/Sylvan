@@ -16,12 +16,19 @@ naturally.
 A transient sbatch failure (SLURM controller overload, momentary resource error) is
 retried with exponential backoff so it doesn't permanently fail the Snakemake job.
 
+Run tagging: when SYLVAN_RUN_NAME is set in the environment (annotate.sh/filter.sh
+export it as the run directory basename), it is appended to the job name
+("pasa." -> "pasa.Ahy_C"). The 15-run fleet shares rule names across runs, so the
+tag is what makes squeue/sacct output attributable to a specific run and lets
+controller guards match children safely.
+
 Usage in entry scripts (Snakemake appends the jobscript path as the final argument):
   --cluster "python3 bin/cluster_submit.py {cluster.nodes} {cluster.memory} \
     {cluster.ncpus} {cluster.name} {cluster.account} {cluster.partition} \
     {cluster.time} {cluster.output} {cluster.error} {cluster.extra_args}"
 """
 
+import os
 import subprocess
 import sys
 import time
@@ -48,6 +55,12 @@ def main():
     memory = sys.argv[2]
     ncpus = sys.argv[3]
     name = sys.argv[4]
+    # Run tagging: append SYLVAN_RUN_NAME (exported by annotate.sh/filter.sh as
+    # the run dir basename) so fleet child jobs carry their run in -J, e.g.
+    # "pasa." -> "pasa.Ahy_C" / "psiClass_bin.binid=Ath_Chr1" -> "...Chr1.Ahy_C".
+    run_tag = os.environ.get("SYLVAN_RUN_NAME", "").strip()
+    if run_tag:
+        name = name.rstrip(".") + "." + run_tag
     account = sys.argv[5]
     partition = sys.argv[6]
     time_limit = sys.argv[7]
