@@ -1134,8 +1134,12 @@ rule merge_geneRegion2Genewise:
 					if block.startswith("Bits"):
 						align_line = block.split('\n')[1]
 						parts = align_line.split()
-						seq = parts[4].split('.')[0]
-						start = parts[4].split('.')[1]
+						# genewise Target is "<seqid>.<start>.<end>.<strand>", and the seqid
+						# itself may contain dots (Ahy scaffolds are named
+						# "Ahy_arahy.Tifrunner.gnm1.Arahy.01"). Split the four trailing
+						# fields off the right; taking the first two from the left made
+						# seq="Ahy_arahy" and start="Tifrunner" -> ValueError (#35).
+						seq, start, _t_end, _t_strand = parts[4].rsplit('.', 3)
 						locus = int(parts[5]) + int(start)
 						ID = parts[1]
 						if int(parts[2]) == 1:
@@ -1524,7 +1528,14 @@ rule BGM2AT:
 			f'mv -f ati.* genes.*.gb* gff2gbSmallDNA.*.log etraining.* badgenes.lst '
 			f'new_species.*.log optimize.out training.gb.* hmm_files_bak* tmp_opt_* '
 			f'{aug_dir}/training/ 2>/dev/null || true ; '
-			f'rm -f firsttest.ok secondtest.ok optimize_augustus.ok 2>/dev/null || true ; '
+			# Deliberately NOT removing firsttest.ok / optimize_augustus.ok /
+			# secondtest.ok: BGM2AT guards each stage with `unless (-e "X.ok")`.
+			# Deleting them made every rerun restart at firsttest and redo
+			# optimize_augustus (the long pole), so the run never reached the
+			# secondtest stage that writes secondtest.out -- a declared output,
+			# so Snakemake rescheduled the rule again. Ath burned ~1,740 CPU-h
+			# across 6 executions that way (#37). Each marker is written only
+			# after its stage succeeds, so nothing failed is ever skipped.
 			f'cd - > /dev/null ; '
 			f'mv -f genes.gb* hmm_files_bak* tmp_opt_* cleaning_* {aug_dir}/training/ 2>/dev/null || true'
 		)
