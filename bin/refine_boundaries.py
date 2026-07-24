@@ -112,7 +112,9 @@ def parse_miniprot(gff3_path):
 
 
 def _get_attr(attrs, key):
-    m = re.search(rf"{key}=([^;\s]+)", attrs)
+    # Anchor the key to the start of the attribute string or a ';' separator so
+    # "ID=" does not substring-match inside "GeneID=" etc. (issue #20.7).
+    m = re.search(rf"(?:^|;)\s*{re.escape(key)}=([^;\s]+)", attrs)
     return m.group(1) if m else None
 
 
@@ -411,19 +413,59 @@ def rebuild_gene_lines(original, replacement):
 
     # Exon lines
     exon_intervals = replacement["exon_intervals"] if replacement["exon_intervals"] else replacement["cds_intervals"]
-    for i, (s, e) in enumerate(sorted(exon_intervals), 1):
+    exon_sorted = sorted(exon_intervals)
+    for i, (s, e) in enumerate(exon_sorted, 1):
         new_lines.append(
             f"{chrom}\tSylvan_refined\texon\t{s}\t{e}\t.\t{strand}\t.\t"
             f"ID={mrna_id}.exon{i};Parent={mrna_id}\n"
         )
 
-    # CDS lines
-    for i, (s, e) in enumerate(sorted(replacement["cds_intervals"]), 1):
-        phase = "0"  # Phase would need proper calculation for accuracy
+    # CDS lines with correct per-segment phase (issue #12).
+    # phase = bases to trim from the 5' end of this CDS segment to reach the next
+    # codon = (3 - (cumulative upstream CDS length % 3)) % 3, walking 5'->3'
+    # (ascending coords on +, descending on -). Writing phase=0 everywhere (the
+    # old behaviour) frameshifted every segment after the first.
+    cds_sorted = sorted(replacement["cds_intervals"])
+    order = list(range(len(cds_sorted)))
+    if strand == "-":
+        order = order[::-1]
+    phase_by_idx = {}
+    cumulative = 0
+    for idx in order:
+        s, e = cds_sorted[idx]
+        phase_by_idx[idx] = (3 - (cumulative % 3)) % 3
+        cumulative += e - s + 1
+    for i, (s, e) in enumerate(cds_sorted, 1):
         new_lines.append(
-            f"{chrom}\tSylvan_refined\tCDS\t{s}\t{e}\t.\t{strand}\t{phase}\t"
+            f"{chrom}\tSylvan_refined\tCDS\t{s}\t{e}\t.\t{strand}\t{phase_by_idx[i - 1]}\t"
             f"ID=cds.{mrna_id}.{i};Parent={mrna_id}\n"
         )
+
+    # UTR lines: exon regions outside the CDS span (issue #12 — the rebuild path
+    # previously dropped UTRs entirely). Derived from exon minus CDS so they stay
+    # self-consistent with the refined structure.
+    if cds_sorted:
+        cds_min = cds_sorted[0][0]
+        cds_max = max(e for _, e in cds_sorted)
+        utr_i = 0
+        for (es, ee) in exon_sorted:
+            segments = []
+            if es < cds_min:
+                left_end = min(ee, cds_min - 1)
+                if es <= left_end:
+                    utype = "five_prime_UTR" if strand != "-" else "three_prime_UTR"
+                    segments.append((es, left_end, utype))
+            if ee > cds_max:
+                right_start = max(es, cds_max + 1)
+                if right_start <= ee:
+                    utype = "three_prime_UTR" if strand != "-" else "five_prime_UTR"
+                    segments.append((right_start, ee, utype))
+            for (us, ue, utype) in segments:
+                utr_i += 1
+                new_lines.append(
+                    f"{chrom}\tSylvan_refined\t{utype}\t{us}\t{ue}\t.\t{strand}\t.\t"
+                    f"ID={mrna_id}.utr{utr_i};Parent={mrna_id}\n"
+                )
 
     return new_lines, gene_start, gene_end
 
@@ -512,7 +554,7 @@ def main():
     # Process each gene
     refined_count = 0
     candidate_count = 0
-    output_genes = []  # list of (start, end, lines)
+    output_genes = []  # list of (chrom, start, end, lines)
 
     for gene in sylvan_genes:
         # Collect all overlapping alternative models
@@ -525,7 +567,7 @@ def main():
 
         # Check if gene appears truncated
         if not is_truncated(gene, all_alternatives):
-            output_genes.append((gene["start"], gene["end"], gene["lines"]))
+            output_genes.append((gene["chrom"], gene["start"], gene["end"], gene["lines"]))
             continue
 
         candidate_count += 1
@@ -582,12 +624,12 @@ def main():
             # Only allow Helixer/Augustus as replacement sources (not miniprot)
             # Miniprot gives approximate exon boundaries; RNA-seq splice junctions are authoritative
             if best_alt.get("_source_name") == "miniprot":
-                output_genes.append((gene["start"], gene["end"], gene["lines"]))
+                output_genes.append((gene["chrom"], gene["start"], gene["end"], gene["lines"]))
                 continue
 
             # Swap
             new_lines, new_start, new_end = rebuild_gene_lines(gene, best_alt)
-            output_genes.append((new_start, new_end, new_lines))
+            output_genes.append((gene["chrom"], new_start, new_end, new_lines))
             refined_count += 1
             print(f"  REFINED {gene['gene_id']}: "
                   f"CDS {total_cds_length(gene['cds_intervals'])}→{total_cds_length(best_alt['cds_intervals'])}bp, "
@@ -596,16 +638,16 @@ def main():
                   f"{best_score:.2f}",
                   file=sys.stderr)
         else:
-            output_genes.append((gene["start"], gene["end"], gene["lines"]))
+            output_genes.append((gene["chrom"], gene["start"], gene["end"], gene["lines"]))
 
-    # Write output sorted by position
-    output_genes.sort(key=lambda x: (x[0], x[1]))
+    # Write output sorted by position, grouped by chromosome (issue #20.10)
+    output_genes.sort(key=lambda x: (x[0], x[1], x[2]))
 
     with open(args.output, "w") as fout:
         fout.write("##gff-version 3\n")
         fout.write(f"# Refined by refine_boundaries.py: {refined_count} genes updated "
                    f"out of {candidate_count} candidates ({len(sylvan_genes)} total)\n")
-        for _, _, lines in output_genes:
+        for _, _, _, lines in output_genes:
             for line in lines:
                 fout.write(line if line.endswith("\n") else line + "\n")
 
