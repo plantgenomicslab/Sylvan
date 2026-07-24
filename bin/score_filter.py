@@ -27,9 +27,27 @@ import sys
 import pandas as pd
 import numpy as np
 
+from sklearn.base import clone
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
+from sklearn.metrics import roc_auc_score, precision_recall_curve, average_precision_score
+from sklearn.model_selection import cross_val_predict, StratifiedKFold
+
+# Features that deterministically DEFINE the pseudo-labels (label_pos = pfam|homolog,
+# label_neg = rex). Feeding them to the model lets it memorise the labelling rule
+# (train AUC ~= 1, useless generalisation), so they are excluded from X.
+LEAKAGE_FEATURES = ["pfam_hit", "homolog_hit", "rex_hit"]
+# Evidence the model is actually allowed to learn from.
+MODEL_FEATURES = [
+    "tpm",
+    "cov_aug",
+    "cov_helixer",
+    "cov_repeat",
+    "lnc_prob",
+    "aa_len",
+    "internal_stop",
+    "short_orf",
+]
 
 
 def load_pfam(path):
@@ -66,11 +84,16 @@ def load_rsem(path):
 def load_cov(path):
     if not os.path.exists(path):
         return pd.DataFrame(columns=["gene_id", "cov"])
-    # bedtools coverage default output: a_fields + (num, bp_covered, len, frac)
+    # The prefilter BED handed to `bedtools coverage -a` has 5 columns
+    # (chrom, start, end, strand, transcript_id); bedtools then appends
+    # (num_overlaps, bp_covered, feature_len, frac_covered). So the gene ID is
+    # column index 4 and the coverage fraction is column index 8 -- matching
+    # Filter.py's read_abInitio_cov (usecols=[4, 8]). The previous code read
+    # column index 3 (strand) as the gene ID, so the join key never matched and
+    # cov_aug/cov_helixer/cov_repeat were all NaN -> 0.
     df = pd.read_csv(path, sep="\t", header=None, comment="#")
-    # gene id is 4th column in the input bed (0-based idx 3)
-    df["gene_id"] = df.iloc[:, 3].astype(str)
-    frac = df.iloc[:, -1]
+    df["gene_id"] = df.iloc[:, 4].astype(str)
+    frac = df.iloc[:, 8]
     return df[["gene_id"]].assign(cov=frac.values)
 
 
@@ -215,74 +238,58 @@ def main():
         feats["rf_score"] = 0.0
         metrics_lines.append("Insufficient labels for training; scores set to 0.")
     else:
-        X_train = train[[
-            "pfam_hit",
-            "homolog_hit",
-            "rex_hit",
-            "tpm",
-            "cov_aug",
-            "cov_helixer",
-            "cov_repeat",
-            "lnc_prob",
-            "aa_len",
-            "internal_stop",
-            "short_orf",
-        ]]
+        # Exclude the label-defining features (pfam/homolog/rex) so the model
+        # learns from independent evidence instead of memorising the rule.
+        X_train = train[MODEL_FEATURES]
         y_train = train["label"]
 
-        # Logistic regression
-        logit = LogisticRegression(max_iter=1000)
-        logit.fit(X_train, y_train)
-        feats["logit_score"] = logit.predict_proba(
-            feats[[
-                "pfam_hit",
-                "homolog_hit",
-                "rex_hit",
-                "tpm",
-                "cov_aug",
-                "cov_helixer",
-                "cov_repeat",
-                "lnc_prob",
-                "aa_len",
-                "internal_stop",
-                "short_orf",
-            ]]
-        )[:, 1]
+        models = {
+            "logit": LogisticRegression(max_iter=1000),
+            "rf": RandomForestClassifier(
+                n_estimators=200,
+                max_depth=None,
+                n_jobs=-1,
+                class_weight="balanced",
+                random_state=42,
+            ),
+        }
 
-        # Random forest
-        rf = RandomForestClassifier(
-            n_estimators=200,
-            max_depth=None,
-            n_jobs=-1,
-            class_weight="balanced",
-            random_state=42,
-        )
-        rf.fit(X_train, y_train)
-        feats["rf_score"] = rf.predict_proba(
-            feats[[
-                "pfam_hit",
-                "homolog_hit",
-                "rex_hit",
-                "tpm",
-                "cov_aug",
-                "cov_helixer",
-                "cov_repeat",
-                "lnc_prob",
-                "aa_len",
-                "internal_stop",
-                "short_orf",
-            ]]
-        )[:, 1]
+        # Metrics on the same rows a model trained on are optimistic (AUC ~= 1).
+        # Estimate generalisation with out-of-fold cross-validated predictions;
+        # fall back to in-sample only when there are too few minority labels to
+        # split into folds.
+        min_class = int(y_train.value_counts().min())
+        n_splits = min(5, min_class)
+        can_cv = n_splits >= 2
 
-        # Metrics on pseudo-labels
-        for name in ["logit", "rf"]:
-            scores = feats.loc[has_label, f"{name}_score"]
-            auc_roc = roc_auc_score(y_train, scores)
-            pr_auc = auc(*precision_recall_curve(y_train, scores)[:2])
-            thresh, p, r, f1 = select_threshold(y_train, scores)
+        for name, est in models.items():
+            # Fit on the full labelled set to score EVERY gene for the CSV.
+            est.fit(X_train, y_train)
+            feats[f"{name}_score"] = est.predict_proba(feats[MODEL_FEATURES])[:, 1]
+
+            if can_cv:
+                oof = cross_val_predict(
+                    clone(est),
+                    X_train,
+                    y_train,
+                    cv=StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42),
+                    method="predict_proba",
+                )[:, 1]
+                eval_scores = pd.Series(oof, index=y_train.index)
+                note = f"(out-of-fold {n_splits}-fold CV)"
+            else:
+                eval_scores = feats.loc[has_label, f"{name}_score"]
+                note = "(in-sample; too few minority labels for CV)"
+
+            auc_roc = roc_auc_score(y_train, eval_scores)
+            # average_precision_score is the correct PR-AUC. The previous
+            # auc(precision, recall) integrated precision (non-monotonic) as the
+            # x-axis, which auc() is not defined for -> garbage/negative values.
+            pr_auc = average_precision_score(y_train, eval_scores)
+            thresh, p, r, f1 = select_threshold(y_train, eval_scores)
             metrics_lines.append(
                 f"{name}: ROC_AUC={auc_roc:.4f} PR_AUC={pr_auc:.4f} "
-                f"threshold={thresh:.4f} precision={p:.4f} recall={r:.4f} F1={f1:.4f}"
+                f"threshold={thresh:.4f} precision={p:.4f} recall={r:.4f} F1={f1:.4f} {note}"
             )
             feats[f"{name}_threshold"] = thresh
 
