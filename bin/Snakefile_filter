@@ -1,6 +1,7 @@
 import yaml, sys, os, re
 import pandas as pd
 from pathlib import Path
+from snakemake.exceptions import WorkflowError
 
 # TODO: file handling for re-runs is inadequate ... if a new gff is used many outputs need to be overwritten
 
@@ -117,6 +118,15 @@ for root, dirs, files in os.walk(rna_seq):
 			sample_to_files[sample_name] = {}
 		sample_to_files[sample_name]['single'] = os.path.join(root, fi)
 	break
+
+# Fail fast when no RNA-seq fastq were found. Otherwise bams/rsem stay empty and
+# downstream mergeSTAR/mergeRSEM run on empty input, silently dropping expression
+# evidence (or dying with a cryptic samtools error). Stop here with a clear message.
+if not rsem:
+	raise WorkflowError(
+		f"No RNA-seq fastq found in {rna_seq} (expected .fastq.gz paired-end "
+		"_1/_2 | _R1/_R2, or single-end). Expression evidence would be silently missing."
+	)
 
 # Classify samples so the single/paired RSEM rules never both match the same
 # {run}.isoforms.results target (see wildcard_constraints on the RSEM rules).
