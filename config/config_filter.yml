@@ -107,9 +107,19 @@ __default__:
 PfamScan:
   ncpus: 48
   memory: 64g       # hmmscan on ~48k proteins uses tens of GB, not 192g; refine from sacct MaxRSS
-RSEM:
-  ncpus: 32
-  memory: 128g
+# RSEM expression — cluster keys MUST match Snakefile_filter rule names exactly (#14).
+# Real rules are calculateRSEMExpression_PAIRED / _SINGLE (threads 16) and mergeRSEM.
+# The old dead `RSEM:` / `calculateRSEMExpression:` keys never matched, so these rules
+# fell through to __default__ (4c/16g) — 16 threads on 4 cpus = 4x oversubscription.
+calculateRSEMExpression_PAIRED:
+  ncpus: 16
+  memory: 64g       # refine from sacct MaxRSS
+calculateRSEMExpression_SINGLE:
+  ncpus: 16
+  memory: 64g       # refine from sacct MaxRSS
+mergeRSEM:          # single-process pandas TPM merge; light
+  ncpus: 4
+  memory: 16g
 sortSTAR:
   ncpus: 16
   memory: 64g
@@ -119,10 +129,10 @@ blast:
 coverage:
   ncpus: 16
   memory: 64g
-indexRef:
+blastDB:            # makeblastdb on homolog proteins; single-threaded, light
   ncpus: 4
   memory: 16g
-blastDB:
+blastRexDB:         # makeblastdb on RexDB; single-threaded, light (#14: was falling to __default__)
   ncpus: 4
   memory: 16g
 splitPep:
@@ -131,22 +141,25 @@ splitPep:
 combineBlast:
   ncpus: 4
   memory: 16g
+blastRex:           # blastp vs RexDB, -num_threads 16 (#14: verified oversubscribed at __default__ 4c/16g)
+  ncpus: 16
+  memory: 64g
+combineBlastRex:    # cat of per-part blastRex hits; light (#14)
+  ncpus: 4
+  memory: 16g
 abInitioCoverage:
   ncpus: 1
   memory: 4g
-STAR_generate:
-  ncpus: 12
-  memory: 48g
 fastp_PAIRED:
   ncpus: 16
   memory: 64g
-STAR_paired:
+STAR_paired:        # threads = Threads.STAR = 12
+  ncpus: 12
+  memory: 48g
+STAR_single:        # threads = Threads.STAR = 12 (#14: was falling to __default__ 4c/16g)
   ncpus: 12
   memory: 48g
 mergeSTAR:
-  ncpus: 16
-  memory: 64g
-calculateRSEMExpression:
   ncpus: 16
   memory: 64g
 prepRSEM:
@@ -158,6 +171,11 @@ lncRNA_pred:
 STAR_index:
   ncpus: 12
   memory: 48g
+busco:              # BUSCO protein mode over the annotated proteome (#14: was falling to
+                    # __default__ 4c/16g). No -c flag so it runs ~single-threaded; give memory
+                    # headroom for hmmsearch on large proteomes. Refine from sacct MaxRSS.
+  ncpus: 4
+  memory: 32g
 filter:
   # Semi-supervised random forest over ~tens of thousands of proteins; needs tens
   # of GB, not the 192g heavy rules use. Explicit block so it no longer inherits
