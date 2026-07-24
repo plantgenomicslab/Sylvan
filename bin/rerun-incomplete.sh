@@ -20,6 +20,11 @@ export SLURM_TMPDIR="$TMPDIR"
 # queue throughout the run's active life (including the inter-wave gap), so
 # matching it here refuses to run while a controller owns this run.
 #
+# NOTE: the format is '%j', not '%200j'. A width-qualified squeue format pads the
+# job name to that width, so every line ends in trailing spaces and an anchored
+# `grep -E "...$"` never matches -- the guard silently passes while a controller
+# is live. Verified against a running syl_fi_Osa.
+#
 # Harmless no-op outside the fleet: on clusters/accounts without these job names
 # (or without squeue) nothing matches and the script proceeds. Pass --force to
 # override -- only when the controller is confirmed dead AND you have verified no
@@ -33,7 +38,7 @@ set -- ${_passthru[@]+"${_passthru[@]}"}
 
 _run="$(basename "$PWD")"
 if [ "$_force" -ne 1 ] \
-   && squeue -A cpu-s1-pgl-0 -h -o '%200j' 2>/dev/null | grep -qE "^syl_(an|fi)_${_run}$"; then
+   && squeue -A cpu-s1-pgl-0 -h -o '%j' 2>/dev/null | grep -qE "^syl_(an|fi)_${_run}$"; then
     echo "ABORT (#29): controller syl_an_${_run}/syl_fi_${_run} is queued or running for '${_run}'." >&2
     echo "  Its per-wave 'snakemake --unlock' races this manual rerun-incomplete and can spawn a" >&2
     echo "  duplicate DAG writing the same outputs. Wait for the controller chain to finish, or --" >&2
