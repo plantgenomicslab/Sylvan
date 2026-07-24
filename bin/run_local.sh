@@ -14,20 +14,22 @@
 #   SYLVAN_SKIP_FILTER      Set to 1 to skip Phase 2 (filter)
 #   SYLVAN_SKIP_BENCHMARK   Set to 1 to skip Phase 3 (benchmark)
 
-set -e
+set -euo pipefail
 
 echo "============================================="
 echo " Sylvan Local Pipeline"
 echo " $(date)"
 echo "============================================="
 
-EXTRA_ARGS="$@"
+# Preserve argument boundaries: an array keeps "--config a b" intact where a
+# flattened string ($EXTRA_ARGS="$@" + unquoted expansion) would word-split it.
+EXTRA_ARGS=("$@")
 
 # Phase 1: Annotate
 if [ "${SYLVAN_SKIP_ANNOTATE:-0}" != "1" ]; then
 	echo ""
 	echo "=== Phase 1: Annotate ==="
-	./bin/annotate_local.sh $EXTRA_ARGS
+	./bin/annotate_local.sh ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 	echo "=== Phase 1 complete ==="
 else
 	echo "=== Phase 1: SKIPPED (SYLVAN_SKIP_ANNOTATE=1) ==="
@@ -37,7 +39,7 @@ fi
 if [ "${SYLVAN_SKIP_FILTER:-0}" != "1" ]; then
 	echo ""
 	echo "=== Phase 2: Filter ==="
-	./bin/filter_local.sh $EXTRA_ARGS
+	./bin/filter_local.sh ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 	echo "=== Phase 2 complete ==="
 else
 	echo "=== Phase 2: SKIPPED (SYLVAN_SKIP_FILTER=1) ==="
@@ -47,7 +49,7 @@ fi
 if [ "${SYLVAN_SKIP_BENCHMARK:-0}" != "1" ]; then
 	echo ""
 	echo "=== Phase 3: Benchmark ==="
-	./bin/benchmark_local.sh $EXTRA_ARGS
+	./bin/benchmark_local.sh ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 	echo "=== Phase 3 complete ==="
 else
 	echo "=== Phase 3: SKIPPED (SYLVAN_SKIP_BENCHMARK=1) ==="

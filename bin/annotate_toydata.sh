@@ -15,7 +15,7 @@
 #     --account cpu-s1-pgl-0 --partition cpu-s1-pgl-0
 
 set -x
-set -e
+set -euo pipefail
 
 mkdir -p results/TMP
 export TMPDIR="$(pwd)/results/TMP"

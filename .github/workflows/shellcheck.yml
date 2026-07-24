@@ -1,0 +1,39 @@
+name: ShellCheck
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'bin/**.sh'
+      - '.github/workflows/shellcheck.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'bin/**.sh'
+      - '.github/workflows/shellcheck.yml'
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install shellcheck
+      run: |
+        if ! command -v shellcheck >/dev/null 2>&1; then
+          sudo apt-get update && sudo apt-get install -y shellcheck
+        fi
+        shellcheck --version
+
+    - name: Analysing the shell scripts with shellcheck
+      run: |
+        # Advisory gate — mirrors the pylint job's `--exit-zero`: findings are
+        # reported but never fail the build. Drop the trailing `|| true` to make
+        # shellcheck enforced once bin/*.sh is clean.
+        shellcheck --shell=bash --severity=warning bin/*.sh || true
+
+# shellcheck runs with `|| true` and so can never fail the build (advisory).
+# It surfaces SC2086 (unquoted expansions), missing-quote, and strict-mode
+# regressions so new scripts don't backslide. Promote to a hard gate by
+# removing `|| true` above.

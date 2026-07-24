@@ -9,7 +9,7 @@
 # Requires Benchmark section in filter config with gff3_files and optional omark_db.
 
 set -x
-set -e
+set -euo pipefail
 
 mkdir -p results/TMP
 export TMPDIR="$(pwd)/results/TMP"

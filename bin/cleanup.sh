@@ -1,6 +1,12 @@
 #!/bin/bash
 
-# This script is intened to be run after both the annotation phase 
+# Catch unset variables. `-e`/`-o pipefail` are deliberately NOT set: the
+# `snakemake --list-untracked | grep -v ... | xargs rm` chain relies on grep
+# returning non-zero when it filters out every line (nothing left to remove),
+# which pipefail/errexit would turn into a spurious cleanup failure.
+set -u
+
+# This script is intened to be run after both the annotation phase
 # and filter phases have been completed. It will clean up intermediate 
 # files generated during the annotation phase. Primary tool outputs
 # used for EVM are retained. The logs and configs are also preserved 

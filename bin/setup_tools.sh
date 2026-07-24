@@ -5,7 +5,7 @@
 # Usage:
 #   ./bin/setup_tools.sh [--geta-home /path/to/geta] [--pfam-dir /path/to/pfamdb]
 #
-set -e
+set -euo pipefail
 
 GETA_HOME="${GETA_HOME:-tools/geta}"
 PFAM_DIR="${PFAM_DIR:-databases/Pfam}"
