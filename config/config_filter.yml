@@ -78,6 +78,7 @@ Cutoff:
 ###############################################################################################
  
 Threads:
+  splitInterleaved: 2        # one sort + two gzip writers; not a parallel rule
   PfamScan: 48
   sortSTAR: 16
   blast: 16
@@ -150,6 +151,10 @@ combineBlastRex:    # cat of per-part blastRex hits; light (#14)
 abInitioCoverage:
   ncpus: 1
   memory: 4g
+splitInterleaved:
+  ncpus: 2
+  memory: 8g               # sort runs with -S 2G and spills to $TMPDIR
+  time: "08:00:00"         # ~25-40 min per 1-6 GB input on GPFS scratch
 fastp_PAIRED:
   ncpus: 16
   memory: 64g
