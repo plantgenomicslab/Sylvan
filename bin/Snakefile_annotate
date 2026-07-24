@@ -1436,7 +1436,7 @@ rule BGM2AT:
 	resources:
 		mem_mb = parse_memory_to_mb(config_dict["BGM2AT"]["memory"])
 	params: a_species = augustus_species,
-		a_start = augustus_start_from,   # seeds optimize_augustus from a related species (read at line ~238)
+		a_start = None, # Augustus species start from
 		args = config_dict["Internal"]["BGM2AT"],
 		results_dir = RESULTS_DIR
 	run:
@@ -1504,11 +1504,6 @@ rule BGM2AT:
 				print(f"BGM2AT sanitize: dropped {len(dropped)} invalid mRNAs from {path}: {sorted(dropped)}")
 			else:
 				san[key] = path
-		# Seeding parameters.cfg from a related species shortens optimize_augustus,
-		# which is nearly all of BGM2AT's 13-40 h runtime.
-		start_from = ""
-		if params.a_start and params.a_start not in ("placeholder", "None"):
-			start_from = f"--augustus_species_start_from {params.a_start} "
 		run_in_container(
 			f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training && "
 			f"rm -rf {params.results_dir}GETA/Augustus/config/* && "
@@ -1517,7 +1512,6 @@ rule BGM2AT:
 			f"export AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
 			f"BGM2AT "
 			f"{params.args} "
-			f"{start_from}"
 			f"--flanking_length {flanking_length} "
 			f"--CPU {threads} "
 			f"--onlytrain_GFF3 {san['one']} {san['two']} "
