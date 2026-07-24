@@ -99,7 +99,7 @@ liftoff:
 miniprot:
   ncpus: 48
   threads: 48
-  memory: 192g
+  memory: 96g            # #18: was 192g (4.91Gb template); est. 40-80g. Kept generous (heavy rule). Refine from sacct MaxRSS.
 gmapPrep:
   ncpus: 4
   memory: 16g
@@ -133,17 +133,17 @@ psiClass_HiSat:
   ncpus: 16
   threads: 16
   memory: 64g
-stringtie_HiSat:
+stringtie_HiSat:          # NOTE: no matching rule in current Snakefile_annotate (dead key); right-sized for parity
   ncpus: 32
   threads: 32
-  memory: 128g
+  memory: 48g            # #18: was 128g (4.91Gb template); stringtie est. <20g. Refine from sacct MaxRSS.
 psiClass_STAR:            # aggregation: cat per-bin votes + gtf_to_alignment (light)
   ncpus: 2
   memory: 16g
 psiClass_bin:             # per-chromosome-bin psiClass worker, single-threaded (#25)
   ncpus: 2
   threads: 1
-  memory: 96g
+  memory: 64g             # #18: was 96g; est. 10-40g per bin. Conservative headroom. Refine from sacct MaxRSS.
   # Densest chromosome arms are split into sub-regions no wider than this (bp) so each
   # psiClass component stays under the int32 atCnt overflow / DP-hang ceiling (#25).
   # ~5Mb keeps even ~5000 subexons/Mb regions under ~25k subexons (Ath Chr4 completed at
@@ -152,7 +152,7 @@ psiClass_bin:             # per-chromosome-bin psiClass worker, single-threaded 
 stringtie_STAR:
   ncpus: 32
   threads: 32
-  memory: 128g
+  memory: 48g            # #18: was 128g (4.91Gb template); stringtie est. <20g. Refine from sacct MaxRSS.
 bamToFastq:
   ncpus:  12
   threads: 12
@@ -172,7 +172,8 @@ STAR_single:
 mergeSTAR:
   ncpus: 12
   threads: 12
-  memory: 220g
+  memory: 64g              # #18: samtools merge; sacct MaxRSS measured 3-11g on fleet runs.
+                           # Was 220g (4.91Gb-template) — unschedulable on 250g nodes (7-day PENDING).
   sortthreads: 12
   sortmem: 16G
 STAR_split:
@@ -212,17 +213,17 @@ prepareGenome:
   ncpus: 1
   memory: 4g
 RepeatMasker_species:
-  ncpus: 64
-  threads: 64
-  memory: 220g
+  ncpus: 32              # #18: was 64c (whole node → needs an empty node to schedule)
+  threads: 32
+  memory: 128g          # #18: was 220g (4.91Gb template); est. 40-100g. Refine from sacct MaxRSS.
 RepeatModeler:
-  ncpus: 64
-  threads: 64
-  memory: 220g
+  ncpus: 32              # #18: was 64c; de novo repeat family building
+  threads: 32
+  memory: 128g          # #18: was 220g; RepeatModeler is the heaviest of the three. Refine from sacct MaxRSS.
 RepeatMasker_custom:
-  ncpus: 64
-  threads: 64
-  memory: 220g
+  ncpus: 32              # #18: was 64c
+  threads: 32
+  memory: 128g          # #18: was 220g. Refine from sacct MaxRSS.
 RepeatMasker_merge:
   ncpus: 4
   threads: 4
@@ -235,10 +236,10 @@ fastp_SINGLE:
   ncpus: 8
   threads: 8
   memory: 32g
-HiSat2_split:
+HiSat2_split:             # NOTE: no matching rule in current Snakefile_annotate (dead key); right-sized for parity
   ncpus: 48
   threads: 48
-  memory: 192g
+  memory: 64g            # #18: was 192g (4.91Gb template); HiSat2 est. <30g. Refine from sacct MaxRSS.
 HiSat2_build:
   ncpus: 4
   memory: 16g
@@ -327,7 +328,7 @@ geneModels2AugusutsTrainingInput:
 BGM2AT:
   ncpus: 12
   threads: 12
-  memory: 220g
+  memory: 64g             # #18: was 220g (4.91Gb template); Augustus training is modest. Refine from sacct MaxRSS.
 prepareAugusutusHints:
   ncpus: 4
   memory: 16g
