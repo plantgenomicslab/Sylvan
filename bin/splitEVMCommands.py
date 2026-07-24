@@ -23,8 +23,10 @@ def main():
 
     input_file = evm_dir / "commands.list"
     if not input_file.is_file():
-        # If the file doesn't exist, there are no commands to run.
-        # Create empty command files to satisfy Snakemake dependencies.
+        # If the file doesn't exist, there are no commands to run. Warn loudly
+        # (issue #20.12): otherwise an empty EVM.all.gff3 passes silently.
+        print(f"WARNING: {input_file} does not exist — EVM has no commands to run; "
+              "downstream EVM output will be EMPTY.", file=sys.stderr)
         for file_num in range(num_files):
             output_file = evm_dir / f"commands.{file_num}.list"
             output_file.touch()
@@ -62,12 +64,17 @@ def main():
 
         fixed_lines.append(updated_line)
 
-    # Shuffle and distribute the fixed commands
-    random.shuffle(fixed_lines)
+    # Shuffle (to balance heavy/light commands across chunks) and distribute.
+    # Seed deterministically (issue #20.12): an unseeded shuffle reshuffles the
+    # chunk assignment on every rerun, changing every commands.N.list mtime and
+    # cascading needless downstream reruns under --rerun-triggers mtime.
+    random.Random(1234).shuffle(fixed_lines)
 
     total_lines = len(fixed_lines)
     if total_lines == 0:
-        # Create empty files if after processing there are no commands
+        # Warn loudly (issue #20.12) rather than silently producing empty output.
+        print("WARNING: commands.list contained no commands after processing — "
+              "downstream EVM output will be EMPTY.", file=sys.stderr)
         for file_num in range(num_files):
              output_file = evm_dir / f"commands.{file_num}.list"
              output_file.touch()

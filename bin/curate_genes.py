@@ -34,8 +34,8 @@ def main():
 
     def gid_of(attr, ftype):
         if ftype == "gene":
-            m = re.search(r'ID=([^;]+)', attr);  return m.group(1) if m else None
-        m = re.search(r'Parent=([^;]+)', attr)   # mRNA->gene ; lower features handled by mRNA gate below
+            m = re.search(r'(?:^|;)ID=([^;]+)', attr);  return m.group(1) if m else None
+        m = re.search(r'(?:^|;)Parent=([^;]+)', attr)   # mRNA->gene ; lower features handled by mRNA gate below
         return m.group(1) if m else None
 
     # stream: keep a gene block iff gene id in keep_genes. Track current gene via Parent chain.
@@ -48,8 +48,8 @@ def main():
             c = ln.rstrip("\n").split("\t")
             if len(c) < 9:
                 continue
-            fid = (re.search(r'ID=([^;]+)', c[8]) or [None, None])[1] if "ID=" in c[8] else None
-            par = (re.search(r'Parent=([^;]+)', c[8]) or [None, None])[1] if "Parent=" in c[8] else None
+            fid = (re.search(r'(?:^|;)ID=([^;]+)', c[8]) or [None, None])[1] if "ID=" in c[8] else None
+            par = (re.search(r'(?:^|;)Parent=([^;]+)', c[8]) or [None, None])[1] if "Parent=" in c[8] else None
             if fid: id_parent[fid] = par
             lines.append(("feat", c, (fid, par)))
 

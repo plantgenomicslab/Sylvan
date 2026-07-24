@@ -112,7 +112,10 @@ try:
         gene_id = None
         gene_id_list = []
         for line in f:
-            match = re.search(r"\tgene\t.*ID=([^\s;]+)", line)
+            # Anchor ID= to the column-9 boundary (issue #20.7): the greedy
+            # ".*ID=" captured the LAST ID= on the line (e.g. a ";GeneID=" or a
+            # Note), not the gene's own ID.
+            match = re.search(r"\tgene\t.*?(?:\t|;)ID=([^\s;]+)", line)
             if match:
                 gene_id = match.group(1)
                 gene_id_list.append(gene_id)
