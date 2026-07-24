@@ -114,7 +114,7 @@ bam2Fasta:
 spades:
   ncpus: 48
   threads: 48
-  memory: 192g
+  memory: 96g          # was 192g: sacct MaxRSS 44-66g
 evigene:
   ncpus: 12
   threads: 12
@@ -143,7 +143,7 @@ psiClass_STAR:            # aggregation: cat per-bin votes + gtf_to_alignment (l
 psiClass_bin:             # per-chromosome-bin psiClass worker, single-threaded (#25)
   ncpus: 2
   threads: 1
-  memory: 64g             # #18: was 96g; est. 10-40g per bin. Conservative headroom. Refine from sacct MaxRSS.
+  memory: 48g             # #18 asked to refine from sacct: Ath_Chr1 (18h, densest bin) peaked at 9.9g, so 64g -> 48g keeps ~5x headroom for larger genomes.
   # Densest chromosome arms are split into sub-regions no wider than this (bp) so each
   # psiClass component stays under the int32 atCnt overflow / DP-hang ceiling (#25).
   # ~5Mb keeps even ~5000 subexons/Mb regions under ~25k subexons (Ath Chr4 completed at
@@ -328,7 +328,7 @@ geneModels2AugusutsTrainingInput:
 BGM2AT:
   ncpus: 12
   threads: 12
-  memory: 64g             # #18: was 220g (4.91Gb template); Augustus training is modest. Refine from sacct MaxRSS.
+  memory: 32g             # #18 asked to refine from sacct: 5 completed runs peak at 5.6-12.2g, so 64g -> 32g. The 15 fleet configs still carried the 220g template, which cannot pack onto an occupied 256g node — 682h queued vs 144h running (83% wait, ~38h/job).
 prepareAugusutusHints:
   ncpus: 4
   memory: 16g
