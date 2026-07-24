@@ -200,7 +200,14 @@ recombineEVM:
 pasaPost:
   ncpus: 48
   threads: 48
-  memory: 192g
+  memory: 64g              # actual ~11h/<64g in practice; was 192g (over-provisioned)
+  time: "1-00:00:00"       # was inheriting 3-day __default__; real runs finish in ~11h
+agat_clean_final:
+  # agat_convert_sp_gxf2gxf is single-threaded and light; ~2min at 48g on real
+  # genomes (validated 2026-07). Explicit block so it no longer inherits the
+  # 3-day __default__ walltime (ncpus falls back to __default__).
+  memory: 48g
+  time: "12:00:00"
 prepareGenome:
   ncpus: 1
   memory: 4g
