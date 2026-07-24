@@ -15,8 +15,13 @@ args = parser.parse_args()
 
 scores = pd.read_csv(args.scores, sep="\t", usecols=["#acc", "score_1"])
 scores = scores[scores["#acc"].str.contains(r"\.p1$")].reset_index(drop=True)
-scores.loc[:, "gene"] = scores.loc[:, "#acc"].str[:-6]
+# acc looks like "<gene>.t<N>.p1". The primary ORF suffix ".p1" is always 3
+# chars, so transcript = acc[:-3]. The gene is transcript with its ".t<N>"
+# suffix stripped -- do it with a regex, NOT a fixed str[:-6], which only
+# removes ".t1.p1" and mis-splits multi-digit transcripts (".t10.p1" left a
+# stray ".t1", splitting one gene into two "primaries").
 scores.loc[:, "transcript"] = scores.loc[:, "#acc"].str[:-3]
+scores.loc[:, "gene"] = scores.loc[:, "transcript"].str.replace(r"\.t\d+$", "", regex=True)
 
 primary = scores[scores.groupby(['gene'])['score_1'].transform(max) == scores["score_1"]].drop_duplicates(["gene"])
 
@@ -48,7 +53,13 @@ if args.gff != "":
 					out.write("\t".join(line) + "\n")
 					continue
 				tID = m.group(1)
-				score = scores[scores["transcript"]==tID]["score_1"].values[0]
+				matched = scores.loc[scores["transcript"] == tID, "score_1"].values
+				if len(matched) == 0:
+					# mRNA with no TransDecoder score (e.g. no primary ORF):
+					# leave it untouched instead of crashing on values[0].
+					out.write("\t".join(line) + "\n")
+					continue
+				score = matched[0]
 				line[8] = re.sub(";$", "", line[8]) + f";transdecoder_orf_score={score}"
 				if tID in primary["transcript"].values:
 					line[8] = line[8] + ";primary_transcript=True"
