@@ -1,4 +1,4 @@
-import yaml, sys, os, re
+import yaml, sys, os, re, gzip
 import pandas as pd
 from pathlib import Path
 from snakemake.exceptions import WorkflowError
@@ -86,6 +86,28 @@ rsem = []
 # Support both _1/_2 and _R1/_R2 naming conventions for paired-end reads
 pair1_re = re.compile(r"(.+)(_1|_R1)\.fastq\.gz$")
 pair2_re = re.compile(r"(.+)(_2|_R2)\.fastq\.gz$")
+interleaved_re = re.compile(r"/[12]\s*$")
+
+
+def _is_interleaved(path, probe_reads=8):
+	"""True when a single .fastq.gz actually holds BOTH mates, tagged /1 and /2.
+
+	FASTQ regenerated from a BAM (rather than fetched from SRA) come out this
+	way: the filename looks single-end, but the content is interleaved paired-end
+	with the mates shuffled. Treating it as single-end makes RSEM reject the
+	transcriptome BAM ("alignments with inconsistent read lengths"), because it
+	strips the /1 /2 suffix and then sees one read name with two different
+	lengths. Probe the first few headers rather than trusting the filename."""
+	try:
+		with gzip.open(path, "rt") as fh:
+			for i, line in enumerate(fh):
+				if i % 4 == 0 and interleaved_re.search(line):
+					return True
+				if i >= probe_reads * 4:
+					break
+	except OSError:
+		pass  # unreadable/corrupt: fall through to single-end, fastp will complain
+	return False
 # Store mapping of sample names to actual file paths.
 # Each sample dict holds EITHER 'fwd'+'rev' (paired-end) OR 'single' (single-end).
 sample_to_files = {}
@@ -114,14 +136,22 @@ for root, dirs, files in os.walk(rna_seq):
 			sample_to_files[sample_name]['rev'] = os.path.join(root, fi)
 			continue
 
-		# Single-end: a *.fastq.gz that is neither _1/_R1 nor _2/_R2.
-		# sample_name = filename minus the .fastq.gz suffix.
+		# Neither _1/_R1 nor _2/_R2. Usually single-end -- but it may be an
+		# interleaved paired-end file, which only the content reveals.
 		sample_name = re.sub(r"\.fastq\.gz$", "", fi)
-		bams.append(f"{RESULTS_DIR}FILTER/STAR/{sample_name}.STAR_singleend.bamAligned.toTranscriptome.out.bam")
-		rsem.append(f"{RESULTS_DIR}FILTER/rsem_outdir/{sample_name}.isoforms.results")
+		src = os.path.join(root, fi)
 		if sample_name not in sample_to_files:
 			sample_to_files[sample_name] = {}
-		sample_to_files[sample_name]['single'] = os.path.join(root, fi)
+		if _is_interleaved(src):
+			# splitInterleaved writes the mates; the paired rules take it from there.
+			sample_to_files[sample_name]['interleaved'] = src
+			sample_to_files[sample_name]['fwd'] = f"{RESULTS_DIR}FILTER/reads/{sample_name}_1.fastq.gz"
+			sample_to_files[sample_name]['rev'] = f"{RESULTS_DIR}FILTER/reads/{sample_name}_2.fastq.gz"
+			bams.append(f"{RESULTS_DIR}FILTER/STAR/{sample_name}.STAR_pairedend.bamAligned.toTranscriptome.out.bam")
+		else:
+			sample_to_files[sample_name]['single'] = src
+			bams.append(f"{RESULTS_DIR}FILTER/STAR/{sample_name}.STAR_singleend.bamAligned.toTranscriptome.out.bam")
+		rsem.append(f"{RESULTS_DIR}FILTER/rsem_outdir/{sample_name}.isoforms.results")
 	# No `break` (issue #19.8): os.walk must recurse so fastq nested in per-sample
 	# subdirectories are discovered, not only files in the top level of rna_seq.
 
@@ -139,6 +169,10 @@ if not rsem:
 # A sample is either single-end ('single') or paired-end ('fwd'), never both.
 single_sample_names = sorted(n for n, f in sample_to_files.items() if 'single' in f)
 paired_sample_names = sorted(n for n, f in sample_to_files.items() if 'fwd' in f)
+# Subset of paired samples whose mates still have to be split out of one
+# interleaved file; splitInterleaved is constrained to exactly these, so it can
+# never match a sample whose _1/_2 already exist on disk.
+interleaved_sample_names = sorted(n for n, f in sample_to_files.items() if 'interleaved' in f)
 
 # Validate mate completeness (issue #19.9). A paired-end sample must have BOTH
 # mates: an orphan _1/_R1 (fwd only) would KeyError in get_fastq_rev at DAG build,
@@ -262,6 +296,33 @@ rule prepRSEM:
 		-p {threads} \
 		{input} \
 		{params.mrna}
+		"""
+
+rule splitInterleaved:
+	"""Split one interleaved FASTQ into order-matched _1/_2 (tracker #33).
+
+	Only fires for samples _is_interleaved() flagged, i.e. a lone .fastq.gz whose
+	headers carry /1 and /2. Everything downstream then sees an ordinary
+	paired-end sample. Duplicated records (same read emitted once per secondary
+	alignment) are dropped, as are reads whose mate is absent.
+
+	sort spills to $TMPDIR, which the entry script points at results/TMP on
+	disk; the helper refuses a tmpfs TMPDIR outright, because filling a node's
+	RAM this way once OOM-killed an unrelated pipeline controller."""
+	wildcard_constraints:
+		run = _sample_name_constraint(interleaved_sample_names)
+	input:
+		src = lambda wildcards: sample_to_files[wildcards.run]['interleaved']
+	output:
+		fwd = f"{RESULTS_DIR}FILTER/reads/{{run}}_1.fastq.gz",
+		rev = f"{RESULTS_DIR}FILTER/reads/{{run}}_2.fastq.gz"
+	threads: config_dict["Threads"].get("splitInterleaved", 2)
+	params:
+		# filter configs have no Internal: section (unlike the annotate config),
+		# so default rather than KeyError.
+		sort_mem = config_dict.get("Internal", {}).get("splitInterleaved_sort_mem", "2G")
+	shell:"""
+		bash bin/split_interleaved_fastq.sh {input.src} {output.fwd} {output.rev} "$TMPDIR" {params.sort_mem}
 		"""
 
 rule fastp_PAIRED:
