@@ -1,6 +1,7 @@
 import duckdb
 import sys
 import os
+import re
 import pandas as pd
 from fasta_utils import readFasta
 
@@ -18,7 +19,13 @@ def parse_gff(gff:str) -> dict:
 			if line.startswith("#") or line == "\n":
 				continue
 			line = line.strip().split("\t")
-			seq_id = line[8].split(";")[0].split("=")[1]
+			# Pull ID= explicitly rather than assuming it is the first attribute;
+			# GFF3 does not guarantee attribute order, so split(";")[0] could
+			# return Parent=/Name= and mislabel the gene/transcript.
+			m = re.search(r"(?:^|;)ID=([^;]+)", line[8])
+			if not m:
+				continue
+			seq_id = m.group(1)
 			if line[2] == "gene":
 				gene_id  = seq_id
 			if line[2] == "mRNA":
@@ -81,8 +88,13 @@ clustered_regions = duckdb.sql(
 	"fin1, " +
 	"start2, " +
 	"fin2, " +
-	"LAG(fin1) OVER () AS prev_end_value " +
-"FROM GroupedProteins ").to_df()
+	# LAG needs a defined window order, otherwise prev_end_value is
+	# nondeterministic and will not line up with the row order the Python
+	# loop below iterates in. Order the window AND the outer result
+	# identically so prev_end_value is always the fin1 of the preceding row.
+	"LAG(fin1) OVER (ORDER BY chromosome, gene, start1, fin1, prot) AS prev_end_value " +
+"FROM GroupedProteins " +
+"ORDER BY chromosome, gene, start1, fin1, prot ").to_df()
 
 # Set cluster membership within genes based on segmentation threshold
 clustered_regions["cluster"] = None
