@@ -123,9 +123,9 @@ pasaPrep:
   ncpus: 4
   memory: 16g
 pasa:
-  ncpus: 32
-  threads: 32
-  memory: 128g
+  ncpus: 8                # was 32: sacct Osa pasa = 1.94 avg CPUs (classify_alt_splice_isoforms is single-threaded by design); 8 keeps ~4x headroom for the parallel assembly steps
+  threads: 8
+  memory: 64g             # was 128g: sqlite DB is 0.7-1.4GB on disk, queried not loaded
 addXS:
   ncpus: 12
   memory: 48g
@@ -199,8 +199,8 @@ recombineEVM:
   ncpus: 4
   memory: 16g
 pasaPost:
-  ncpus: 48
-  threads: 48
+  ncpus: 8                # was 48: sacct Osa pasaPost = 1.12 avg CPUs over 11.7h (annotation_compare is near-serial); 8 keeps ~7x headroom
+  threads: 8
   memory: 64g              # actual ~11h/<64g in practice; was 192g (over-provisioned)
   time: "1-00:00:00"       # was inheriting 3-day __default__; real runs finish in ~11h
 agat_clean_final:
