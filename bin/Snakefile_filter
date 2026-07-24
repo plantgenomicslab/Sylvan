@@ -80,10 +80,16 @@ rsem = []
 # Support both _1/_2 and _R1/_R2 naming conventions for paired-end reads
 pair1_re = re.compile(r"(.+)(_1|_R1)\.fastq\.gz$")
 pair2_re = re.compile(r"(.+)(_2|_R2)\.fastq\.gz$")
-# Store mapping of sample names to actual file paths
+# Store mapping of sample names to actual file paths.
+# Each sample dict holds EITHER 'fwd'+'rev' (paired-end) OR 'single' (single-end).
 sample_to_files = {}
 for root, dirs, files in os.walk(rna_seq):
 	for fi in files:
+		# Only consider gzipped FASTQ; skip sidecar files (e.g. *.samtools.log,
+		# .done markers) and hidden files so they are never mistaken for samples.
+		if fi.startswith('.') or not fi.endswith('.fastq.gz'):
+			continue
+
 		match1 = pair1_re.match(fi)
 		if match1:
 			sample_name = match1.group(1)
@@ -92,6 +98,7 @@ for root, dirs, files in os.walk(rna_seq):
 			if sample_name not in sample_to_files:
 				sample_to_files[sample_name] = {}
 			sample_to_files[sample_name]['fwd'] = os.path.join(root, fi)
+			continue
 
 		match2 = pair2_re.match(fi)
 		if match2:
@@ -99,18 +106,38 @@ for root, dirs, files in os.walk(rna_seq):
 			if sample_name not in sample_to_files:
 				sample_to_files[sample_name] = {}
 			sample_to_files[sample_name]['rev'] = os.path.join(root, fi)
+			continue
 
-		# Single-end support...
-		#elif se_re.match(fi):
-		#	os.system(f"ln -sf {os.path.join(root,fi)} GETA/fastp/single/{fi}")
-		#	bams.append(f"GETA/HiSat2/single/hisat2.{basename.group(1)}.bam")
+		# Single-end: a *.fastq.gz that is neither _1/_R1 nor _2/_R2.
+		# sample_name = filename minus the .fastq.gz suffix.
+		sample_name = re.sub(r"\.fastq\.gz$", "", fi)
+		bams.append(f"{RESULTS_DIR}FILTER/STAR/{sample_name}.STAR_singleend.bamAligned.toTranscriptome.out.bam")
+		rsem.append(f"{RESULTS_DIR}FILTER/rsem_outdir/{sample_name}.isoforms.results")
+		if sample_name not in sample_to_files:
+			sample_to_files[sample_name] = {}
+		sample_to_files[sample_name]['single'] = os.path.join(root, fi)
 	break
+
+# Classify samples so the single/paired RSEM rules never both match the same
+# {run}.isoforms.results target (see wildcard_constraints on the RSEM rules).
+# A sample is either single-end ('single') or paired-end ('fwd'), never both.
+single_sample_names = sorted(n for n, f in sample_to_files.items() if 'single' in f)
+paired_sample_names = sorted(n for n, f in sample_to_files.items() if 'fwd' in f)
+
+def _sample_name_constraint(names):
+	# Regex matching exactly the given sample names. When the list is empty the
+	# pattern 'a^' matches nothing, so the corresponding RSEM rule is inert
+	# (keeps all-single and all-paired directories unambiguous).
+	return "|".join(re.escape(n) for n in names) if names else r"a^"
 
 def get_fastq_fwd(wildcards):
 	return sample_to_files[wildcards.run]['fwd']
 
 def get_fastq_rev(wildcards):
 	return sample_to_files[wildcards.run]['rev']
+
+def get_fastq_single(wildcards):
+	return sample_to_files[wildcards.run]['single']
 
 pep_string = re.sub(r"\.fa.*$", "", config_dict["Input"]["anot_gff"] + ".fa")
 pep_string = re.sub(r"^.*\/", "", pep_string)
@@ -266,7 +293,39 @@ rule STAR_paired:
 			--alignEndsType EndToEnd
 			"""
 
+rule STAR_single:
+	input:
+		g  = f"{RESULTS_DIR}FILTER/STAR/SA",
+		single = get_fastq_single
+	output: temp(f"{RESULTS_DIR}FILTER/STAR/{{run}}.STAR_singleend.bamAligned.toTranscriptome.out.bam")
+	threads: config_dict["Threads"]["STAR"]
+	params:
+		results_dir = RESULTS_DIR
+	shell: """
+			micromamba activate alignment
+			STAR --runMode alignReads \
+			--runThreadN {threads} \
+			--outFilterMultimapNmax 10 \
+			--alignIntronMin 25 \
+			--alignIntronMax 25000 \
+			--genomeDir {params.results_dir}FILTER/STAR \
+			--outSAMtype BAM SortedByCoordinate \
+			--limitBAMsortRAM 216000000000 \
+			--outBAMsortingBinsN 200 \
+			--outSAMattributes XS \
+			--outSAMstrandField intronMotif \
+			--outFileNamePrefix {params.results_dir}FILTER/STAR/{wildcards.run}.STAR_singleend.bam \
+			--outTmpDir {params.results_dir}FILTER/STAR/{wildcards.run}_STARtmp \
+			--readFilesCommand gunzip -c \
+			--readFilesIn {input.single} \
+			--quantMode TranscriptomeSAM \
+			--quantTranscriptomeSAMoutput BanSingleEnd_BanIndels_ExtendSoftclip \
+			--alignEndsType EndToEnd
+			"""
+
 rule calculateRSEMExpression_PAIRED:
+	wildcard_constraints:
+		run = _sample_name_constraint(paired_sample_names)
 	input:
 		prep = f"{anot_mrna}.seq",
 		bam = f"{RESULTS_DIR}FILTER/STAR/{{run}}.STAR_pairedend.bamAligned.toTranscriptome.out.bam"
@@ -283,10 +342,35 @@ rule calculateRSEMExpression_PAIRED:
 		--paired-end {input.bam} {params.mrna} {params.results_dir}FILTER/rsem_outdir/{wildcards.run}
 		"""
 
+rule calculateRSEMExpression_SINGLE:
+	wildcard_constraints:
+		run = _sample_name_constraint(single_sample_names)
+	input:
+		prep = f"{anot_mrna}.seq",
+		bam = f"{RESULTS_DIR}FILTER/STAR/{{run}}.STAR_singleend.bamAligned.toTranscriptome.out.bam"
+	output: f"{RESULTS_DIR}FILTER/rsem_outdir/{{run}}.isoforms.results"
+	threads: config_dict["Threads"]["calculateRSEMExpression"]
+	params:
+		mrna = anot_mrna,
+		results_dir = RESULTS_DIR
+	shell:"""
+		micromamba activate filter
+		rsem-calculate-expression \
+		--no-bam-output -p {threads} \
+		--alignments {input.bam} {params.mrna} {params.results_dir}FILTER/rsem_outdir/{wildcards.run}
+		"""
+
 rule mergeRSEM:
 	input: rsem
 	output: f"{RESULTS_DIR}FILTER/rsem_outdir/RSEM.isoforms.results"
 	run:
+		if not input:
+			raise ValueError(
+				"mergeRSEM: no RSEM isoforms.results inputs — no RNA-seq samples were "
+				f"detected under Input.rna_seq='{rna_seq}'. Ensure the directory contains "
+				"single-end reads (<name>.fastq.gz) or paired-end reads "
+				"(<name>_1/_2 or <name>_R1/_R2.fastq.gz)."
+			)
 		num_inputs = len(input)
 		summary = pd.read_csv(input.pop(0), sep="\t", usecols=["transcript_id", "TPM"])
 		
