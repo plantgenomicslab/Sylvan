@@ -71,7 +71,12 @@ shell.prefix(
     f'  ) 9>"{_HOOK_CACHE}.lock" || true; '
     f'fi; '
     f'source "{_HOOK_CACHE}" 2>/dev/null || eval "$(/usr/local/bin/micromamba shell hook -s bash 2>/dev/null)" || true; '
-    'set -u; '
+    'set -euo pipefail; '  # issue #16: strict mode for rule bodies, matching the
+    # Snakefile_annotate rollout. The hook setup above is errexit-safe (runs under
+    # `set +u` with `|| true` guards); errexit/pipefail apply only to each rule's own
+    # commands, so a mid-block failure (e.g. a partial gff3_file_to_proteins.pl or a
+    # zero-row coverage grep) aborts the rule instead of being masked by the last
+    # command's exit status. Stage the rollout toydata -> canary -> fleet.
 )
 
 # Get rnaseq run wildcards
@@ -117,7 +122,8 @@ for root, dirs, files in os.walk(rna_seq):
 		if sample_name not in sample_to_files:
 			sample_to_files[sample_name] = {}
 		sample_to_files[sample_name]['single'] = os.path.join(root, fi)
-	break
+	# No `break` (issue #19.8): os.walk must recurse so fastq nested in per-sample
+	# subdirectories are discovered, not only files in the top level of rna_seq.
 
 # Fail fast when no RNA-seq fastq were found. Otherwise bams/rsem stay empty and
 # downstream mergeSTAR/mergeRSEM run on empty input, silently dropping expression
@@ -134,6 +140,26 @@ if not rsem:
 single_sample_names = sorted(n for n, f in sample_to_files.items() if 'single' in f)
 paired_sample_names = sorted(n for n, f in sample_to_files.items() if 'fwd' in f)
 
+# Validate mate completeness (issue #19.9). A paired-end sample must have BOTH
+# mates: an orphan _1/_R1 (fwd only) would KeyError in get_fastq_rev at DAG build,
+# while an orphan _2/_R2 (rev only) is never added to bams/rsem and is silently
+# dropped from expression evidence. Fail fast with a clear list instead.
+_incomplete_pairs = []
+for _name, _files in sorted(sample_to_files.items()):
+	if 'single' in _files:
+		continue
+	_has_fwd = 'fwd' in _files
+	_has_rev = 'rev' in _files
+	if _has_fwd != _has_rev:
+		_missing = 'reverse (_2/_R2)' if _has_fwd else 'forward (_1/_R1)'
+		_incomplete_pairs.append(f"{_name}: missing {_missing} mate")
+if _incomplete_pairs:
+	raise WorkflowError(
+		f"Incomplete paired-end RNA-seq sample(s) under Input.rna_seq='{rna_seq}':\n  "
+		+ "\n  ".join(_incomplete_pairs)
+		+ "\nProvide both mates (_1/_2 or _R1/_R2), or remove the orphan file."
+	)
+
 def _sample_name_constraint(names):
 	# Regex matching exactly the given sample names. When the list is empty the
 	# pattern 'a^' matches nothing, so the corresponding RSEM rule is inert
@@ -149,7 +175,11 @@ def get_fastq_rev(wildcards):
 def get_fastq_single(wildcards):
 	return sample_to_files[wildcards.run]['single']
 
-pep_string = re.sub(r"\.fa.*$", "", config_dict["Input"]["anot_gff"] + ".fa")
+# Derive the peptide filename base from anot_gff. Strip only the trailing ".fa"
+# just appended — anchored with `$` (issue #19.11). A bare `\.fa.*$` matched the
+# FIRST ".fa"/".fasta" anywhere in the path and truncated early (e.g.
+# ".../my.fasta_annot.gff3" collapsed to ".../my").
+pep_string = re.sub(r"\.fa$", "", config_dict["Input"]["anot_gff"] + ".fa")
 pep_string = re.sub(r"^.*\/", "", pep_string)
 
 os.makedirs(f"{RESULTS_DIR}logs", exist_ok=True)
@@ -198,7 +228,11 @@ rule makeCDSPep:
 
 		# Extract full mRNA (exons incl. UTRs) for RSEM — must match STAR transcriptome BAM lengths
 		micromamba activate annotation
-		gffread {params.gff} -g {params.genome} -w {output.mrna} || true
+		# No `|| true` here (issue #16): a failed/empty gffread must abort. A 0-byte
+		# mrna silently kills all RSEM-based expression evidence downstream, so also
+		# assert the file is non-empty under strict mode.
+		gffread {params.gff} -g {params.genome} -w {output.mrna}
+		[ -s {output.mrna} ]
 		"""
 
 rule PfamScan:
@@ -253,7 +287,10 @@ rule fastp_PAIRED:
 		"""
 
 rule STAR_index:
-	output: temp(f"{RESULTS_DIR}FILTER/STAR/SA")
+	# Not temp() (issue #19.10): marking the genome index SA as temporary deleted it
+	# after the last consuming STAR job, forcing a full genomeGenerate on every wave
+	# retry. Keep it so re-runs reuse the index.
+	output: f"{RESULTS_DIR}FILTER/STAR/SA"
 	threads: config_dict["Threads"]["STAR_index"]
 	params:
 		g = config_dict["Input"]["genome"],
@@ -289,8 +326,8 @@ rule STAR_paired:
 			--alignIntronMin 25 \
 			--alignIntronMax 25000 \
 			--genomeDir {params.results_dir}FILTER/STAR \
-			--outSAMtype BAM SortedByCoordinate \
-			--limitBAMsortRAM 216000000000 \
+			--outSAMtype None \
+			--limitBAMsortRAM 105000000000 \
 			--outBAMsortingBinsN 200 \
 			--outSAMattributes XS \
 			--outSAMstrandField intronMotif \
@@ -319,8 +356,8 @@ rule STAR_single:
 			--alignIntronMin 25 \
 			--alignIntronMax 25000 \
 			--genomeDir {params.results_dir}FILTER/STAR \
-			--outSAMtype BAM SortedByCoordinate \
-			--limitBAMsortRAM 216000000000 \
+			--outSAMtype None \
+			--limitBAMsortRAM 105000000000 \
 			--outBAMsortingBinsN 200 \
 			--outSAMattributes XS \
 			--outSAMstrandField intronMotif \
@@ -381,17 +418,29 @@ rule mergeRSEM:
 				"single-end reads (<name>.fastq.gz) or paired-end reads "
 				"(<name>_1/_2 or <name>_R1/_R2.fastq.gz)."
 			)
-		num_inputs = len(input)
-		summary = pd.read_csv(input.pop(0), sep="\t", usecols=["transcript_id", "TPM"])
-		
+		# Accumulate over ALL inputs inside the try (issue #19.7). Previously the first
+		# file was read via input.pop(0) OUTSIDE the try, so a 0-byte first RSEM file
+		# crashed with an opaque EmptyDataError instead of being skipped with a warning.
+		summary = None
+		num_inputs = 0
 		for result in input:
 			try:
 				current = pd.read_csv(result, sep="\t", usecols=["transcript_id", "TPM"])
-				summary["TPM"] = summary["TPM"] + current["TPM"]
 			except (pd.errors.EmptyDataError, ValueError, KeyError) as e:
 				print(f"WARNING: Error parsing {result}: {e}")
-				num_inputs -= 1
-		
+				continue
+			if summary is None:
+				summary = current
+			else:
+				summary["TPM"] = summary["TPM"] + current["TPM"]
+			num_inputs += 1
+
+		if summary is None or num_inputs == 0:
+			raise ValueError(
+				"mergeRSEM: no RSEM isoforms.results file could be parsed — every input "
+				"was empty or malformed. Check the RSEM step for all samples."
+			)
+
 		summary["TPM"] = summary["TPM"]/num_inputs
 		summary.to_csv(output[0], sep="\t", index=False, header=True)
 
@@ -497,7 +546,9 @@ rule combineBlast:
 	output: f"{RESULTS_DIR}FILTER/BLASTP.OUT.TMP"
 	params:
 		results_dir = RESULTS_DIR
-	shell: "cat {params.results_dir}FILTER/splitPep/" + pep_string + ".part_*.blast.tmp > {output}"
+	# cat the declared {input} shards, not a `part_*.blast.tmp` glob (issue #19.12):
+	# the glob absorbed stale shards left by a prior attempt with a different split count.
+	shell: "cat {input} > {output}"
 		#| awk '{{if ($13 > " + str(config_dict["Cutoff"]["blast"]) + "){{print $0}}}}' > {output}"
 
 rule blastRex:
@@ -526,7 +577,8 @@ rule combineBlastRex:
 	output: f"{RESULTS_DIR}FILTER/BLASTP.OUT.Rex"
 	params:
 		results_dir = RESULTS_DIR
-	shell: "cat {params.results_dir}FILTER/splitPep/" + pep_string + ".part_*.blastRex.tmp > {output}" 
+	# cat the declared {input} shards, not a `part_*.blastRex.tmp` glob (issue #19.12).
+	shell: "cat {input} > {output}"
 		#| awk '{{if ($13 > " + str(config_dict["Cutoff"]["blastRex"])+ "){{print $0}}}}' > {output}"
 
 #TODO: Add repeat coverage calculation... add to config as well

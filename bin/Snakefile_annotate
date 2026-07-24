@@ -231,6 +231,31 @@ if not helixer_model_dir or helixer_model_dir == "placeholder":
 	helixer_model_dir = "/usr/local/src/Helixer/models/"  # Container default path
 neighbor_gff = config_dict["Input"]["liftoff"]["neighbor_gff"]
 neighbor_fasta = config_dict["Input"]["liftoff"]["neighbor_fasta"]
+
+def _find_liftoff_refs(path, extensions):
+	"""Mirror the `find <path> -regex ...` used inside prepare_liftoff so Snakemake
+	tracks the neighbour reference files as rule inputs (issue #3). Without this the
+	rule declares no input:, so replacing a corrupted neighbour reference in place can
+	never re-fire the rule (--rerun-triggers mtime has nothing to compare against; the
+	params path string is unchanged). Returns a sorted list of files under `path`
+	(recursively, matching a directory the same way `find` does) whose extension is in
+	`extensions`; falls back to a single file when `path` itself is a file."""
+	exts = tuple("." + e for e in extensions)
+	matches = []
+	if os.path.isdir(path):
+		for root, _dirs, files in os.walk(path):
+			for fn in files:
+				if fn.endswith(exts):
+					matches.append(os.path.join(root, fn))
+	elif os.path.isfile(path) and path.endswith(exts):
+		matches.append(path)
+	return sorted(matches)
+
+# Extension sets mirror the find regexes in prepare_liftoff exactly:
+#   fasta: .fa|.fasta|.fna|.fas|.fsa|.seq   gff: .gff|.gff3
+liftoff_neighbor_fasta_refs = _find_liftoff_refs(neighbor_fasta, ["fa", "fasta", "fna", "fas", "fsa", "seq"])
+liftoff_neighbor_gff_refs = _find_liftoff_refs(neighbor_gff, ["gff", "gff3"])
+
 augustus_species = config_dict["Input"]["geta"]["augustus_species"]
 geta_RMspecies = config_dict["Input"]["geta"]["RM_species"]
 geta_pfamdb = config_dict["Input"]["geta"]["pfamdb"]
@@ -448,7 +473,10 @@ rule RepeatModeler:
 
 		# RepeatModeler 2.0.5 may leave output in RM_* subdir; copy to expected location
 		if [ ! -f {params.results_dir}GETA/RepeatMasker/repeatModeler/species-families.fa ]; then
-		  RM_DIR=$(ls -td {params.results_dir}GETA/RepeatMasker/repeatModeler/RM_*/ 2>/dev/null | head -1)
+		  # `|| true` inside the substitution: with zero RM_* matches `ls` exits non-zero,
+		  # which under `set -euo pipefail` (issue #19.5) would abort the rule before the
+		  # empty-output `touch` fallback below (small/repeat-free genomes never reach it).
+		  RM_DIR=$(ls -td {params.results_dir}GETA/RepeatMasker/repeatModeler/RM_*/ 2>/dev/null | head -1 || true)
 		  if [ -n "$RM_DIR" ] && [ -f "$RM_DIR/consensi.fa" ]; then
 		    cp "$RM_DIR/consensi.fa" {params.results_dir}GETA/RepeatMasker/repeatModeler/species-families.fa
 		    cp "$RM_DIR/families.stk" {params.results_dir}GETA/RepeatMasker/repeatModeler/species-families.stk
@@ -1097,6 +1125,11 @@ rule merge_geneRegion2Genewise:
 				except:
 					print(f"Error parsing {f}", file=sys.stderr)
 					continue
+				# seq/start/ID carry over from the most recent "Bits" header into the
+				# gff blocks that follow it. Initialise them (issue #19.6) so a file
+				# whose first block is NOT a Bits header does not raise NameError; the
+				# gff branch also skips until a header has been seen.
+				seq, start, ID = None, None, None
 				for block in content:
 					if block.startswith("Bits"):
 						align_line = block.split('\n')[1]
@@ -1110,6 +1143,10 @@ rule merge_geneRegion2Genewise:
 								info.write(f"{seq}\t{locus}\t{parts[0]}\n")
 
 					else:
+						# No preceding Bits header -> no coordinate context; skip
+						# rather than crash on the unset offset (issue #19.6).
+						if seq is None or start is None:
+							continue
 						gff_lines = block.split('\n')
 						for gff_line in gff_lines:
 							if gff_line:
@@ -2486,6 +2523,15 @@ rule helixer:
 		'''
 
 rule prepare_liftoff:
+	# input: the neighbour reference GFFs/FASTAs are declared here (issue #3) so
+	# Snakemake tracks their mtimes and a replaced/repaired reference re-fires the
+	# rule. Before this they arrived only as `params` (a path string), so once
+	# combined.{fasta,gff3} existed the rule could never re-run. The rule body still
+	# uses params.neighbor_* (the directory paths) for its `find`; input.* is for the
+	# DAG only. Empty lists (no refs found) preserve the old no-input behaviour.
+	input:
+		neighbor_fasta = liftoff_neighbor_fasta_refs,
+		neighbor_gff = liftoff_neighbor_gff_refs
 	output:
 		f"{RESULTS_DIR}LIFTOVER/LiftOff/combined.fasta",
 		f"{RESULTS_DIR}LIFTOVER/LiftOff/combined.gff3"
@@ -2753,12 +2799,16 @@ rule pasaPrep:
 
 		{params.pasa_home}/misc_utilities/SAM_to_gtf.pl {params.results_dir}TRANSCRIPT/PASA/evigene.sam > {params.results_dir}TRANSCRIPT/PASA/evigene.gtf
 
-		sed -i 's/\\ .*//g' {input.spades}
+		# Clean spades transcript headers (drop everything after the first space) into a
+		# COPY, not in place (issue #19.3): `sed -i {input.spades}` mutated the evigene
+		# rule's declared output, violating input immutability and confusing
+		# --rerun-triggers mtime. minimap2 above already consumed the original headers.
+		sed 's/\\ .*//g' {input.spades} > {params.results_dir}TRANSCRIPT/PASA/spades.okay.clean.tr
 
 		{params.pasa_home}/misc_utilities/gff3_file_to_proteins.pl \
 		{input.helixer} {input.genome_fasta} cDNA > {params.results_dir}AB_INITIO/Helixer/helixer.cdna.fasta
 
-		cat {params.results_dir}AB_INITIO/Helixer/helixer.cdna.fasta {input.spades} > {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta
+		cat {params.results_dir}AB_INITIO/Helixer/helixer.cdna.fasta {params.results_dir}TRANSCRIPT/PASA/spades.okay.clean.tr > {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta
 
 		cp {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta {params.results_dir}TRANSCRIPT/PASA/transcripts_for_pasa.fasta.clean
 
@@ -3120,8 +3170,10 @@ rule runEVM:
 		CMD_FILE="commands.{wildcards.evm_num}.list"
 
 		if [ -s "$CMD_FILE" ]; then
-			# Execute the script, and if it fails, print an error and exit with a non-zero status
-			/bin/bash "$CMD_FILE" || (echo "Error executing $CMD_FILE." && exit 1)
+			# `bash -e`: a child bash does NOT inherit the parent's errexit, so without
+			# -e a failed EVM chunk mid-list is masked by the last command's exit status
+			# and a partial EVM result passes with .ok touched (issue #19.1).
+			/bin/bash -e "$CMD_FILE" || (echo "Error executing $CMD_FILE." && exit 1)
 		fi
 		
 		touch "{output}"
@@ -3153,7 +3205,10 @@ rule recombineEVM:
 			--output evm.out \
 			--genome $GENOME_FILE
 
-			find . -regex '.*\\/evm.out.gff3' -exec cat {{}} \\; > {output}.raw
+			# Scope the search to the EVM partition dir (issue #19.2). `find .` ran from
+			# the run root and would concatenate stray evm.out.gff3 from backups/TMP/old
+			# experiments into the merged output.
+			find {params.results_dir_abs} -regex '.*\\/evm.out.gff3' -exec cat {{}} \\; > {output}.raw
 
 			# Remove phantom genes with coordinates beyond chromosome boundaries
 			# (safety net for EVM partition merge issues)
@@ -3179,6 +3234,13 @@ rule pasaPost:
 			WORKDIR=$(pwd)
 
 			cd {params.pasa_dir}
+
+			# Clear stale PASA checkpoints before the annotation-compare update (issue
+			# #19.4), mirroring the pasa rule. A prior pasaPost that TIMEOUT'd (10-day
+			# cap) leaves `*.ok` markers; PASA then skips already-"done" stages on retry
+			# and an incomplete update passes. `|| true` keeps this errexit-safe.
+			rm -f __pasa_*_chkpts/*.ok || true
+			rm -f __pasa_*.sqlite_SQLite_chkpts/*.ok || true
 
 			export TMPDIR={params.results_dir}TMP
 			export SLURM_TMPDIR={params.results_dir}TMP
