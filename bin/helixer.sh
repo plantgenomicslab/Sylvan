@@ -84,6 +84,9 @@ echo "Model:      $MODEL_FILE"
 echo "Container:  $SIF"
 echo "==========================================="
 
+# SINGULARITY_ARGS must word-split into separate flags (e.g. --nv -B /path), so it
+# is intentionally unquoted here.
+# shellcheck disable=SC2086
 singularity exec $SINGULARITY_ARGS "$SIF" bash -c "
 eval \"\$(/usr/local/bin/micromamba shell hook -s bash)\"
 micromamba activate helixer
