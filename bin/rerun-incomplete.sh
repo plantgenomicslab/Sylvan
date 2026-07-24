@@ -34,6 +34,7 @@ snakemake -p \
 	--jobs 150 \
 	--latency-wait 30 \
 	--cluster "$CLUSTER_CMD" \
+	--cluster-status "python3 bin/cluster_status.py" \
 		"$@"
 
 # Generate report after run
