@@ -773,6 +773,12 @@ checkpoint STAR_split:
 def getSplitedSam(wildcards):
 	ck_output = checkpoints.STAR_split.get(**wildcards).output[1]
 	SMP, = glob_wildcards(os.path.join(ck_output, "{splited}.sam"))
+	# {splited} is unconstrained, so it matches across "/" and would pick up the
+	# sub-region SAMs an interrupted Sam2Transfrag left in its scratch directory,
+	# turning each one into a phantom split (and duplicating transfrags, since
+	# mergeTransfrag concatenates without de-duplication). Only top-level SAMs in
+	# the checkpoint directory are splits.
+	SMP = [s for s in SMP if "/" not in s]
 	inputs = expand(os.path.join(ck_output, "{splited}.gtf"), splited=SMP)
 	return inputs
 
@@ -820,7 +826,9 @@ rule Sam2Transfrag:
 				"$1" > "$2"
 		}}
 		if [ "$span" -gt 1000000 ]; then
-			SUB="$OUTDIR/.subsplit_$SPLITED"
+			# Scratch lives outside $OUTDIR: the checkpoint globs $OUTDIR for splits, and
+			# an interrupted run leaves this directory behind.
+			SUB={params.results_dir}GETA/transcript/subsplit_tmp/$SPLITED
 			rm -rf "$SUB"; mkdir -p "$SUB"
 			python3 bin/split_large_sam.py {input} "$SUB" --max-span {params.max_sub_span}
 			: > {output}
