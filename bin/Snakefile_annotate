@@ -831,20 +831,32 @@ rule Sam2Transfrag:
 			SUB={params.results_dir}GETA/transcript/subsplit_tmp/$SPLITED
 			rm -rf "$SUB"; mkdir -p "$SUB"
 			python3 bin/split_large_sam.py {input} "$SUB" --max-span {params.max_sub_span}
-			: > {output}
-			: > "$OUTDIR/$SPLITED.intron"
-			: > "$OUTDIR/$SPLITED.base_depth"
+			# Accumulate into .part and move at the end. Truncating {output} up front
+			# meant any interruption left a 0-byte .gtf, and a 0-byte output "exists",
+			# so the split looked finished forever and mergeTransfrag concatenated
+			# nothing for it -- the very evidence loss this rule exists to fix.
+			for f in {output} "$OUTDIR/$SPLITED.intron" "$OUTDIR/$SPLITED.base_depth"; do
+				: > "$f.part"
+			done
 			for s in "$SUB"/*.sam; do
 				[ -s "$s" ] || continue
 				run_s2t "$s" "$s.gtf" "$s.intron" "$s.base_depth"
-				cat "$s.gtf"        >> {output}
-				cat "$s.intron"     >> "$OUTDIR/$SPLITED.intron"
-				cat "$s.base_depth" >> "$OUTDIR/$SPLITED.base_depth"
+				cat "$s.gtf"        >> {output}.part
+				cat "$s.intron"     >> "$OUTDIR/$SPLITED.intron.part"
+				cat "$s.base_depth" >> "$OUTDIR/$SPLITED.base_depth.part"
 			done
+			mv -f {output}.part {output}
+			mv -f "$OUTDIR/$SPLITED.intron.part" "$OUTDIR/$SPLITED.intron"
+			mv -f "$OUTDIR/$SPLITED.base_depth.part" "$OUTDIR/$SPLITED.base_depth"
 			echo "Sam2Transfrag: $SPLITED (${{span}} bp) split into $(ls "$SUB"/*.sam 2>/dev/null | wc -l) sub-regions, $(wc -l < {output}) transfrag lines" >&2
 			rm -rf "$SUB"
 		else
-			run_s2t {input} {output} "$OUTDIR/$SPLITED.intron" "$OUTDIR/$SPLITED.base_depth"
+			# Same reason as above: on the direct path an interruption used to leave a
+			# partially written .gtf, which reads as real content.
+			run_s2t {input} {output}.part "$OUTDIR/$SPLITED.intron.part" "$OUTDIR/$SPLITED.base_depth.part"
+			mv -f {output}.part {output}
+			mv -f "$OUTDIR/$SPLITED.intron.part" "$OUTDIR/$SPLITED.intron"
+			mv -f "$OUTDIR/$SPLITED.base_depth.part" "$OUTDIR/$SPLITED.base_depth"
 		fi
 		"""
 
