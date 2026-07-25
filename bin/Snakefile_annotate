@@ -670,14 +670,25 @@ rule STAR_single:
 		--outFilterMatchNminOverLread 0.3 \
 		--outReadsUnmapped Fastx \
 		--genomeDir {params.results_dir}GETA/STAR \
-		--outSAMtype BAM SortedByCoordinate \
+		--outSAMtype BAM Unsorted \
 		--outSAMattributes XS \
 		--outSAMstrandField intronMotif \
-		--limitBAMsortRAM 105000000000 \
 		--outFileNamePrefix {params.results_dir}GETA/STAR/single/STAR_single.{wildcards.run}.bam \
 		--readFilesCommand zcat \
 		-c \
 		--readFilesIn {input.single}
+
+		# STAR aborts if --limitBAMsortRAM is short of what its in-RAM coordinate
+		# sort needs (120 GB+ on the largest libraries), and raising the pin means a
+		# SLURM request that will not fit a packed 256 GB node. samtools streams the
+		# sort at threads x -m instead. -T stays on GPFS: /tmp here is RAM-backed.
+		samtools sort \
+			-@ {threads} \
+			-m 1G \
+			-T {params.results_dir}GETA/STAR/single/STAR_single.{wildcards.run}.sorttmp \
+			-o {params.results_dir}GETA/STAR/single/STAR_single.{wildcards.run}.bamAligned.sortedByCoord.out.bam \
+			{params.results_dir}GETA/STAR/single/STAR_single.{wildcards.run}.bamAligned.out.bam
+		rm {params.results_dir}GETA/STAR/single/STAR_single.{wildcards.run}.bamAligned.out.bam
 
 		sambamba markdup \
 			--nthreads={params.threads_half} \
@@ -772,28 +783,60 @@ rule Sam2Transfrag:
 	output: f"{RESULTS_DIR}GETA/transcript/splited_sam_out/{{splited}}.gtf"
 	params:
 		args = config_dict["Internal"]["sam2transfrag"],
+		max_sub_span = config_dict.get("Sam2Transfrag", {}).get("max_sub_span", 800000),
 		results_dir = RESULTS_DIR
 	shell:
 		"""
 		micromamba activate base
-		# #24: sam2transfrag's transfrag search is O(n^2)+ in region span. Deep single-end
-		# RNA-seq gives pervasive coverage, so some splits span many Mb and never finish.
-		# Skip splits whose region span exceeds the threshold (empty .gtf; mergeTransfrag
-		# tolerates it and other evidence still covers the region). Operator decision: 1 Mb.
-		splited="{wildcards.splited}"
-		coords="${{splited##*.}}"
+		# #24: sam2transfrag's transfrag search grows super-linearly with region span,
+		# and GETA's first-pass splitter only cuts where nothing aligns for >=10 bp, so
+		# deep RNA-seq leaves splits of several Mb that never finish.
+		#
+		# This used to emit an empty .gtf for those. Measured on Osa that discarded
+		# transfrag evidence over 95.6% of the genome (103 of 1,028 splits held 357 of
+		# 374 Mb), which shows up downstream as imprecise exon boundaries.
+		#
+		# Raising sam2transfrag's own cut thresholds does not help -- a 2.43 Mb split
+		# timed out at 30 min under --max_expressed_base_depth 50, 200 and 1000 alike,
+		# at a flat 31 MB RSS. Span binds, not depth. Splitting that same file into
+		# three ~810 kb pieces let all three finish. So: split, then concatenate.
+		# Sub-regions are cut at low-coverage points (between genes where the data
+		# allows), the same tactic that fixed psiClass in #25.
+		#
+		# Kept inside the rule so the checkpoint DAG and the one-gtf-per-split output
+		# contract are unchanged. Reads are routed by POS, so nothing is duplicated --
+		# mergeTransfrag concatenates without de-duplication.
+		SPLITED="{wildcards.splited}"
+		OUTDIR={params.results_dir}GETA/transcript/splited_sam_out
+		coords="${{SPLITED##*.}}"
 		span=$(( ${{coords#*-}} - ${{coords%-*}} ))
-		if [ "$span" -gt 1000000 ]; then
-			echo "Sam2Transfrag: SKIP $splited (region span ${{span}} bp > 1 Mb; see #24)" >&2
-			: > {output}
-		else
+		run_s2t () {{   # $1 = input sam, $2 = gtf out, $3 = intron out, $4 = base_depth out
 			sam2transfrag \
 				--no_strand_specific \
 				--no_PE_sequencing \
 				{params.args} \
-				--intron_info_out {params.results_dir}GETA/transcript/splited_sam_out/{wildcards.splited}.intron \
-				--base_depth_out {params.results_dir}GETA/transcript/splited_sam_out/{wildcards.splited}.base_depth \
-				{input} > {output}
+				--intron_info_out "$3" \
+				--base_depth_out "$4" \
+				"$1" > "$2"
+		}}
+		if [ "$span" -gt 1000000 ]; then
+			SUB="$OUTDIR/.subsplit_$SPLITED"
+			rm -rf "$SUB"; mkdir -p "$SUB"
+			python3 bin/split_large_sam.py {input} "$SUB" --max-span {params.max_sub_span}
+			: > {output}
+			: > "$OUTDIR/$SPLITED.intron"
+			: > "$OUTDIR/$SPLITED.base_depth"
+			for s in "$SUB"/*.sam; do
+				[ -s "$s" ] || continue
+				run_s2t "$s" "$s.gtf" "$s.intron" "$s.base_depth"
+				cat "$s.gtf"        >> {output}
+				cat "$s.intron"     >> "$OUTDIR/$SPLITED.intron"
+				cat "$s.base_depth" >> "$OUTDIR/$SPLITED.base_depth"
+			done
+			echo "Sam2Transfrag: $SPLITED (${{span}} bp) split into $(ls "$SUB"/*.sam 2>/dev/null | wc -l) sub-regions, $(wc -l < {output}) transfrag lines" >&2
+			rm -rf "$SUB"
+		else
+			run_s2t {input} {output} "$OUTDIR/$SPLITED.intron" "$OUTDIR/$SPLITED.base_depth"
 		fi
 		"""
 
