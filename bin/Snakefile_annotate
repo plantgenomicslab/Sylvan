@@ -873,8 +873,14 @@ rule mergeTransfrag:
 		results_dir = RESULTS_DIR
 	run:
 		rd = params.results_dir
+		# Concatenate into .part and rename at the end. Appending straight into the
+		# outputs meant an interrupted merge left a partially written transfrag.gtf,
+		# and a partial file is worse than an empty one: it is non-empty, so Snakemake
+		# sees the output as present and everything downstream runs on truncated
+		# transcript evidence that looks real.
 		shell(f"rm -f {rd}GETA/transcript/transfrag.list {rd}GETA/transcript/transfrag.gtf {rd}GETA/transcript/intron.txt {rd}GETA/transcript/base_depth.txt")
-		shell(f"touch {rd}GETA/transcript/transfrag.gtf {rd}GETA/transcript/intron.txt {rd}GETA/transcript/base_depth.txt")
+		shell(f"rm -f {rd}GETA/transcript/transfrag.gtf.part {rd}GETA/transcript/intron.txt.part {rd}GETA/transcript/base_depth.txt.part")
+		shell(f"touch {rd}GETA/transcript/transfrag.gtf.part {rd}GETA/transcript/intron.txt.part {rd}GETA/transcript/base_depth.txt.part")
 
 		# Write basenames to a list file and merge via a while-loop. A single
 		# `;`-joined shell string segfaults bash when input.gtf_files >100k.
@@ -884,10 +890,13 @@ rule mergeTransfrag:
 				lf.write(re.sub(r"\.[a-zA-Z]+$", "", item) + "\n")
 		shell(f"""
 			while IFS= read -r base; do
-				cat "$base.gtf" >> {rd}GETA/transcript/transfrag.gtf
-				[ -f "$base.intron" ] && cat "$base.intron" >> {rd}GETA/transcript/intron.txt || true
-				[ -f "$base.base_depth" ] && cat "$base.base_depth" >> {rd}GETA/transcript/base_depth.txt || true
+				cat "$base.gtf" >> {rd}GETA/transcript/transfrag.gtf.part
+				[ -f "$base.intron" ] && cat "$base.intron" >> {rd}GETA/transcript/intron.txt.part || true
+				[ -f "$base.base_depth" ] && cat "$base.base_depth" >> {rd}GETA/transcript/base_depth.txt.part || true
 			done < {list_path}
+			mv -f {rd}GETA/transcript/transfrag.gtf.part {rd}GETA/transcript/transfrag.gtf
+			mv -f {rd}GETA/transcript/intron.txt.part {rd}GETA/transcript/intron.txt
+			mv -f {rd}GETA/transcript/base_depth.txt.part {rd}GETA/transcript/base_depth.txt
 		""")
 
 		run_in_container(
