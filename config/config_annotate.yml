@@ -259,7 +259,8 @@ mergeHiSat:
   sortmem: 16G
 Sam2Transfrag:
   ncpus: 4
-  memory: 16g
+  memory: 8g
+  max_sub_span: 500000
 mergeTransfrag:
   ncpus: 4
   memory: 16g
