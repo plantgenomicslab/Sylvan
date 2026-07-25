@@ -288,8 +288,11 @@ def filter_gff(gff_data, keep):
 	# A feature may list multiple parents (Parent=t1,t2 — e.g. an exon shared by
 	# two isoforms). Keep it if ANY listed parent is kept, otherwise shared exons
 	# of kept genes are silently dropped (issue #20.5).
+	# isinstance, not bool(p): rows without a Parent= yield None, which pandas may
+	# store as NaN. bool(nan) is True, so a truthiness guard lets a float through
+	# to .split() -- AttributeError: 'float' object has no attribute 'split'.
 	pid_match = gff_data["parent_id"].apply(
-		lambda p: bool(p) and any(x in name_set for x in p.split(",")))
+		lambda p: isinstance(p, str) and any(x in name_set for x in p.split(",")))
 	to_keep = tid_match | pid_match
 	return gff_data[to_keep], gff_data[~to_keep]
 
