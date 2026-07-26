@@ -1460,11 +1460,31 @@ rule geneModels2AugusutsTrainingInput:
 		log_err = f'{RESULTS_DIR}logs/geneModels2AugusutsTrainingInput_.err'
 		os.makedirs(f'{RESULTS_DIR}logs', exist_ok=True)
 
+		# Drop models this tool cannot translate before handing it the GFF3.
+		# It reads a gene's frame from the phase of its first CDS row; a gene
+		# with no CDS leaves that undefined, which interpolates into
+		# `s/\w{$fram}//` as `\w{}` and Perl 5.34 kills the entire run over it
+		# ("Unescaped left brace in regex is illegal here"). The offenders are
+		# UTR-only transfrag models with no called ORF -- untrainable anyway --
+		# but one of them takes down every other gene with it. Mtr and Ptr each
+		# stalled ~5 h of waves on this; the other seven runs carried none.
+		sys.path.insert(0, os.path.dirname(workflow.snakefile))
+		from sanitize_training_gff import sanitize_gff
+		gff_in = input.gff
+		with open(input.gff) as fh:
+			cleaned, dropped = sanitize_gff(fh.read().splitlines())
+		if dropped:
+			gff_in = f"{input.gff}.sanitized.gff3"
+			with open(gff_in, "w") as fh:
+				fh.write("\n".join(cleaned) + "\n")
+			print(f"geneModels2AugusutsTrainingInput sanitize: dropped {len(dropped)} "
+			      f"untrainable mRNAs from {input.gff}: {sorted(dropped)}")
+
 		run_in_container(f"geneModels2AugusutsTrainingInput \
 		{params.args} \
 		--out_prefix ati \
 		--cpu {threads} \
-		{input.gff} \
+		{gff_in} \
 		{input.genome_fasta}", stderr_file=log_err)
 
 		training_genes_number=0
@@ -1487,7 +1507,7 @@ rule geneModels2AugusutsTrainingInput:
 			--keep_ratio_for_excluding_too_long_gene 0.99 \
 			--out_prefix ati \
 			--cpu {threads} \
-			{input.gff} \
+			{gff_in} \
 			{input.genome_fasta} 1> {params.results_dir}GETA/Augustus/training/geneModels2AugusutsTrainingInput.log.Loose_thresholds 2>&1")
 
 		# GETA writes ati.* outputs to CWD — move to proper locations
@@ -3073,8 +3093,23 @@ rule psiClass_bin:
 		bindir={params.results_dir}TRANSCRIPT/PsiClass/bins/{wildcards.binid}
 		mkdir -p $bindir
 		samtools view -bq 10 {input} > $bindir/filtered.bam
+		# psiclass segfaults on a small number of bins, deterministically and
+		# regardless of size (Ptr Chr01_r3/_r10, Mtr chr1_r4 -- 10-15 MB bins,
+		# while 2-4 GB bins in the same runs finish). A crash there must not
+		# take down the wave: the bin can never succeed, so failing the rule
+		# just loops until the #38 breaker trips. Record it and emit an empty
+		# vote, the same outcome this rule already accepts for a bin with no
+		# reads. The cost is ~0.2-0.3% of the aligned reads in the PsiClass
+		# track for that run, and those regions are still covered by the
+		# stringtie / transfrag / miniprot / liftoff / ab-initio tracks feeding
+		# EVM. failed_bins.txt is the audit trail -- report it in methods.
 		if [ "$(samtools view -c $bindir/filtered.bam)" -gt 0 ]; then
-			psiclass -b $bindir/filtered.bam -o $bindir/psi -p {threads} -c 0.05
+			psiclass -b $bindir/filtered.bam -o $bindir/psi -p {threads} -c 0.05 && rc=0 || rc=$?
+			if [ "$rc" -ne 0 ]; then
+				echo "psiClass_bin: psiclass failed on {wildcards.binid} (exit $rc) -- emitting empty vote" >&2
+				printf '%s\\texit=%s\\n' "{wildcards.binid}" "$rc" \
+					>> {params.results_dir}TRANSCRIPT/PsiClass/failed_bins.txt
+			fi
 		fi
 		# psiclass restarts gene/transcript numbering per bin, so sub-regions of the same
 		# chromosome (bin_{{seq}}_r0, _r1, ...) would emit colliding ids (Chr1.1 in each).
