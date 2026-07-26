@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
-"""Drop coordinate-invalid gene models from an AUGUSTUS training GFF3.
+"""Drop unusable gene models from an AUGUSTUS training GFF3.
 
-Background (tracker wyim-pgl/Sylvan-EGAPx#31): the GETA training set fed to
-BGM2AT can contain a handful of models whose CDS exons butt against or
-overlap each other, giving introns of length <= 0. AUGUSTUS's GBProcessor
-skips such models but logs one error per re-read — with 5 rounds x 12-fold
-cross-validation the same 3-4 genes produce ~9k log lines, masking real
-errors.
+Two conditions make a model unusable as training input, and both are dropped
+here:
 
-An mRNA is invalid when, after sorting its CDS features by genomic start,
-any adjacent pair has ``next.start <= prev.end`` (intron <= 0 bp). Invalid
-mRNAs are dropped together with their child features; a gene row is dropped
-only when no mRNA remains under it.
+**Intron <= 0 bp** (tracker wyim-pgl/Sylvan-EGAPx#31). The GETA training set
+fed to BGM2AT can contain a handful of models whose CDS exons butt against or
+overlap each other. AUGUSTUS's GBProcessor skips such models but logs one
+error per re-read — with 5 rounds x 12-fold cross-validation the same 3-4
+genes produce ~9k log lines, masking real errors. An mRNA is invalid when,
+after sorting its CDS features by genomic start, any adjacent pair has
+``next.start <= prev.end``.
+
+**No CDS at all.** GETA's geneModels2AugusutsTrainingInput takes a gene's
+reading frame from the phase of its first CDS row (``$frame = $1 if $cds[0]
+=~ m/(\\d+)$/``). A gene with no CDS leaves that undefined, the frame
+interpolates into ``s/\\w{$fram}//`` as ``\\w{}``, and Perl 5.34 rejects it
+outright — "Unescaped left brace in regex is illegal here" kills the whole
+run, not just the one model. Older Perls only warned, so this surfaces as a
+container-version-dependent crash on the runs that happen to carry such a
+model (Mtr 5 genes, Ptr 10; the other seven runs had none). They are UTR-only
+``transfrag`` models tagged ``Integrity=internal`` whose ORF was never
+called, so they carry no coding signal to train on either way.
+
+Invalid mRNAs are dropped together with their child features; a gene row is
+dropped only when no mRNA remains under it.
 
 Usage:
     python sanitize_training_gff.py input.gff3 output.gff3
@@ -29,13 +42,25 @@ def _attr(regex, attrs):
 
 
 def find_invalid_mrnas(lines):
-    """Return the set of mRNA IDs whose CDS layout has an intron <= 0 bp."""
+    """Return the set of mRNA IDs unusable as AUGUSTUS training input.
+
+    That is: those with no CDS at all, plus those whose CDS layout has an
+    intron <= 0 bp. See the module docstring for why each is fatal.
+    """
     mrna_cds = {}
+    all_mrnas = set()
     for line in lines:
         if line.startswith("#"):
             continue
         fields = line.rstrip("\n").split("\t")
-        if len(fields) < 9 or fields[2] != "CDS":
+        if len(fields) < 9:
+            continue
+        if fields[2] == "mRNA":
+            mrna_id = _attr(ID_RE, fields[8])
+            if mrna_id is not None:
+                all_mrnas.add(mrna_id)
+            continue
+        if fields[2] != "CDS":
             continue
         parent = _attr(CDS_PARENT_RE, fields[8])
         if parent is None:
@@ -43,7 +68,7 @@ def find_invalid_mrnas(lines):
         start, end = int(fields[3]), int(fields[4])
         mrna_cds.setdefault(parent, []).append((start, end))
 
-    invalid = set()
+    invalid = all_mrnas - set(mrna_cds)
     for mrna, cds_list in mrna_cds.items():
         cds_list.sort()
         for (prev_start, prev_end), (next_start, _next_end) in zip(cds_list, cds_list[1:]):
