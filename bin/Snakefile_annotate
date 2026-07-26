@@ -1650,9 +1650,13 @@ rule BGM2AT:
 			# `|| true` keeps this errexit-safe: a failed copy leaves the previous
 			# snapshot (or none) intact, and the reconcile step then just redoes
 			# optimize rather than trusting parameters that were never captured.
-			f'{{ rm -rf {opt_snapshot}.tmp && '
+			# ( subshell, not { brace group: shell() inside a run: block passes
+			# through snakemake's own format layer, where a literal { starts a
+			# placeholder and kills the rule with a NameError AFTER the 13-40 h
+			# BGM2AT training completes (Ath, 2026-07-26).
+			f'( rm -rf {opt_snapshot}.tmp && '
 			f'cp -a {aug_dir}/config/species/{params.a_species} {opt_snapshot}.tmp && '
-			f'rm -rf {opt_snapshot} && mv {opt_snapshot}.tmp {opt_snapshot} ; }} || true ; '
+			f'rm -rf {opt_snapshot} && mv {opt_snapshot}.tmp {opt_snapshot} ) || true ; '
 			f'mv -f ati.* genes.*.gb* gff2gbSmallDNA.*.log etraining.* badgenes.lst '
 			f'new_species.*.log optimize.out training.gb.* hmm_files_bak* tmp_opt_* '
 			f'{aug_dir}/training/ 2>/dev/null || true ; '
