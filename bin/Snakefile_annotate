@@ -1517,12 +1517,28 @@ rule BGM2AT:
 		flanking_length = []
 		gene_length = []
 
-		# Remove stale .ok checkpoint files that prevent re-running
-		for ok_file in ["firsttest.ok", "secondtest.ok", "optimize_augustus.ok"]:
-			try:
-				os.remove(ok_file)
-			except OSError:
-				pass
+		# Reconcile BGM2AT's internal .ok checkpoints against the products they
+		# stand for. BGM2AT guards each stage with `unless (-e "X.ok")` and those
+		# markers live outside Snakemake's control, so a marker that outlives its
+		# product disables that stage forever: Snakemake deletes firsttest.out and
+		# secondtest.out whenever this rule fails or is cancelled, and the config
+		# wipe below destroys the optimized parameters. Blanket deletion is not the
+		# answer either -- it re-ran optimize_augustus every wave (~1,740 CPU-h on
+		# Ath, #37) -- so drop only the markers whose product is actually gone.
+		# Paths must be absolute: this run: block executes from the workflow root
+		# while BGM2AT itself runs with cwd=results/GETA/Augustus, so a bare
+		# filename silently no-ops and leaves every marker in place.
+		aug_dir = f"{RESULTS_DIR}GETA/Augustus"
+		opt_snapshot = f"{aug_dir}/training/optimized_species_config"
+		for marker, product in (("firsttest.ok", f"{aug_dir}/firsttest.out"),
+					("secondtest.ok", f"{aug_dir}/secondtest.out"),
+					("optimize_augustus.ok", opt_snapshot)):
+			if not os.path.exists(product):
+				try:
+					os.remove(f"{aug_dir}/{marker}")
+					print(f"BGM2AT: dropped stale {marker} (no {product})")
+				except OSError:
+					pass
 
 		with open(f"{RESULTS_DIR}GETA/Augustus/training/geneModels.gff3", 'r') as IN:
 			for line in IN:
@@ -1580,6 +1596,14 @@ rule BGM2AT:
 			f"mkdir -p {params.results_dir}GETA/Augustus/config/species {params.results_dir}GETA/Augustus/training && "
 			f"rm -rf {params.results_dir}GETA/Augustus/config/* && "
 			f"cp -rf $CONDA_PREFIX/config/* {params.results_dir}GETA/Augustus/config/ && "
+			# The wipe above throws away whatever optimize_augustus produced last
+			# time, so restore the snapshot taken after the previous successful
+			# run. Without this, honouring optimize_augustus.ok would silently
+			# hand Augustus un-optimized parameters. The reconcile step above only
+			# keeps that marker when this snapshot exists.
+			f"if [ -d {opt_snapshot} ]; then "
+			f"mkdir -p {params.results_dir}GETA/Augustus/config/species/{params.a_species} && "
+			f"cp -rf {opt_snapshot}/. {params.results_dir}GETA/Augustus/config/species/{params.a_species}/ ; fi && "
 			f"cd {params.results_dir}GETA/Augustus && "
 			f"export AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
 			f"BGM2AT "
@@ -1597,17 +1621,27 @@ rule BGM2AT:
 			f'cd {aug_dir} && '
 			f'if [ "$(realpath firsttest.out)" != "$(realpath {aug_dir}/firsttest.out)" ]; then mv -f firsttest.out {aug_dir}/firsttest.out; fi ; '
 			f'if [ "$(realpath secondtest.out)" != "$(realpath {aug_dir}/secondtest.out)" ]; then mv -f secondtest.out {aug_dir}/secondtest.out; fi ; '
+			# Snapshot the trained species config while it is still in place. This
+			# is what makes honouring optimize_augustus.ok on a later invocation
+			# legitimate: the rule wipes config/* on entry, so without a snapshot
+			# a skipped optimize stage would leave stock parameters behind. Taken
+			# atomically so an interrupted copy can never be mistaken for a good
+			# one by the reconcile step at the top of this rule.
+			# `|| true` keeps this errexit-safe: a failed copy leaves the previous
+			# snapshot (or none) intact, and the reconcile step then just redoes
+			# optimize rather than trusting parameters that were never captured.
+			f'{{ rm -rf {opt_snapshot}.tmp && '
+			f'cp -a {aug_dir}/config/species/{params.a_species} {opt_snapshot}.tmp && '
+			f'rm -rf {opt_snapshot} && mv {opt_snapshot}.tmp {opt_snapshot} ; }} || true ; '
 			f'mv -f ati.* genes.*.gb* gff2gbSmallDNA.*.log etraining.* badgenes.lst '
 			f'new_species.*.log optimize.out training.gb.* hmm_files_bak* tmp_opt_* '
 			f'{aug_dir}/training/ 2>/dev/null || true ; '
-			# Deliberately NOT removing firsttest.ok / optimize_augustus.ok /
-			# secondtest.ok: BGM2AT guards each stage with `unless (-e "X.ok")`.
-			# Deleting them made every rerun restart at firsttest and redo
-			# optimize_augustus (the long pole), so the run never reached the
-			# secondtest stage that writes secondtest.out -- a declared output,
-			# so Snakemake rescheduled the rule again. Ath burned ~1,740 CPU-h
-			# across 6 executions that way (#37). Each marker is written only
-			# after its stage succeeds, so nothing failed is ever skipped.
+			# The .ok markers are left in place on purpose: BGM2AT guards each
+			# stage with `unless (-e "X.ok")`, and deleting them unconditionally
+			# made every rerun redo optimize_augustus, the long pole (Ath burned
+			# ~1,740 CPU-h across 6 executions that way, #37). The reconcile step
+			# at the top of this rule is what keeps that safe -- it drops any
+			# marker whose product Snakemake or the config wipe has since removed.
 			f'cd - > /dev/null ; '
 			f'mv -f genes.gb* hmm_files_bak* tmp_opt_* cleaning_* {aug_dir}/training/ 2>/dev/null || true'
 		)
