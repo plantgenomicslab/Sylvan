@@ -246,6 +246,14 @@ YAMLEOF
 	# Navigate into the PsiCLASS directory
 	cd PsiCLASS
 
+	# Fix unbounded chromosome-group scan in trust-splice (Sylvan-EGAPx #41):
+	# the loop at GetTrustedSplice.cpp:213 has no `j < siteCnt` guard and walks
+	# off the end of the sites vector on single-chromosome bins (all chrId == 0
+	# matches zero-initialized heap) -> deterministic segfault. Cost the 2026
+	# fleet 0.2-0.3% of the PsiClass track in Mtr/Ptr. Reported upstream.
+	sed -i 's/for ( j = i + 1 ; sites\[j\].chrId == sites\[i\].chrId ; ++j )/for ( j = i + 1 ; j < siteCnt \&\& sites[j].chrId == sites[i].chrId ; ++j )/' GetTrustedSplice.cpp
+	grep -q 'j < siteCnt && sites\[j\].chrId' GetTrustedSplice.cpp
+
 	# Build PsiCLASS using the make command with 2 threads, which utilizes the Makefile present in the directory
 	make
 
