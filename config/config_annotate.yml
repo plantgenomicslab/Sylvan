@@ -126,6 +126,10 @@ pasa:
   ncpus: 8                # was 32: sacct Osa pasa = 1.94 avg CPUs (classify_alt_splice_isoforms is single-threaded by design); 8 keeps ~4x headroom for the parallel assembly steps
   threads: 8
   memory: 64g             # was 128g: sqlite DB is 0.7-1.4GB on disk, queried not loaded
+  time: "7-00:00:00"    # was inheriting __default__ 3d. Peers finish in 6-10h (Svi_A 6h20m,
+                        # Ptr 7h31m, Sly 8h38m, Mtr 9h46m) but Ahy_A has been running 50h --
+                        # allotetraploid, ~5x the peers. The rule clears PASA checkpoints on
+                        # entry, so a TIMEOUT restarts the assembly from scratch.
 addXS:
   ncpus: 12
   memory: 48g
@@ -333,6 +337,12 @@ BGM2AT:
   ncpus: 12
   threads: 12
   memory: 32g             # #18 asked to refine from sacct: 5 completed runs peak at 5.6-12.2g, so 64g -> 32g. The 15 fleet configs still carried the 220g template, which cannot pack onto an occupied 256g node — 682h queued vs 144h running (83% wait, ~38h/job).
+  time: "10-00:00:00"   # was inheriting __default__ 3d. optimize_augustus does 5 rounds x
+                        # 12-fold CV and its round-skip shortcut is commented out upstream,
+                        # so all 5 rounds always run. Ath finished in 10h and Ptr in 26h,
+                        # but Sly/Svi_A/Mtr average 4.2 of their 12 cores and reached only
+                        # round 1.4 in 52h (~7.7d pace). A TIMEOUT restarts training from
+                        # scratch, so a cap below the slowest run loops instead of delaying.
 prepareAugusutusHints:
   ncpus: 4
   memory: 16g
