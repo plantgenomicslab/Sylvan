@@ -79,7 +79,7 @@ Cutoff:
  
 Threads:
   splitInterleaved: 2        # one sort + two gzip writers; not a parallel rule
-  PfamScan: 48
+  PfamScan: 8
   sortSTAR: 16
   blast: 16
   STAR_generate: 12
@@ -106,7 +106,11 @@ __default__:
   error: results/logs/{rule}_{wildcards}.err
   extra_args: ""                          # Extra sbatch flags (e.g., "--export=ALL")
 PfamScan:
-  ncpus: 48
+  ncpus: 8              # was 48: sacct on Dca showed 1.58 of 48 cores used
+                    # (TotalCPU 6:58 over 4:24 elapsed, 3.3%). pfam_scan.pl
+                    # does not parallelise the way -cpu implies, so 48 just
+                    # locked a quarter of the 180-CPU account cap for ~10 h
+                    # per run and starved the controllers (#47).
   memory: 64g       # hmmscan on ~48k proteins uses tens of GB, not 192g; refine from sacct MaxRSS
 # RSEM expression — cluster keys MUST match Snakefile_filter rule names exactly (#14).
 # Real rules are calculateRSEMExpression_PAIRED / _SINGLE (threads 16) and mergeRSEM.
