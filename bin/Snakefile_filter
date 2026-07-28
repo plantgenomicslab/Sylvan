@@ -247,6 +247,14 @@ rule all:
 	input: inputAll
 
 rule makeCDSPep:
+	# anot_gff must be an input, not just a params: as a params: it is invisible to
+	# the DAG, so a regenerated PREFILTER/Sylvan.gff3 never re-triggers this rule and
+	# RSEM keeps using an mRNA reference built from an older gene set. Osa hit exactly
+	# that -- a 07-24 reference against a 07-27 PREFILTER -- and RSEM aborted with
+	# "can not recognize reference sequence name evm.model.Osa_Chr1.4550.1.6a628d23".
+	# Same defect shape as the prepare_liftoff missing-input bug (#3).
+	input:
+		anot_gff = config_dict["Input"]["anot_gff"]
 	output:
 		cdna = anot_cdna,
 		pep = anot_pep,
