@@ -2275,6 +2275,18 @@ rule pickBetterModels:
 		mv {params.results_dir}GETA/CombineGeneModels/geneModels.a.clean.gff3 {input.a}
 		mv {params.results_dir}GETA/CombineGeneModels/geneModels.c.clean.gff3 {output.c}
 
+		# Drop mRNAs that carry no CDS before pickout runs. GETA's
+		# pickout_better_geneModels_from_evidence divides match_length by the
+		# gene's total CDS length (line 120), so a single CDS-less mRNA aborts
+		# the whole tool with "Illegal division by zero" and the wave can never
+		# progress (tracker wyim-pgl/Sylvan-EGAPx#45). These are the same
+		# UTR-only transfrag models that broke AUGUSTUS training in #31; the
+		# sanitizer's intron<=0 branch is a no-op on this input (Ptr: 0 hits).
+		python3 {workflow.basedir}/sanitize_training_gff.py {input.a} {input.a}.sanitized
+		mv {input.a}.sanitized {input.a}
+		python3 {workflow.basedir}/sanitize_training_gff.py {output.c} {output.c}.sanitized
+		mv {output.c}.sanitized {output.c}
+
 		pickout_better_geneModels_from_evidence \
 		{params.args} \
 		{input.a} \
