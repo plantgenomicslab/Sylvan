@@ -126,7 +126,7 @@ pasa:
   ncpus: 8                # was 32: sacct Osa pasa = 1.94 avg CPUs (classify_alt_splice_isoforms is single-threaded by design); 8 keeps ~4x headroom for the parallel assembly steps
   threads: 8
   memory: 64g             # was 128g: sqlite DB is 0.7-1.4GB on disk, queried not loaded
-  time: "7-00:00:00"    # was inheriting __default__ 3d. Peers finish in 6-10h (Svi_A 6h20m,
+  time: "14-00:00:00"    # was inheriting __default__ 3d. Peers finish in 6-10h (Svi_A 6h20m,
                         # Ptr 7h31m, Sly 8h38m, Mtr 9h46m) but Ahy_A has been running 50h --
                         # allotetraploid, ~5x the peers. The rule clears PASA checkpoints on
                         # entry, so a TIMEOUT restarts the assembly from scratch.
