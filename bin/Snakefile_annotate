@@ -1815,7 +1815,13 @@ checkpoint prepAugustusWithHints:
 
 rule augustusWithHints:
 	input:
-		trained = f"{RESULTS_DIR}GETA/Augustus/firsttest.out",
+		# BGM2AT is only done when secondtest.out exists. firsttest.out is written
+		# before optimize_augustus starts, so depending on it alone lets AUGUSTUS
+		# predict with un-optimized species parameters whenever BGM2AT dies or is
+		# cancelled mid-optimize -- --keep-incomplete leaves the stale firsttest.out
+		# in place and this rule becomes runnable. That silently breaks protocol
+		# parity with the runs whose BGM2AT completed all 5 optimize rounds.
+		trained = f"{RESULTS_DIR}GETA/Augustus/secondtest.out",
 		hints = lambda wc: f"{RESULTS_DIR}GETA/Augustus/temp_directory/{wc.seqid_start}.gff",
 		masked = lambda wc: f"{RESULTS_DIR}GETA/Augustus/temp_directory/{wc.seqid_start}.fasta",
 		segSize = lambda wc: f"{RESULTS_DIR}GETA/Augustus/temp_directory/{wc.seqid_start}.segSize"
