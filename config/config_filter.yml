@@ -136,27 +136,31 @@ PfamScan:
 # fell through to __default__ (4c/16g) — 16 threads on 4 cpus = 4x oversubscription.
 calculateRSEMExpression_PAIRED:
   ncpus: 12
-  memory: 64g       # refine from sacct MaxRSS
+  memory: 16g       # refine from sacct MaxRSS
   # was 16: 5.19 of 16 used (32%) over 41 jobs; 12 keeps >2x headroom.
+  # was 64g: sacct MaxRSS peak 3.26g; RSEM은 transcriptome 기준이라 genome 크기에 비례하지 않는다
 calculateRSEMExpression_SINGLE:
   ncpus: 16
-  memory: 64g       # refine from sacct MaxRSS
+  memory: 16g       # refine from sacct MaxRSS
+  # was 64g: sacct MaxRSS peak 3.26g; PAIRED와 동일 근거
 mergeRSEM:          # single-process pandas TPM merge; light
   ncpus: 4
   memory: 16g
 sortSTAR:
   ncpus: 16
-  memory: 32g
+  memory: 64g
   # was 64g: sacct MaxRSS peak 13.84g over 5 jobs; samtools sort memory is
   # set by -m, not by genome size, so this does not scale with the species.
+  # 64g (was 32g): BAM 비례 룰. 런별 MaxRSS 최대 13.84g — samtools sort도 BAM 비례. Dca 13.84g / Spe_A 13.6g 실측, Ahy_A 미도달.
 blast:
   ncpus: 16
   memory: 8g
   # was 64g: sacct MaxRSS peak 0.30g over 131 jobs
 coverage:
   ncpus: 4
-  memory: 64g
+  memory: 96g
   # was 16: 1.00 of 16 used (6.2%) -- bedtools coverage is single-threaded.
+  # 96g (was 64g): BAM 비례 룰. 런별 MaxRSS 최대 27.19g — bedtools coverage가 읽는 sorted.bam이 게놈·라이브러리에 비례한다 — Spe_A 27.19g(BAM 26G), Ahy_A는 그보다 크다. 16g로 낮췄다가 OOM 발생(job 5964686).
 blastDB:            # makeblastdb on homolog proteins; single-threaded, light
   ncpus: 4
   memory: 16g
@@ -194,8 +198,9 @@ STAR_single:        # threads = Threads.STAR = 12 (#14: was falling to __default
   memory: 48g
 mergeSTAR:
   ncpus: 16
-  memory: 16g
+  memory: 48g
   # was 64g: sacct MaxRSS peak 0.40g over 5 jobs
+  # 48g (was 16g): BAM 비례 룰. 런별 MaxRSS 최대 10.26g — samtools merge는 입력 BAM 크기에 비례한다. Mtr 실측 10.26g이고 Ahy_A(~2.5Gb 이질사배수체)는 아직 이 단계를 지나지 않았다.
 prepRSEM:
   ncpus: 16
   memory: 8g
@@ -215,4 +220,6 @@ filter:
   # Semi-supervised random forest over ~tens of thousands of proteins; needs tens
   # of GB, not the 192g heavy rules use. Explicit block so it no longer inherits
   # the __default__ (ncpus falls back to __default__). Refine from sacct MaxRSS.
-  memory: 48g
+  memory: 8g
+  # was 16c/48g: sacct MaxRSS peak 0.82g over 3 jobs. Filter.py works on
+  # per-transcript tables, not sequence, so this does not scale with genome.
