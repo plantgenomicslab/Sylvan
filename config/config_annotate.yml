@@ -203,13 +203,14 @@ recombineEVM:
   ncpus: 4
   memory: 16g
 pasaPost:
-  ncpus: 8                # was 48: sacct Osa pasaPost = 1.12 avg CPUs over 11.7h (annotation_compare is near-serial); 8 keeps ~7x headroom
-  threads: 8
+  ncpus: 2                # was 48: sacct Osa pasaPost = 1.12 avg CPUs over 11.7h (annotation_compare is near-serial); 8 keeps ~7x headroom
+  threads: 2
   memory: 64g              # actual ~11h/<64g in practice; was 192g (over-provisioned)
   time: "2-00:00:00"       # peers finish in 12-18h, but Ath blew the old 1-day cap
                            # (job 5952960 TIMEOUT at 1-00:00:18). The rule wipes PASA
                            # checkpoints on entry, so the retry restarts the compare from
                            # scratch -- an undersized cap loops rather than merely delays.
+  # was 8: sacct over 5 completed jobs shows 0.85 cores used (10.7%).
 agat_clean_final:
   # agat_convert_sp_gxf2gxf is single-threaded and light; ~2min at 48g on real
   # genomes (validated 2026-07). Explicit block so it no longer inherits the
@@ -347,8 +348,13 @@ prepareAugusutusHints:
   ncpus: 4
   memory: 16g
 augustusWithHints:
-  ncpus: 4
+  ncpus: 2
   memory: 16g
+  # was 4: sacct over 243 completed jobs shows 1.00 of 4 cores used (25%).
+  # AUGUSTUS runs one sequence per job and is single-threaded, so the extra
+  # three only reserved cap. Mtr/Sly/Svi_A each queue hundreds of these after
+  # BGM2AT, and under the ~180-CPU account cap halving the ask doubles how
+  # many run at once.
 combineAugustusWithHints:
   ncpus: 4
   memory: 16g

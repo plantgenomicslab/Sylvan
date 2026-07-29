@@ -121,19 +121,21 @@ filterBlastP:
   ncpus: 4
   memory: 32g
 PfamScan:
-  ncpus: 8              # was 48: sacct on Dca showed 1.58 of 48 cores used
+  ncpus: 4              # was 48: sacct on Dca showed 1.58 of 48 cores used
                     # (TotalCPU 6:58 over 4:24 elapsed, 3.3%). pfam_scan.pl
                     # does not parallelise the way -cpu implies, so 48 just
                     # locked a quarter of the 180-CPU account cap for ~10 h
                     # per run and starved the controllers (#47).
   memory: 64g       # hmmscan on ~48k proteins uses tens of GB, not 192g; refine from sacct MaxRSS
+  # 8 still over-asks: 1.46 of 8 used (18%) once the 48-CPU jobs are excluded.
 # RSEM expression — cluster keys MUST match Snakefile_filter rule names exactly (#14).
 # Real rules are calculateRSEMExpression_PAIRED / _SINGLE (threads 16) and mergeRSEM.
 # The old dead `RSEM:` / `calculateRSEMExpression:` keys never matched, so these rules
 # fell through to __default__ (4c/16g) — 16 threads on 4 cpus = 4x oversubscription.
 calculateRSEMExpression_PAIRED:
-  ncpus: 16
+  ncpus: 12
   memory: 64g       # refine from sacct MaxRSS
+  # was 16: 5.19 of 16 used (32%) over 41 jobs; 12 keeps >2x headroom.
 calculateRSEMExpression_SINGLE:
   ncpus: 16
   memory: 64g       # refine from sacct MaxRSS
@@ -147,8 +149,9 @@ blast:
   ncpus: 16
   memory: 64g
 coverage:
-  ncpus: 16
+  ncpus: 4
   memory: 64g
+  # was 16: 1.00 of 16 used (6.2%) -- bedtools coverage is single-threaded.
 blastDB:            # makeblastdb on homolog proteins; single-threaded, light
   ncpus: 4
   memory: 16g
