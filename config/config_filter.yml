@@ -105,6 +105,21 @@ __default__:
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
   extra_args: ""                          # Extra sbatch flags (e.g., "--export=ALL")
+makeCDSPep:
+  # No key existed: this fell to __default__ 4c/16g and OOM'd on Osa (54,239
+  # mRNAs, 37 oom-kill events, 2 attempts) once #49 made the rule actually re-run.
+  # Spe_A (42,805) and Dca (45,049) had squeaked through at 16g, which is why it
+  # stayed hidden. gff3_file_to_proteins + gffread hold the annotation in memory,
+  # so the ceiling scales with mRNA count and every run above Osa would hit it.
+  ncpus: 4
+  memory: 64g
+extractTranscriptsForFilter:
+  # Same shape: reads the full annotation, no key, 16g default.
+  ncpus: 4
+  memory: 64g
+filterBlastP:
+  ncpus: 4
+  memory: 32g
 PfamScan:
   ncpus: 8              # was 48: sacct on Dca showed 1.58 of 48 cores used
                     # (TotalCPU 6:58 over 4:24 elapsed, 3.3%). pfam_scan.pl
