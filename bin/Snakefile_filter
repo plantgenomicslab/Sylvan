@@ -389,6 +389,14 @@ rule STAR_paired:
 		results_dir = RESULTS_DIR
 	shell: """
 			micromamba activate alignment
+			# STAR refuses to start when --outTmpDir already exists and never
+			# overwrites it, so a run that dies (OOM, TIMEOUT, scancel) leaves a
+			# directory that blocks every retry with "could not make temporary
+			# directory" -- an error about scratch space that is really a leftover.
+			# --keep-incomplete makes this the normal case, not the rare one.
+			# Removing only this rule's own {wildcards.run}_STARtmp is safe: the
+			# path is per-run and nothing else reads it.
+			rm -rf {params.results_dir}FILTER/STAR/{wildcards.run}_STARtmp
 			STAR --runMode alignReads \
 			--runThreadN {threads} \
 			--outFilterMultimapNmax 10 \
@@ -419,6 +427,14 @@ rule STAR_single:
 		results_dir = RESULTS_DIR
 	shell: """
 			micromamba activate alignment
+			# STAR refuses to start when --outTmpDir already exists and never
+			# overwrites it, so a run that dies (OOM, TIMEOUT, scancel) leaves a
+			# directory that blocks every retry with "could not make temporary
+			# directory" -- an error about scratch space that is really a leftover.
+			# --keep-incomplete makes this the normal case, not the rare one.
+			# Removing only this rule's own {wildcards.run}_STARtmp is safe: the
+			# path is per-run and nothing else reads it.
+			rm -rf {params.results_dir}FILTER/STAR/{wildcards.run}_STARtmp
 			STAR --runMode alignReads \
 			--runThreadN {threads} \
 			--outFilterMultimapNmax 10 \
