@@ -300,18 +300,49 @@ rule makeCDSPep:
 		"""
 
 rule PfamScan:
-	input: anot_pep
+	# pfam_scan.pl takes -cpu but does not parallelise with it: sacct measured
+	# 1.46 of 8 allocated cores, and one run took 6-10 h wall (Ath 6:11:09,
+	# Ptr 9:10:13). That made it the critical path for the whole filter phase.
+	# The proteome is already split 20 ways for blast (rule splitPep), so scan
+	# those chunks concurrently instead of adding another split. Each protein is
+	# scanned independently of the others, so concatenating the per-chunk output
+	# is equivalent to scanning the file whole -- and Filter.py reads only
+	# column 0 (the protein id), skipping '#' comments, so neither the repeated
+	# headers nor the record order matter.
+	input:
+		pep = anot_pep,
+		# Lambda, not a bare expand: `num` is defined further down the file (it
+		# belongs to the blast section), so evaluating it here at parse time
+		# would raise NameError. Input functions run during DAG construction,
+		# after the whole Snakefile has been read.
+		parts = lambda wildcards: expand(
+			f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{number}.pep",
+			number=num)
 	output: f"{RESULTS_DIR}FILTER/pfam.out"
 	threads: config_dict["Threads"]["PfamScan"]
 	params:
-		hmm = config_dict['Input']['HmmDB']
+		hmm = config_dict['Input']['HmmDB'],
+		results_dir = RESULTS_DIR
 	shell:"""
 		micromamba activate filter
-		pfam_scan.pl \
-			-fasta {input} \
-			-dir {params.hmm} \
-			-cpu {threads} \
-			-outfile {output}
+		wd={params.results_dir}FILTER/pfam_parts
+		rm -rf "$wd" && mkdir -p "$wd"
+
+		pids=""
+		for f in {input.parts}; do
+			pfam_scan.pl -fasta "$f" -dir {params.hmm} \
+				-outfile "$wd/$(basename "$f").pfam" &
+			pids="$pids $!"
+		done
+		# Wait on each pid rather than bare `wait`: under `set -e` a bare wait
+		# reports only the last job, so one failed chunk would be silently
+		# concatenated as a missing slice of the domain table.
+		rc=0
+		for p in $pids; do wait "$p" || rc=1; done
+		[ "$rc" -eq 0 ]
+
+		cat "$wd"/*.pfam > {output}
+		[ -s {output} ]
 		"""
 
 # Prepare RSEM files — use full mRNA (exons incl. UTRs) to match STAR transcriptome BAM lengths
