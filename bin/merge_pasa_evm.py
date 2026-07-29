@@ -111,6 +111,73 @@ def get_mrna_spans(lines):
     return mrnas
 
 
+def block_ids(lines):
+    """Return every ID defined by rows in one gene block."""
+    ids = set()
+    for line in lines:
+        if line.startswith("#"):
+            continue
+        fields = line.rstrip("\n").split("\t")
+        if len(fields) < 9:
+            continue
+        match = re.search(r"\bID=([^;\s]+)", fields[8])
+        if match:
+            ids.add(match.group(1))
+    return ids
+
+
+def disambiguate_block(lines, taken):
+    """Rename a rescued block's IDs when they collide with already-emitted ones.
+
+    The rescue test asks whether an EVM gene overlaps a PASA gene *in the same
+    (chrom, strand) bucket* (issue #51). PASA reuses ``evm.*`` identifiers, so a
+    model PASA moved to the other strand -- or more than 50 kb away -- is
+    invisible to that test: the EVM gene looks uncovered, gets rescued, and the
+    same ID is written twice at two loci. That is invalid GFF3, and the AGAT
+    pass at the end of the PREFILTER rule resolves the collision by *fusing*
+    the two records into one gene whose exons sit on both strands. Osa carried
+    2,522 such collisions -- 1,261 of them strand-flipped -- and the resulting
+    chimeras made EVM's gff3_file_to_proteins.pl emit sequences longer than the
+    chromosome (issue #50), stalling the filter phase.
+
+    Renaming keeps both structures and makes the file valid; dropping either
+    one would discard a real gene model.
+
+    Returns (lines, ids_now_in_use).
+    """
+    local = block_ids(lines)
+    if not local & taken:
+        return lines, local
+
+    suffix = ".rescued"
+    n = 1
+    while any(f"{i}{suffix}" in taken for i in local):
+        n += 1
+        suffix = f".rescued{n}"
+    mapping = {i: f"{i}{suffix}" for i in local}
+
+    def _rename_id(match):
+        return mapping.get(match.group(1), match.group(1))
+
+    def _rename_parents(match):
+        return ",".join(mapping.get(p, p) for p in match.group(1).split(","))
+
+    out = []
+    for line in lines:
+        if line.startswith("#"):
+            out.append(line)
+            continue
+        fields = line.rstrip("\n").split("\t")
+        if len(fields) < 9:
+            out.append(line)
+            continue
+        attrs = re.sub(r"(?<=\bID=)([^;\s]+)", _rename_id, fields[8])
+        attrs = re.sub(r"(?<=\bParent=)([^;\s]+)", _rename_parents, attrs)
+        fields[8] = attrs
+        out.append("\t".join(fields) + "\n")
+    return out, set(mapping.values())
+
+
 def overlap_fraction(s1, e1, s2, e2):
     """Fraction of gene1 covered by gene2."""
     overlap = max(0, min(e1, e2) - max(s1, s2) + 1)
@@ -306,7 +373,7 @@ def main():
         pasa_by_loc[(chrom, strand)].append((start, end, gid, lines, i))
 
     # First pass: classify each EVM gene
-    rescued_lines = []  # EVM genes with no PASA coverage
+    rescued_blocks = []  # EVM genes with no PASA coverage, one block per gene
     rescued_count = 0
     conflicts = []  # (evm_idx, evm_info, pasa_idx, pasa_info)
 
@@ -324,7 +391,7 @@ def main():
 
         if best_overlap < 0.5:
             rescued_count += 1
-            rescued_lines.extend(lines)
+            rescued_blocks.append(lines)
             continue
 
         # Check for structural alteration
@@ -424,7 +491,11 @@ def main():
         print("No DIAMOND DB — keeping PASA for all conflicts", file=sys.stderr)
         stats["tie"] = len(conflicts)
 
-    # Write merged output
+    # Write merged output. Track every ID as it is written so a rescued EVM
+    # block that would reuse one is renamed rather than silently duplicated
+    # (issue #51 — AGAT fuses same-ID records into strand-mixed chimeras).
+    emitted_ids = set()
+    renamed_blocks = 0
     with open(out_gff, "w") as f:
         f.write("##gff-version 3\n")
         for i, (_, _, _, _, _, lines) in enumerate(pasa_genes):
@@ -432,22 +503,31 @@ def main():
                 # One PASA gene may be replaced by several EVM genes (chimeric
                 # merge); write every EVM block, not just the last (issue #17).
                 for block in pasa_replaced[i]:
+                    block, ids = disambiguate_block(block, emitted_ids)
+                    emitted_ids |= ids
                     for line in block:
                         f.write(line)
             else:
+                emitted_ids |= block_ids(lines)
                 for line in lines:
                     f.write(line)
-        if rescued_lines:
+        if rescued_blocks:
             f.write("# Rescued EVM genes without PASA coverage\n")
-            for line in rescued_lines:
-                f.write(line)
+            for block in rescued_blocks:
+                deduped, ids = disambiguate_block(block, emitted_ids)
+                if deduped is not block:
+                    renamed_blocks += 1
+                emitted_ids |= ids
+                for line in deduped:
+                    f.write(line)
 
     evm_blocks_emitted = sum(len(v) for v in pasa_replaced.values())
     total_genes = len(pasa_genes) - len(pasa_replaced) + evm_blocks_emitted + rescued_count
     print(f"\nResults:", file=sys.stderr)
     print(f"  PASA genes: {len(pasa_genes)} ({len(pasa_replaced)} replaced by "
           f"{evm_blocks_emitted} EVM genes)", file=sys.stderr)
-    print(f"  Rescued EVM genes: {rescued_count}", file=sys.stderr)
+    print(f"  Rescued EVM genes: {rescued_count} "
+          f"({renamed_blocks} renamed to avoid an ID collision)", file=sys.stderr)
     print(f"  Total genes: {total_genes}", file=sys.stderr)
     print(f"  Conflicts: {len(conflicts)} — EVM wins: {stats['evm_wins']}, "
           f"PASA wins: {stats['pasa_wins']}, tie: {stats['tie']}", file=sys.stderr)

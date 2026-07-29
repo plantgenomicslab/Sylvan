@@ -242,6 +242,16 @@ def inputAll(wc):
 anot_cdna = f"{RESULTS_DIR}FILTER/{pep_string}.cdna"
 anot_mrna = f"{RESULTS_DIR}FILTER/{pep_string}.mrna"   # Full mRNA (exons incl. UTRs) for RSEM
 anot_pep = f"{RESULTS_DIR}FILTER/{pep_string}.pep"
+anot_sane = f"{RESULTS_DIR}FILTER/{pep_string}.sanitized.gff3"
+
+# Pin the extractor by absolute path (issue #50). The image ships FIVE different
+# scripts named gff3_file_to_proteins.pl -- EVM's, two from PASA, and two from
+# TransDecoder -- and none of them lives in the `filter` env, so the name
+# currently resolves through the base PATH to EVM's copy. That is the intended
+# one, but nothing pins it: an env change would silently swap in a different
+# implementation. Same class of trap as gtf_to_alignment_gff3.pl needing
+# genepred's perl. A missing path fails loudly instead of drifting.
+EVM_GFF3_TO_SEQ = "/usr/local/bin/EVidenceModeler-v2.1.0/EvmUtils/gff3_file_to_proteins.pl"
 
 rule all:
 	input: inputAll
@@ -256,24 +266,35 @@ rule makeCDSPep:
 	input:
 		anot_gff = config_dict["Input"]["anot_gff"]
 	output:
+		gff = anot_sane,
 		cdna = anot_cdna,
 		pep = anot_pep,
 		mrna = anot_mrna
 	params:
 		genome = config_dict["Input"]["genome"],
-		gff =  config_dict["Input"]["anot_gff"]
+		evm_tool = EVM_GFF3_TO_SEQ
 	shell:"""
 		micromamba activate filter
-		gff3_file_to_proteins.pl {params.gff} {params.genome} cDNA > {output.cdna}
 
-		gff3_file_to_proteins.pl {params.gff} {params.genome} prot > {output.pep}
+		# Strip childless mRNA shells before any sequence extraction (issues #50/#51).
+		# Left in place they put isoforms of opposite strand under one gene, and EVM's
+		# Gene_obj then assembles sequences longer than the chromosome -- Osa produced
+		# an 82 Mb "transcript" and a 63 Ma "protein", so the rule ran out of memory no
+		# matter how much it was given. gffread mishandles them the other way, emitting
+		# the raw genomic span as a fake RSEM reference transcript (issue #49). The
+		# extractor already skipped these, so .cdna/.pep are unchanged by this step.
+		/opt/envs/base/bin/python3 bin/sanitize_filter_gff.py {input.anot_gff} {output.gff}
+
+		{params.evm_tool} {output.gff} {params.genome} cDNA > {output.cdna}
+
+		{params.evm_tool} {output.gff} {params.genome} prot > {output.pep}
 
 		# Extract full mRNA (exons incl. UTRs) for RSEM — must match STAR transcriptome BAM lengths
 		micromamba activate annotation
 		# No `|| true` here (issue #16): a failed/empty gffread must abort. A 0-byte
 		# mrna silently kills all RSEM-based expression evidence downstream, so also
 		# assert the file is non-empty under strict mode.
-		gffread {params.gff} -g {params.genome} -w {output.mrna}
+		gffread {output.gff} -g {params.genome} -w {output.mrna}
 		[ -s {output.mrna} ]
 		"""
 
