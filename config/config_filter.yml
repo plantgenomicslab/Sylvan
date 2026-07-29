@@ -146,7 +146,9 @@ mergeRSEM:          # single-process pandas TPM merge; light
   memory: 16g
 sortSTAR:
   ncpus: 16
-  memory: 64g
+  memory: 32g
+  # was 64g: sacct MaxRSS peak 13.84g over 5 jobs; samtools sort memory is
+  # set by -m, not by genome size, so this does not scale with the species.
 blast:
   ncpus: 16
   memory: 8g
