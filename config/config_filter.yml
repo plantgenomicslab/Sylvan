@@ -122,13 +122,14 @@ filterBlastP:
   ncpus: 4
   memory: 32g
 PfamScan:
-  ncpus: 4              # was 48: sacct on Dca showed 1.58 of 48 cores used
+  ncpus: 20              # was 48: sacct on Dca showed 1.58 of 48 cores used
                     # (TotalCPU 6:58 over 4:24 elapsed, 3.3%). pfam_scan.pl
                     # does not parallelise the way -cpu implies, so 48 just
                     # locked a quarter of the 180-CPU account cap for ~10 h
                     # per run and starved the controllers (#47).
   memory: 64g       # hmmscan on ~48k proteins uses tens of GB, not 192g; refine from sacct MaxRSS
   # 8 still over-asks: 1.46 of 8 used (18%) once the 48-CPU jobs are excluded.
+  # 20 = one process per splitPep chunk; the rule now scans them concurrently
 # RSEM expression — cluster keys MUST match Snakefile_filter rule names exactly (#14).
 # Real rules are calculateRSEMExpression_PAIRED / _SINGLE (threads 16) and mergeRSEM.
 # The old dead `RSEM:` / `calculateRSEMExpression:` keys never matched, so these rules
