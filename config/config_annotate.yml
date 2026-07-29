@@ -198,7 +198,8 @@ writeEVMCommands:
   memory: 16g
 runEVM:
   ncpus: 1
-  memory: 8g
+  memory: 4g
+  # was 8g: sacct MaxRSS peak 0.45g over 630 jobs
 recombineEVM:
   ncpus: 4
   memory: 16g
@@ -215,8 +216,9 @@ agat_clean_final:
   # agat_convert_sp_gxf2gxf is single-threaded and light; ~2min at 48g on real
   # genomes (validated 2026-07). Explicit block so it no longer inherits the
   # 3-day __default__ walltime (ncpus falls back to __default__).
-  memory: 48g
+  memory: 16g
   time: "12:00:00"
+  # was 48g: sacct MaxRSS peak 1.54g over 10 jobs
 prepareGenome:
   ncpus: 1
   memory: 4g
@@ -349,21 +351,24 @@ prepareAugusutusHints:
   memory: 16g
 augustusWithHints:
   ncpus: 2
-  memory: 16g
+  memory: 8g
   # was 4: sacct over 243 completed jobs shows 1.00 of 4 cores used (25%).
   # AUGUSTUS runs one sequence per job and is single-threaded, so the extra
   # three only reserved cap. Mtr/Sly/Svi_A each queue hundreds of these after
   # BGM2AT, and under the ~180-CPU account cap halving the ask doubles how
   # many run at once.
+  # was 16g: sacct MaxRSS peak 3.09g over 612 jobs
 combineAugustusWithHints:
   ncpus: 4
   memory: 16g
 combineGeneModelsPlus_step6:
   ncpus: 4
-  memory: 16g
+  memory: 8g
+  # was 16g: sacct MaxRSS peak 0.00g over 281 jobs
 combineGeneModelsMinus_step6:
   ncpus: 4
-  memory: 16g
+  memory: 8g
+  # was 16g: sacct MaxRSS peak 0.00g over 281 jobs
 aggregate_CombineGeneModels_step6:
   ncpus: 4
   memory: 16g
@@ -403,7 +408,8 @@ splitFilterProteins:
 filterHMMScan:
   ncpus: 4
   threads: 4
-  memory: 16g
+  memory: 8g
+  # was 16g: sacct MaxRSS peak 1.04g over 120 jobs
 combineHMMScan:
   ncpus: 4
   memory: 16g

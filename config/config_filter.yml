@@ -112,7 +112,8 @@ makeCDSPep:
   # stayed hidden. gff3_file_to_proteins + gffread hold the annotation in memory,
   # so the ceiling scales with mRNA count and every run above Osa would hit it.
   ncpus: 4
-  memory: 64g
+  memory: 16g
+  # was 64g: sacct MaxRSS peak 2.06g over 9 jobs
 extractTranscriptsForFilter:
   # Same shape: reads the full annotation, no key, 16g default.
   ncpus: 4
@@ -147,7 +148,8 @@ sortSTAR:
   memory: 64g
 blast:
   ncpus: 16
-  memory: 64g
+  memory: 8g
+  # was 64g: sacct MaxRSS peak 0.30g over 131 jobs
 coverage:
   ncpus: 4
   memory: 64g
@@ -179,7 +181,8 @@ splitInterleaved:
   time: "08:00:00"         # ~25-40 min per 1-6 GB input on GPFS scratch
 fastp_PAIRED:
   ncpus: 16
-  memory: 64g
+  memory: 16g
+  # was 64g: sacct MaxRSS peak 2.12g over 41 jobs
 STAR_paired:        # threads = Threads.STAR = 12
   ncpus: 12
   memory: 48g
@@ -188,10 +191,12 @@ STAR_single:        # threads = Threads.STAR = 12 (#14: was falling to __default
   memory: 48g
 mergeSTAR:
   ncpus: 16
-  memory: 64g
+  memory: 16g
+  # was 64g: sacct MaxRSS peak 0.40g over 5 jobs
 prepRSEM:
   ncpus: 16
-  memory: 64g
+  memory: 8g
+  # was 64g: sacct MaxRSS peak 0.00g over 7 jobs
 lncRNA_pred:
   ncpus: 48
   memory: 64g       # lncDC on ~48k transcripts uses tens of GB, not 192g; refine from sacct MaxRSS
