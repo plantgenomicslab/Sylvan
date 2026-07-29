@@ -264,7 +264,8 @@ rule makeCDSPep:
 	# "can not recognize reference sequence name evm.model.Osa_Chr1.4550.1.6a628d23".
 	# Same defect shape as the prepare_liftoff missing-input bug (#3).
 	input:
-		anot_gff = config_dict["Input"]["anot_gff"]
+		anot_gff = config_dict["Input"]["anot_gff"],
+		genome = config_dict["Input"]["genome"]
 	output:
 		gff = anot_sane,
 		cdna = anot_cdna,
@@ -380,6 +381,15 @@ rule STAR_index:
 	# Not temp() (issue #19.10): marking the genome index SA as temporary deleted it
 	# after the last consuming STAR job, forcing a full genomeGenerate on every wave
 	# retry. Keep it so re-runs reuse the index.
+	# The genome and annotation must be declared inputs, not params only (issue #49).
+	# params are invisible to the DAG, so a regenerated PREFILTER/Sylvan.gff3 left
+	# this index built from the previous gene set and every downstream STAR run
+	# aligned to a stale transcriptome -- silently, since STAR does not complain.
+	# Measured on 2026-07-29 right after the merge fix regenerated five PREFILTERs:
+	# all five indexes were 1-4 days older than the annotation they claimed to index.
+	input:
+		genome = config_dict["Input"]["genome"],
+		anot_gff = config_dict["Input"]["anot_gff"]
 	output: f"{RESULTS_DIR}FILTER/STAR/SA"
 	threads: config_dict["Threads"]["STAR_index"]
 	params:
@@ -689,6 +699,16 @@ rule combineBlastRex:
 
 #TODO: Add repeat coverage calculation... add to config as well
 rule abInitioCoverage:
+	# Same params-only defect as STAR_index (issue #49): the annotation and the four
+	# evidence tracks decide the output, so they belong in the DAG. Declared here so a
+	# regenerated PREFILTER or a rebuilt evidence track re-derives the coverage beds
+	# instead of leaving the filter to score against the previous gene set.
+	input:
+		anot_gff = config_dict["Input"]["anot_gff"],
+		augustus_gff = config_dict["Input"]["augustus_gff"],
+		helixer_gff = config_dict["Input"]["helixer_gff"],
+		repeat_gff = config_dict["Input"]["repeat_gff"],
+		miniprot_gff = config_dict["Input"]["miniprot_gff"]
 	output:
 		f"{RESULTS_DIR}FILTER/augustus_coverage.bed",
 		f"{RESULTS_DIR}FILTER/helixer_coverage.bed",
@@ -771,7 +791,10 @@ rule filter:
 		miniprot = f"{RESULTS_DIR}FILTER/miniprot_coverage.bed",
 		cov = f"{RESULTS_DIR}FILTER/cov.bed",
 		lncrna = f"{RESULTS_DIR}FILTER/lncrna_predict.csv",
-		busco = f"{RESULTS_DIR}FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv"
+		busco = f"{RESULTS_DIR}FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv",
+		# The annotation being filtered was params-only (issue #49) -- the rule that
+		# writes filtered.gff3 did not depend on the gene set it filters.
+		anot_gff = config_dict["Input"]["anot_gff"]
 	output:
 		f"{RESULTS_DIR}FILTER/filtered.gff3"
 	params:
