@@ -426,7 +426,20 @@ rule STAR_index:
 	params:
 		g = config_dict["Input"]["genome"],
 		gff = config_dict["Input"]["anot_gff"],
-		results_dir = RESULTS_DIR
+		results_dir = RESULTS_DIR,
+		# STAR's --limitGenomeGenerateRAM defaults to 31 GB and is a hard PARAMETER
+		# check, not a soft target: exceed it and STAR aborts in seconds with
+		# "EXITING because of FATAL PARAMETER ERROR" -- which a wave then retries
+		# forever, since the input never changes. genomeGenerate needs roughly
+		# 10 x genome size before --sjdbGTFfile insertion adds more on top, so the
+		# default only holds for genomes under ~3 Gb. Fleet headroom (2026-07-29):
+		# Spe_A 1.00 Gb ~ 10 GB, but Ahy_A 2.60 Gb ~ 26 GB = 84 % of the default
+		# before sjdbInsert. Derive the cap from the same config value SLURM
+		# allocates (90 % of it) so the two cannot drift apart.
+		ram_bytes = int(
+			float(str(config_dict.get("STAR_index", {}).get("memory", "96g")).lower().rstrip("gb"))
+			* 1024**3 * 0.9
+		)
 	shell:"""
 		micromamba activate alignment
 		STAR \
@@ -435,6 +448,7 @@ rule STAR_index:
 		--genomeDir {params.results_dir}FILTER/STAR \
 		--genomeFastaFiles {params.g} \
 		--genomeSAindexNbases 12 \
+		--limitGenomeGenerateRAM {params.ram_bytes} \
 		--sjdbGTFfile {params.gff} \
 		--sjdbGTFtagExonParentTranscript Parent \
 		--outTmpDir {params.results_dir}FILTER/STAR/_STARtmp_index
