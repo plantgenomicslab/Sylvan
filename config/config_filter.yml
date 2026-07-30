@@ -207,7 +207,14 @@ prepRSEM:
   # was 64g: sacct MaxRSS peak 0.00g over 7 jobs
 lncRNA_pred:
   ncpus: 48
-  memory: 64g       # lncDC on ~48k transcripts uses tens of GB, not 192g; refine from sacct MaxRSS
+  # 96g (was 64g, itself down from 192g). Refined from sacct MaxRSS across five runs
+  # on 2026-07-29: Ath 28,412 mRNA -> 28.96g | Spe_A 42,805 -> 46.28g |
+  # Dca 45,050 -> 54.11g | Ptr 41,344 -> 54.64g | Osa 54,240 -> 53.95g.
+  # Note it does NOT scale linearly with transcript count -- Osa has the most mRNAs
+  # yet peaks where Ptr does, so usage saturates near ~54g. But that left only 14%
+  # headroom under 64g, and where the saturation breaks is unknown; Ahy_A is expected
+  # at ~1.5x Osa's transcript count. 96g = 1.76x the observed maximum.
+  memory: 96g
 STAR_index:
   ncpus: 12
   memory: 48g
