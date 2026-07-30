@@ -3436,10 +3436,25 @@ rule pasaPost:
 			export TMPDIR={params.results_dir}TMP
 			export SLURM_TMPDIR={params.results_dir}TMP
 
+			# Chimera guard (2026-07-30). EVM chains adjacent genes' evidence into one
+			# model where evidence is dense -- the individual tracks are fine (Sly's bad
+			# region peaks at AUGUSTUS 49.7 kb / Liftoff 45.4 kb) but the model EVM emits
+			# spanned 188 kb with 575 exons and 38,009 aa. PASA's alignment assembler dies
+			# on those: `pasaPost.Sly` failed after 7 h 22 m with "Fatal Error reading
+			# input file / PASA died on input file. See pasa_killer.input", and since the
+			# input never changes a retry burns the same 7 hours (the psiclass #41 shape).
+			# Thresholds are set from fleet measurements -- max exon/mRNA was Ath 92,
+			# Osa 79, Mtr 90, Ptr 107 against Sly's 669; max protein was 5.4-18.7 k aa
+			# against Sly's 42,592 -- so this catches Sly's 57 models and *nothing* in the
+			# other six scored runs. The rule is fleet-wide; the effect is one run.
+			# Reads the EVM output and never writes it, so EVM.all.gff3 stays pristine.
+			python3 $WORKDIR/bin/strip_evm_chimeras.py \
+				{input.evm} {params.pasa_dir}/EVM.all.pasa_input.gff3
+
 			{params.pasa_home}/scripts/Load_Current_Gene_Annotations.dbi \
 			-c {params.results_dir}config/alignAssembly.config \
 			-g genome.fasta \
-			-P {input.evm}
+			-P {params.pasa_dir}/EVM.all.pasa_input.gff3
 
 			{params.pasa_home}/Launch_PASA_pipeline.pl \
 			-c {params.results_dir}config/annotCompare.config \
