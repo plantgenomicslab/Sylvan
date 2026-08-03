@@ -100,6 +100,81 @@ def getSuffix(feature_id: str) -> str:
 		if re.search(suffix, feature_id):
 			return(re.search(rf"{suffix}\.{{0,1}}\d*", feature_id)[0].lower())
 
+def findChildless(gff: str, report: str = None):
+	"""Find mRNAs with no exon/CDS children, and genes left empty once they go.
+
+	AGAT's ``agat_convert_sp_gxf2gxf.pl`` emits mRNA rows carrying no children --
+	130 of them (all id ``agat-mrna-*``) on the B. tournefortii PREFILTER GFF, each
+	alongside a sibling mRNA that holds every exon and CDS. Such a record declares
+	a span and nothing else: gffread cannot build a sequence for it and skips it
+	silently, so the transcript exists in the GFF but has no CDS, no protein, and
+	no cDNA.
+
+	Left in place they are worse than useless, because ``tidyGFF`` numbers isoforms
+	in file order and a childless mRNA that sorts first takes ``.t1`` -- making the
+	gene's *primary* transcript the one with no sequence. Four genes in run_H1 and
+	two in the shipped annotation ended up that way.
+
+	They cannot be repaired here: there is no exon or CDS row to rebuild from, and
+	borrowing the sibling's structure would invent a transcript that was never
+	predicted -- on this assembly every childless record spans a *different* range
+	from its sibling, so the borrowed model would be wrong as well as fabricated.
+	Dropping them is the only honest option, which is why `report` exists: it names
+	what was removed and where it came from, so the producing step can be fixed
+	upstream instead of this being papered over on every run.
+
+	Returns (childless_mrna_ids, empty_gene_ids).
+	"""
+	mrna = {}          # id -> (seqid, source, start, end, strand, gene)
+	gene_mrnas = {}    # gene -> [mrna ids, in file order]
+	child_count = {}
+	with open(gff) as infile:
+		for line in infile:
+			if line.startswith("#") or not line.strip():
+				continue
+			cols = line.rstrip("\n").split("\t")
+			if len(cols) < 9:
+				continue
+			if cols[2] == "gene":
+				continue
+			if cols[2] == "mRNA":
+				mid, gid = getID(cols[8]), getParent(cols[8])
+				mrna[mid] = (cols[0], cols[1], cols[3], cols[4], cols[6], gid)
+				gene_mrnas.setdefault(gid, []).append(mid)
+				child_count.setdefault(mid, 0)
+			else:
+				# Any non-gene, non-mRNA row counts as a child: an mRNA with a UTR
+				# but no CDS is a different defect, and not this function's to judge.
+				parent = getParent(cols[8])
+				child_count[parent] = child_count.get(parent, 0) + 1
+
+	childless = {m for m in mrna if child_count.get(m, 0) == 0}
+	alive = {}
+	for mid, info in mrna.items():
+		if mid not in childless:
+			alive[info[5]] = alive.get(info[5], 0) + 1
+	empty_genes = {g for g in gene_mrnas if alive.get(g, 0) == 0}
+
+	if report and childless:
+		with open(report, "w") as fh:
+			fh.write("\t".join(["mrna_id", "seqid", "start", "end", "strand",
+			                    "source", "gene_id", "gene_emptied",
+			                    "sibling_mrnas", "siblings_with_children",
+			                    "sibling_detail"]) + "\n")
+			for mid in sorted(childless):
+				seqid, src, start, end, strand, gid = mrna[mid]
+				sibs = [s for s in gene_mrnas.get(gid, []) if s != mid]
+				ok = [s for s in sibs if child_count.get(s, 0) > 0]
+				detail = ";".join(
+					f"{s}:{mrna[s][2]}-{mrna[s][3]}({child_count.get(s, 0)} children)"
+					for s in sibs) or "-"
+				fh.write("\t".join([mid, seqid, start, end, strand, src, gid,
+				                    "yes" if gid in empty_genes else "no",
+				                    str(len(sibs)), str(len(ok)), detail]) + "\n")
+
+	return childless, empty_genes
+
+
 def loadGFF(gff: str) -> dict:
 	with open(gff, 'r') as infile:
 		gff_dict = {}
@@ -265,7 +340,7 @@ def sortGFF(gff_dict: dict, output: str, chrom_regex = False, contig_regex = Fal
 	outfile.close()
 
 
-def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int, no_chrom_id: bool, sort: bool, chrom_regex = False, contig_regex = False, source = None):
+def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int, no_chrom_id: bool, sort: bool, chrom_regex = False, contig_regex = False, source = None, drop_childless = True, childless_report = None):
 
 	# Guard against a path/directory being passed as the ID prefix (issue #10):
 	# a '/' in `pre` lands inside every gene ID (e.g. "results/FILTER00000010"),
@@ -280,14 +355,15 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 	
 	if not no_chrom_id:
 		if sort:
-			sorted = pd.read_csv("preSort.tidyGFF.gff", sep='\t', comment='#', header=None, names=["seqid", "source", "type", "start", "end", "score", "strand", "phase", "attributes"])
+			# NOT named `sorted`: that shadowed the builtin for the rest of the function.
+			sorted_df = pd.read_csv("preSort.tidyGFF.gff", sep='\t', comment='#', header=None, names=["seqid", "source", "type", "start", "end", "score", "strand", "phase", "attributes"])
 		else:
-			sorted = pd.read_csv(gff, sep='\t', comment='#', header=None, names=["seqid", "source", "type", "start", "end", "score", "strand", "phase", "attributes"])
+			sorted_df = pd.read_csv(gff, sep='\t', comment='#', header=None, names=["seqid", "source", "type", "start", "end", "score", "strand", "phase", "attributes"])
 		# Get the total number of true chromosomes
 		if chrom_regex:
-			total_chroms = sorted.loc[sorted.seqid.str.contains(chrom_regex), "seqid"].unique()
+			total_chroms = sorted_df.loc[sorted_df.seqid.str.contains(chrom_regex), "seqid"].unique()
 		else:
-			total_chroms = sorted.loc[sorted.seqid.str.contains(r'(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)'), "seqid"].unique()
+			total_chroms = sorted_df.loc[sorted_df.seqid.str.contains(r'(^Chr)|(^chr)|(^LG)|(^Ch)|(^\d)'), "seqid"].unique()
 		# Extract the numeric part of each chromosome name, skipping names with no
 		# digits (ChrM/ChrC) or suffixes so int("") does not crash (issue #20.11).
 		chrom_nums = [int(re.sub(r"\D", "", i)) for i in total_chroms if re.sub(r"\D", "", i)]
@@ -297,10 +373,40 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 		else:
 			chrom_just = 1
 
-	if sort:
-		read_file = open("preSort.tidyGFF.gff", 'r')
-	else:
-		read_file = open(gff, 'r')
+	source_gff = "preSort.tidyGFF.gff" if sort else gff
+
+	# Find mRNAs that carry no children. The check always runs and always reports,
+	# because the defect is silent otherwise -- the GFF looks complete and the
+	# gene/mRNA accounting balances, and the only visible trace is a protein FASTA
+	# short by exactly those genes. Dropping is what --keep-childless controls.
+	# Scanning the same file the emission loop reads keeps the two in step whether
+	# or not --sort ran.
+	report_path = childless_report or f"{out}.childless.tsv"
+	childless, empty_genes = findChildless(source_gff, report_path)
+	if childless:
+		# The source column is the actionable part: it names the step that produced
+		# the row, which is where the fix belongs.
+		sources = {}
+		with open(report_path) as fh:
+			next(fh)
+			for row in fh:
+				src = row.split("\t")[5]
+				sources[src] = sources.get(src, 0) + 1
+		breakdown = ", ".join(f"{s}={n}" for s, n in
+		                      sorted(sources.items(), key=lambda kv: -kv[1]))
+		verb = "dropping" if drop_childless else "KEEPING"
+		print(f"WARNING: {len(childless)} mRNA(s) have no exon/CDS children and "
+		      f"yield no sequence -- {verb} them; {len(empty_genes)} gene(s) "
+		      f"emptied as a result.")
+		print(f"         producing step (GFF column 2): {breakdown}")
+		print(f"         per-record detail written to {report_path}")
+		if not drop_childless:
+			print(f"         --keep-childless is set, so a childless record may take "
+			      f".t1 and leave that gene's primary transcript with no sequence.")
+	if not drop_childless:
+		childless, empty_genes = (set(), set())
+
+	read_file = open(source_gff, 'r')
 
 	map_file = open(f"{os.path.basename(gff)}.map", 'w')
 	out_file = open(out, 'w')
@@ -310,6 +416,8 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 	transcript_count = 1
 	feature_counts = {}   # per-transcript {feature_type: count}, reset at each mRNA
 	seen_ids = set()      # global ID uniqueness guard (GFF3 requires unique feature IDs)
+	skip_gene = False     # current gene emitted nothing (every mRNA was childless)
+	skip_mrna = False     # current mRNA dropped, so its children go too
 
 	def _register(full_id):
 		"""Track emitted IDs and guarantee global uniqueness (issue #11).
@@ -358,6 +466,12 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 			line[8] = re.sub(r"Name=[a-zA-Z\d\.\-\_\%]*;{0,1}", "", line[8])
 
 		if line[2] == "gene":
+			# A gene whose every mRNA was dropped emits nothing at all, and must not
+			# consume a seq_count -- otherwise the surviving genes are renumbered.
+			skip_gene = getID(line[8]) in empty_genes
+			skip_mrna = skip_gene
+			if skip_gene:
+				continue
 			if no_chrom_id:
 				seq = f"{pre}{str(seq_count).zfill(justify)}0"
 			else:
@@ -369,6 +483,11 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 			line[8], old_id = replaceID(seq, line[8], "")
 			map_file.write("\t".join(["gene", old_id, seq]) + "\n")
 		elif line[2] == "mRNA":
+			# Skipped before transcript_count advances, so the first surviving
+			# isoform of the gene is the one that gets .t1.
+			skip_mrna = skip_gene or getID(line[8]) in childless
+			if skip_mrna:
+				continue
 			base = getID(line[8])
 			line[8] = replaceParent(seq, line[8])
 			transcript_seq = seq + f".{splice}{transcript_count}"
@@ -378,6 +497,8 @@ def tidyGFF(pre: str, gff: str, names: bool, out: str, splice: str, justify: int
 			line[8], old_id = replaceID(transcript_seq, line[8], "")
 			map_file.write("\t".join(["mRNA", old_id, transcript_seq]) + "\n")
 		else:
+			if skip_mrna:
+				continue
 			line[8] = replaceParent(transcript_seq, line[8])
 			# Number each child feature per (transcript, type) from the authoritative
 			# type column, e.g. .cds1/.cds2/.exon1 (issue #11). The former getSuffix
@@ -412,6 +533,18 @@ if __name__ == "__main__":
 	ap.add_argument('--chrom-regex', default=False, help=r"Provide regex for chromosome prefixes. Prefixes Chr, chr, LG, Ch, ^\d are automatically detected.")
 	ap.add_argument('--contig-regex', default=False, help=r"Provide regex for contig/scaffold prefixes and the desired gene name prefix. e.g 'HiC_scaffold_(\d+$),Scaf' results in prefixScaf(\$d+)G000010")
 	ap.add_argument('--source', type=str, default=None, help="Value for GFF column 2")
+	ap.add_argument('--keep-childless', action='store_true',
+	                help="Keep mRNAs that have no exon/CDS children. They produce no "
+	                     "sequence (gffread skips them silently) and, because isoforms "
+	                     "are numbered in file order, a childless record sorting first "
+	                     "takes .t1 and leaves the gene's primary transcript without a "
+	                     "sequence. Dropped by default; they are reported either way.")
+	ap.add_argument('--childless-report', type=str, default=None,
+	                help="Where to write the per-record TSV naming every childless mRNA, "
+	                     "its coordinates, the step that produced it (GFF column 2) and "
+	                     "its siblings. Defaults to <out>.childless.tsv. Use it to fix "
+	                     "the producing step -- these records cannot be repaired here, "
+	                     "since no exon or CDS row survives to rebuild them from.")
 	args = ap.parse_args()
 
 	pre = args.pre
@@ -422,6 +555,6 @@ if __name__ == "__main__":
 	justify = args.justify - 1
 	no_chrom_id = args.no_chrom_id
 	
-	tidyGFF(args.pre, args.gff, args.remove_names, args.out, args.splice_name, args.justify , args.no_chrom_id, args.sort, args.chrom_regex, args.contig_regex, args.source)
+	tidyGFF(args.pre, args.gff, args.remove_names, args.out, args.splice_name, args.justify , args.no_chrom_id, args.sort, args.chrom_regex, args.contig_regex, args.source, not args.keep_childless, args.childless_report)
 	
 	print(f"\nTidy GFF file written to {out}.")
