@@ -43,13 +43,24 @@ TYPICAL PIPELINE
     primary_fasta.py all.pep primary.pep --rename
     busco -i primary.pep -l brassicales_odb10 -m proteins -o busco_primary
 
+FEED IT EVERY ISOFORM
+---------------------
+The input must contain all isoforms. Give it a FASTA that already holds one record
+per gene and this tool cannot add back a gene whose single record is not the `.t1`
+one -- it can only drop it. EVM's `gff3_file_to_proteins.pl <gff> <genome> gene` is
+exactly that trap: `gene` mode emits one record per gene and picks which isoform
+represents it from an unordered Perl hash, so 1,991 of 43,981 B. tournefortii genes
+came through as `.t2`/`.t3`/`.t4` and were dropped here (issue #30). Use `prot`,
+`CDS` or `cDNA` mode, or `gffread -y`, all of which emit every isoform.
+
 OUTPUT
 ------
 Filtered FASTA on `output`; a one-line count and any warnings on stderr, so stdout
 stays clean when writing to `-`. Warnings are raised when nothing matched the
-suffix, when the suffix has no leading dot (`t1` would also match `sampleXt1`), and
-when renaming produces duplicate gene IDs -- that last one means the suffix does not
-identify a unique isoform per gene and the selection is wrong.
+suffix, when the suffix has no leading dot (`t1` would also match `sampleXt1`), when
+renaming produces duplicate gene IDs -- that one means the suffix does not identify a
+unique isoform per gene and the selection is wrong -- and when a gene has no record
+matching the suffix at all, which is the silent-loss case described above.
 
 NOTES
 -----
@@ -61,6 +72,7 @@ The legacy positional call `primary_fasta.py in out [suffix]` still works, but t
 default suffix is `.t1` rather than the older dotless `t1`.
 """
 import argparse
+import re
 import sys
 
 
@@ -114,16 +126,33 @@ def main():
               f"IDs that merely end in those characters. Did you mean '.{suffix}'?",
               file=sys.stderr)
 
+    # Derive the isoform pattern from the suffix (".t1" -> r"\.t\d+$") so every record
+    # can be attributed to a gene, kept or not. Without this the count below cannot tell
+    # "one isoform per gene, the other isoforms dropped" -- the intended outcome -- from
+    # "this gene had no primary at all", which is silent data loss. See issue #30: EVM's
+    # `gff3_file_to_proteins.pl ... gene` emits one arbitrary isoform per gene, so 1,991
+    # of 43,981 B. tournefortii genes were represented by a non-.t1 record and vanished
+    # here with nothing on stderr but a plausible-looking count.
+    iso_match = re.match(r"^(.*?)(\d+)$", suffix)
+    iso_re = re.compile(re.escape(iso_match.group(1)) + r"\d+$") if iso_match else None
+
     out = sys.stdout if args.output == "-" else open(args.output, "w")
     total = kept = dup = 0
     seen = set()
+    # Gene IDs, not sequences: this stays small next to the FASTA the tool streams.
+    genes_in = set()
+    genes_kept = set()
     try:
         for header, seq in stream_fasta(args.input):
             total += 1
             seq_id = header.split(None, 1)[0]
+            if iso_re:
+                genes_in.add(iso_re.sub("", seq_id))
             if not seq_id.endswith(suffix):
                 continue
             kept += 1
+            if iso_re:
+                genes_kept.add(iso_re.sub("", seq_id))
             desc = header.split(None, 1)[1:]
             if args.rename:
                 seq_id = seq_id[: -len(suffix)]
@@ -145,6 +174,14 @@ def main():
     if dup:
         print(f"WARNING: {dup} duplicate gene IDs after renaming -- the suffix does "
               f"not uniquely identify one isoform per gene.", file=sys.stderr)
+    lost = len(genes_in) - len(genes_kept)
+    if lost:
+        missing = sorted(genes_in - genes_kept)
+        print(f"WARNING: {lost} of {len(genes_in)} genes have no {suffix!r} record and "
+              f"are absent from the output entirely, e.g. "
+              f"{', '.join(missing[:3])}{' ...' if lost > 3 else ''}. Selecting primaries "
+              f"cannot recover a gene whose primary isoform is not in the input -- check "
+              f"how the input FASTA was produced.", file=sys.stderr)
 
 
 if __name__ == "__main__":
