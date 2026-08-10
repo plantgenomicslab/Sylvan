@@ -236,6 +236,16 @@ YAMLEOF
 	done
 
 
+	# ---- ProtHint bundle (spaln + spaln_boundary_scorer) for genewise->spaln swap (2026-08-10 Ath_ODB pilot) ---- #
+	# Prebuilt binaries are committed in the repo, so the source tag tarball is sufficient.
+	cd /opt
+	(curl -sL -o ProtHint.tar.gz https://github.com/gatech-genemark/ProtHint/archive/refs/tags/v2.6.0.tar.gz \
+	 && tar xzf ProtHint.tar.gz && rm ProtHint.tar.gz && mv ProtHint-* ProtHint) \
+	 || git clone --depth 1 https://github.com/gatech-genemark/ProtHint.git /opt/ProtHint
+	chmod +x /opt/ProtHint/dependencies/spaln /opt/ProtHint/dependencies/spaln_boundary_scorer
+	/opt/ProtHint/dependencies/spaln 2>&1 | head -3 || true
+	/opt/ProtHint/dependencies/spaln_boundary_scorer 2>&1 | head -3 || true
+
 	# ---- Install PsiCLASS ---- #
 	# Change to the directory where source code is commonly stored
 	cd /usr/local/src
@@ -604,6 +614,10 @@ YAMLEOF
 
 	# Set the Wise2 configuration directory (required by genewise)
 	export WISECONFIGDIR=/opt/envs/genepred/share/wise2/wisecfg
+
+	# ProtHint spaln bundle (2026-08-10 pilot): species parameter tables + binaries on PATH
+	export ALN_TAB=/opt/ProtHint/dependencies/spaln_table
+	export PATH=/opt/ProtHint/dependencies:$PATH
 
 	# Micromamba shell hook (so `micromamba activate` works in shell commands).
 	# Source the hook pre-generated in %post instead of forking `micromamba shell
