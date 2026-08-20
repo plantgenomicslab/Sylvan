@@ -71,10 +71,23 @@ def parse_genes(gff3_path):
 
 
 def parse_miniprot(gff3_path):
-    """Parse miniprot GFF3 (mRNA/CDS only, no gene lines)."""
+    """Parse miniprot GFF3 (mRNA/CDS only, no gene lines).
+
+    Unlike parse_genes, the raw GFF text is not retained: miniprot models are
+    barred from being replacement sources (see the main loop), so only their
+    coordinates, intervals and identity are ever read. At OrthoDB scale the
+    input is ~9 GB / 12M models, and keeping the text cost ~25 GB RSS.
+    """
     models = []
     current = None
-    current_lines = []
+    first_mrna_id = None
+    cds = []
+    exons = []
+
+    def _finalize(model):
+        model["cds_intervals"] = sorted(set(cds))
+        model["exon_intervals"] = sorted(set(exons))
+        models.append(model)
 
     with open(gff3_path) as f:
         for line in f:
@@ -86,27 +99,31 @@ def parse_miniprot(gff3_path):
 
             if cols[2] == "mRNA":
                 if current:
-                    current["lines"] = current_lines
-                    _extract_intervals(current)
-                    models.append(current)
+                    _finalize(current)
                 mid = _get_attr(cols[8], "ID") or f"mp_{len(models)}"
                 identity = _get_attr(cols[8], "Identity")
+                first_mrna_id = _get_attr(cols[8], "ID")
                 current = {
                     "chrom": cols[0], "start": int(cols[3]), "end": int(cols[4]),
                     "strand": cols[6], "gene_id": mid, "source": "miniprot",
                     "lines": [], "cds_intervals": [], "exon_intervals": [],
                     "identity": float(identity) if identity else 0.0
                 }
-                # Wrap mRNA in a synthetic gene line
-                gene_line = f"{cols[0]}\tminiprot\tgene\t{cols[3]}\t{cols[4]}\t{cols[5]}\t{cols[6]}\t.\tID={mid}_gene\n"
-                current_lines = [gene_line, line]
-            elif current:
-                current_lines.append(line)
+                cds = []
+                exons = []
+            elif current and cols[2] in ("CDS", "exon"):
+                # Same isoform guard as _extract_intervals: only rows whose
+                # Parent matches the opening mRNA's ID contribute intervals.
+                parent = _get_attr(cols[8], "Parent")
+                if first_mrna_id and parent and parent != first_mrna_id:
+                    continue
+                if cols[2] == "CDS":
+                    cds.append((int(cols[3]), int(cols[4])))
+                else:
+                    exons.append((int(cols[3]), int(cols[4])))
 
     if current:
-        current["lines"] = current_lines
-        _extract_intervals(current)
-        models.append(current)
+        _finalize(current)
 
     return models
 
