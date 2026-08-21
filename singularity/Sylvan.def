@@ -79,7 +79,11 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - star
+  # Pinned: the 20260810 rebuild floated star down to 2.7.10b, which does not
+  # know --quantTranscriptomeSAMoutput (2.7.11a+). Every filter STAR_paired job
+  # died on it until Snakefile_filter went back to --quantTranscriptomeBan.
+  # Change this pin and the flag in bin/Snakefile_filter together, never alone.
+  - star=2.7.10b
   - hisat2
   - samtools
   - sambamba
