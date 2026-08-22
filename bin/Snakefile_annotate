@@ -3485,9 +3485,31 @@ rule agat_clean_final:
 		micromamba activate annotation
 		mkdir -p {params.results_dir}PREFILTER
 
-		# Find latest PASA output GFF3
-		pasa_files=( {params.pasa_dir}/pasa.sqlite.gene_structures_post_PASA_updates.*.gff3 )
-		pasa_gff3="${{pasa_files[-1]}}"
+		# Find latest PASA output GFF3.
+		#
+		# By mtime, not by glob order. PASA names this file with its process ID,
+		# so the alphabetical last element carries no information about which run
+		# produced it: a run that executed `pasaPost` twice keeps both files, and
+		# the larger PID string wins even when it is the older file. Measured
+		# 2026-08-01 across the fleet -- Osa selected the 07-23 output over its
+		# 07-27 rebuild (PID 47426 > 39727) and Spe_A the 07-27 output over its
+		# 07-31 rebuild (57220 > 41461), while Ath was spared only because its
+		# PIDs happened to ascend with time. The resolved path is echoed below and
+		# lands in results/logs/agat_clean_final_*.out -- compare it against the
+		# file date when auditing a rebuilt run.
+		#
+		# 2026-08-22: this fix was first rolled out only to the runs that were
+		# mis-selecting on 08-01, on the reasoning that "runs that executed
+		# pasaPost once were never at risk". Ptr_ODB then ran pasaPost a second
+		# time, picked its 07-28 output over the 08-20 rebuild (53164 > 45711),
+		# and merged it against an 08-19 EVM. PASA carries evm.* identifiers
+		# forward and EVM renumbers when regenerated, so the same ID named two
+		# loci; AGAT fused those into 254 mRNAs with exons on both strands, one
+		# spanning 545 kb, and makeCDSPep refused the file (issues #50/#51). The
+		# stale merge also left 1,843 EVM genes uncovered where the correct PASA
+		# leaves 238. A run is at risk the moment it reruns pasaPost, so this
+		# now ships to every run rather than to the ones already bitten.
+		pasa_gff3=$(ls -t {params.pasa_dir}/pasa.sqlite.gene_structures_post_PASA_updates.*.gff3 2>/dev/null | head -1)
 		if [ ! -f "${{pasa_gff3}}" ]; then
 			echo "ERROR: No PASA output GFF3 found in {params.pasa_dir}" >&2
 			exit 1

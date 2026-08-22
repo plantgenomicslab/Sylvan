@@ -508,7 +508,17 @@ def main():
                     for line in block:
                         f.write(line)
             else:
-                emitted_ids |= block_ids(lines)
+                # PASA blocks need the same collision check as EVM ones. The
+                # check used to run in one direction only -- a PASA block just
+                # registered its IDs -- so a PASA gene written late could
+                # collide with an EVM block written earlier for a lower
+                # coordinate, and nothing renamed it. That is how Ptr_ODB got
+                # evm.model.Ptr_Chr01.1056 written twice: PASA carried the ID at
+                # 9,947,847-9,948,680 on the minus strand while EVM had it at
+                # 9,403,891-9,408,364 on the plus strand, and AGAT fused the two
+                # into one 545 kb mRNA with children on both strands.
+                lines, ids = disambiguate_block(lines, emitted_ids)
+                emitted_ids |= ids
                 for line in lines:
                     f.write(line)
         if rescued_blocks:
