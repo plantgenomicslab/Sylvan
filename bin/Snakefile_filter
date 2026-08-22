@@ -473,6 +473,11 @@ rule STAR_paired:
 			# Removing only this rule's own {wildcards.run}_STARtmp is safe: the
 			# path is per-run and nothing else reads it.
 			rm -rf {params.results_dir}FILTER/STAR/{wildcards.run}_STARtmp
+			# STAR 2.7.11a renamed --quantTranscriptomeBan to
+			# --quantTranscriptomeSAMoutput. The container ships 2.7.10b, which only
+			# knows the old name; IndelSoftclipSingleend is the same setting as
+			# BanSingleEnd_BanIndels_ExtendSoftclip. Keep this in step with the
+			# star pin in singularity/Sylvan.def.
 			STAR --runMode alignReads \
 			--runThreadN {threads} \
 			--outFilterMultimapNmax 10 \
@@ -489,7 +494,7 @@ rule STAR_paired:
 			--readFilesCommand gunzip -c \
 			--readFilesIn {input.one} {input.two} \
 			--quantMode TranscriptomeSAM \
-			--quantTranscriptomeSAMoutput BanSingleEnd_BanIndels_ExtendSoftclip \
+			--quantTranscriptomeBan IndelSoftclipSingleend \
 			--alignEndsType EndToEnd
 			"""
 
@@ -511,6 +516,11 @@ rule STAR_single:
 			# Removing only this rule's own {wildcards.run}_STARtmp is safe: the
 			# path is per-run and nothing else reads it.
 			rm -rf {params.results_dir}FILTER/STAR/{wildcards.run}_STARtmp
+			# STAR 2.7.11a renamed --quantTranscriptomeBan to
+			# --quantTranscriptomeSAMoutput. The container ships 2.7.10b, which only
+			# knows the old name; IndelSoftclipSingleend is the same setting as
+			# BanSingleEnd_BanIndels_ExtendSoftclip. Keep this in step with the
+			# star pin in singularity/Sylvan.def.
 			STAR --runMode alignReads \
 			--runThreadN {threads} \
 			--outFilterMultimapNmax 10 \
@@ -527,7 +537,7 @@ rule STAR_single:
 			--readFilesCommand gunzip -c \
 			--readFilesIn {input.single} \
 			--quantMode TranscriptomeSAM \
-			--quantTranscriptomeSAMoutput BanSingleEnd_BanIndels_ExtendSoftclip \
+			--quantTranscriptomeBan IndelSoftclipSingleend \
 			--alignEndsType EndToEnd
 			"""
 

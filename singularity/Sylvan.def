@@ -79,7 +79,20 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - star
+  # Pinned: the 20260810 rebuild floated star down to 2.7.10b, which does not
+  # know --quantTranscriptomeSAMoutput (2.7.11a+). Every filter STAR_paired job
+  # died on it until Snakefile_filter went back to --quantTranscriptomeBan.
+  # Change this pin and the flag in bin/Snakefile_filter together, never alone.
+  - star=2.7.10b
+  # Pinned to the version every existing stringtie.star.gff in the fleet was
+  # built with (07-16..07-25, all 24 runs). The same 20260810 rebuild that moved
+  # star also floated stringtie 3.0.3 -> 2.1.7. Nothing has re-run the rule since
+  # -- the outputs exist and --rerun-triggers mtime will not rebuild them -- and
+  # the flags the rule passes (-o -l -p -t -c -f) exist in both, so 2.1.7 would
+  # not crash: it would quietly assemble different transcripts. NOTE the shipped
+  # Sylvan_20260810_spaln.sif contains 2.1.7, so this pin only takes effect on
+  # the next rebuild; until then do not force a stringtie_STAR rerun.
+  - stringtie=3.0.3
   - hisat2
   - samtools
   - sambamba
