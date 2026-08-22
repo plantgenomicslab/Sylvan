@@ -181,7 +181,13 @@ combineBlastRex:    # cat of per-part blastRex hits; light (#14)
   memory: 16g
 abInitioCoverage:
   ncpus: 1
-  memory: 4g
+  # 4g held for the baseline fleet, where this rule finished in 5-11 seconds.
+  # It builds beds from the augustus/helixer/repeat/miniprot tracks, and adding
+  # OrthoDB to the protein set takes the miniprot GFF from ~130 MB to 10-12 GB
+  # (Ptr 126M -> 12G, Dca 138M -> 10G) while the other three are unchanged. The
+  # _ODB runs then ran 26-31 minutes and died OOM. Gene counts barely move
+  # (Ptr 41,344 -> 42,160), so this is the evidence track, not the annotation.
+  memory: 64g
 splitInterleaved:
   ncpus: 2
   memory: 8g               # sort runs with -S 2G and spills to $TMPDIR
