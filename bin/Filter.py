@@ -391,24 +391,55 @@ def filter_genes(gff_path, tpm_cutoff, cov_cutoff, augustus_cutoff, helixer_cuto
 # GFF3 filtering helpers
 # ---------------------------------------------------------------------------
 
+TRANSCRIPT_FEATURES = ("mRNA", "transcript")
+
+
 def filter_gff(gff_data, keep):
-	"""Split GFF3 into kept and discarded rows based on transcript IDs."""
+	"""Split GFF3 into kept and discarded rows, by feature level.
+
+	The three levels are matched against different sets, because they mean
+	different things:
+
+	  gene       kept when ANY of its transcripts is kept
+	  mRNA       kept only when THAT transcript is kept
+	  exon/CDS   kept when any listed Parent transcript is kept
+
+	One flat name set for all three is what produced issue #37. Gene IDs were
+	added to it (by stripping `.tN`) so that gene rows would survive, but the
+	parent test does not know what kind of feature it is looking at, so a
+	*discarded* mRNA whose Parent is that gene matched too. Its children matched
+	nothing and went to the discard file, leaving an mRNA with no exon or CDS in
+	the released annotation -- 138 of them across the nine head-to-head runs,
+	and in 9 of Osa's 10 cases the empty record had taken `.t1`, which is what
+	primary_fasta.py selects as the representative isoform.
+	"""
 	gff_data["transcript_id"] = gff_data[8].apply(_get_gff_id)
 	gff_data["parent_id"] = gff_data[8].apply(_get_gff_parent)
-	names = keep['New_ID']
-	# Include gene-level IDs (strip .tN suffix only) to match gene features
-	names = pd.concat([names, names.str.replace(r'\.t\d+$', '', regex=True)])
-	name_set = set(names.dropna())
-	tid_match = gff_data["transcript_id"].isin(name_set)
+
+	kept_tx = set(keep["New_ID"].dropna())
+	# TidyGFF numbers isoforms `<gene>.tN`, so the gene ID is the transcript ID
+	# without that suffix. Anchored, so a gene called `x.t1y` is left alone.
+	kept_genes = {re.sub(r"\.t\d+$", "", tid) for tid in kept_tx}
+
+	ftype = gff_data[2]
+	is_gene = ftype == "gene"
+	is_tx = ftype.isin(TRANSCRIPT_FEATURES)
+
 	# A feature may list multiple parents (Parent=t1,t2 — e.g. an exon shared by
 	# two isoforms). Keep it if ANY listed parent is kept, otherwise shared exons
 	# of kept genes are silently dropped (issue #20.5).
 	# isinstance, not bool(p): rows without a Parent= yield None, which pandas may
 	# store as NaN. bool(nan) is True, so a truthiness guard lets a float through
 	# to .split() -- AttributeError: 'float' object has no attribute 'split'.
-	pid_match = gff_data["parent_id"].apply(
-		lambda p: isinstance(p, str) and any(x in name_set for x in p.split(",")))
-	to_keep = tid_match | pid_match
+	def _parent_kept(parent):
+		return isinstance(parent, str) and any(
+			x in kept_tx for x in parent.split(","))
+
+	to_keep = (
+		(is_gene & gff_data["transcript_id"].isin(kept_genes))
+		| (is_tx & gff_data["transcript_id"].isin(kept_tx))
+		| (~is_gene & ~is_tx & gff_data["parent_id"].apply(_parent_kept))
+	)
 	return gff_data[to_keep], gff_data[~to_keep]
 
 
