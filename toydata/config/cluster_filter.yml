@@ -28,7 +28,7 @@ __default__:
 PfamScan:
   ncpus: 48
   memory: 192g
-RSEM:
+calculateRSEMExpression_PAIRED:
   ncpus: 32
   memory: 128g
 sortSTAR:
@@ -40,9 +40,6 @@ blast:
 coverage:
   ncpus: 16
   memory: 64g
-indexRef:
-  ncpus: 4
-  memory: 16g
 blastDB:
   ncpus: 4
   memory: 16g
@@ -58,9 +55,6 @@ combineBlast:
 abInitioCoverage:
   ncpus: 1
   memory: 4g
-STAR_generate:
-  ncpus: 12
-  memory: 48g
 fastp_PAIRED:
   ncpus: 16
   memory: 64g
@@ -70,7 +64,7 @@ STAR_paired:
 mergeSTAR:
   ncpus: 16
   memory: 64g
-calculateRSEMExpression:
+calculateRSEMExpression_SINGLE:
   ncpus: 16
   memory: 64g
 prepRSEM:
@@ -82,3 +76,32 @@ lncRNA_pred:
 STAR_index:
   ncpus: 12
   memory: 48g
+
+# Added 2026-08-22 (#14): these rules had no key and took __default__ 4c/16g.
+# blastRex declares 16 threads, so it was running 16 threads on 4 cpus -- the
+# exact oversubscription the issue reported. The production config was fixed
+# earlier; toydata was not, which is why the symptom was still reproducible.
+blastRex:
+  ncpus: 16
+  memory: 64g
+combineBlastRex:
+  ncpus: 4
+  memory: 16g
+STAR_single:
+  ncpus: 12
+  memory: 48g
+mergeRSEM:
+  ncpus: 4
+  memory: 16g
+busco:
+  ncpus: 4
+  memory: 32g
+makeCDSPep:
+  ncpus: 4
+  memory: 16g
+splitInterleaved:
+  ncpus: 2
+  memory: 8g
+filter:
+  ncpus: 4
+  memory: 16g

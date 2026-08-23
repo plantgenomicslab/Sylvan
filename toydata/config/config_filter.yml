@@ -75,12 +75,13 @@ Threads:
   PfamScan: 48
   sortSTAR: 16
   blast: 16
-  STAR_generate: 12
   fastp_PAIRED: 16
   prepRSEM: 16
   STAR: 12
   mergeSTAR: 16
-  calculateRSEMExpression: 16
+  calculateRSEMExpression_PAIRED: 16
+  calculateRSEMExpression_SINGLE: 16
+  busco: 4
   lncRNA_pred: 24
   STAR_index: 12
 
@@ -96,60 +97,10 @@ __default__:
   output: results/logs/{rule}_{wildcards}.out
   error: results/logs/{rule}_{wildcards}.err
   extra_args: ""                          # Extra sbatch flags (e.g., "--export=ALL")
-PfamScan:
-  ncpus: 48
-  memory: 192g
-RSEM:
-  ncpus: 32
-  memory: 128g
-sortSTAR:
-  ncpus: 16
-  memory: 64g
-blast:
-  ncpus: 16
-  memory: 64g
-coverage:
-  ncpus: 16
-  memory: 64g
-indexRef:
-  ncpus: 4
-  memory: 16g
-blastDB:
-  ncpus: 4
-  memory: 16g
-blastRexDB:
-  ncpus: 4
-  memory: 16g
-splitPep:
-  ncpus: 4
-  memory: 16g
-combineBlast:
-  ncpus: 4
-  memory: 16g
-abInitioCoverage:
-  ncpus: 1
-  memory: 4g
-STAR_generate:
-  ncpus: 12
-  memory: 48g
-fastp_PAIRED:
-  ncpus: 16
-  memory: 64g
-STAR_paired:
-  ncpus: 12
-  memory: 48g
-mergeSTAR:
-  ncpus: 16
-  memory: 64g
-calculateRSEMExpression:
-  ncpus: 16
-  memory: 64g
-prepRSEM:
-  ncpus: 16
-  memory: 64g
-lncRNA_pred:
-  ncpus: 24
-  memory: 96g
-STAR_index:
-  ncpus: 12
-  memory: 48g
+
+# Per-rule SLURM blocks used to live here as well. This file is the pipeline
+# config (SYLVAN_FILTER_CONFIG); the scheduler reads cluster_filter.yml
+# (SYLVAN_FILTER_CLUSTER_CONFIG), so those blocks were never applied and four of
+# them named rules that no longer exist (RSEM, indexRef, STAR_generate,
+# calculateRSEMExpression). Removed so there is one place to change an
+# allocation. See test/check_cluster_config.py (#14).

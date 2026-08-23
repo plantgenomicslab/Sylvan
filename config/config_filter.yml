@@ -87,7 +87,14 @@ Threads:
   prepRSEM: 16
   STAR: 12
   mergeSTAR: 16
-  calculateRSEMExpression: 16
+  # Per rule, not one shared key. The resource side of _PAIRED was measured down
+  # to 12 cpus (5.19 of 16 used over 41 jobs) but this thread count stayed at 16,
+  # so RSEM ran 16 threads on a 12-cpu allocation -- the same oversubscription
+  # shape #14 reported for blastRex, left behind by the right-sizing pass.
+  # _SINGLE keeps 16 because its ncpus is still 16.
+  calculateRSEMExpression_PAIRED: 12
+  calculateRSEMExpression_SINGLE: 16
+  busco: 4                # matches busco.ncpus; the rule now passes -c {threads}
   lncRNA_pred: 48
   STAR_index: 12
 
@@ -114,13 +121,11 @@ makeCDSPep:
   ncpus: 4
   memory: 16g
   # was 64g: sacct MaxRSS peak 2.06g over 9 jobs
-extractTranscriptsForFilter:
-  # Same shape: reads the full annotation, no key, 16g default.
-  ncpus: 4
-  memory: 64g
-filterBlastP:
-  ncpus: 4
-  memory: 32g
+# extractTranscriptsForFilter / filterBlastP were here but are Snakefile_annotate
+# rules (annotate:2332, :2504), never reachable from this workflow, so the entries
+# were inert. config_annotate.yml carries the ones that actually apply, and it
+# disagreed with these (16g/16g there vs 64g/32g here) -- a copy of the wrong pair
+# would have tripled the request. Removed rather than kept as a second source (#14).
 PfamScan:
   ncpus: 20              # was 48: sacct on Dca showed 1.58 of 48 cores used
                     # (TotalCPU 6:58 over 4:24 elapsed, 3.3%). pfam_scan.pl
