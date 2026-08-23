@@ -1,0 +1,55 @@
+name: Cluster config validation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'bin/Snakefile_filter'
+      - 'config/config_filter.yml'
+      - 'toydata/config/config_filter.yml'
+      - 'toydata/config/cluster_filter.yml'
+      - 'test/check_cluster_config.py'
+      - '.github/workflows/cluster-config-check.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'bin/Snakefile_filter'
+      - 'config/config_filter.yml'
+      - 'toydata/config/config_filter.yml'
+      - 'toydata/config/cluster_filter.yml'
+      - 'test/check_cluster_config.py'
+      - '.github/workflows/cluster-config-check.yml'
+
+jobs:
+  filter-cluster-keys:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install YAML parser
+        run: pip install pyyaml
+
+      # Production: one file is both pipeline config and --cluster-config.
+      - name: Production filter config
+        run: |
+          python test/check_cluster_config.py \
+            --snakefile bin/Snakefile_filter \
+            --config config/config_filter.yml \
+            --also-rules-from bin/Snakefile_annotate
+
+      # Toydata splits them: cluster_filter.yml allocates, config_filter.yml
+      # carries Threads. Checking only one of the pair misses the pairing bugs.
+      - name: Toydata filter config
+        run: |
+          python test/check_cluster_config.py \
+            --snakefile bin/Snakefile_filter \
+            --config toydata/config/cluster_filter.yml \
+            --threads-from toydata/config/config_filter.yml \
+            --also-rules-from bin/Snakefile_annotate
+
+# config_annotate.yml is deliberately not gated yet: it carries 27 inert keys
+# from retired tool paths (HiSat2, mikado, portcullis, AS_*) and 5 prep rules on
+# __default__. Gating it today would fail every PR for reasons unrelated to the
+# change under review. Tracked separately.

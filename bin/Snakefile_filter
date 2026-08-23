@@ -548,7 +548,7 @@ rule calculateRSEMExpression_PAIRED:
 		prep = f"{anot_mrna}.seq",
 		bam = f"{RESULTS_DIR}FILTER/STAR/{{run}}.STAR_pairedend.bamAligned.toTranscriptome.out.bam"
 	output: f"{RESULTS_DIR}FILTER/rsem_outdir/{{run}}.isoforms.results"
-	threads: config_dict["Threads"]["calculateRSEMExpression"]
+	threads: config_dict["Threads"]["calculateRSEMExpression_PAIRED"]
 	params:
 		mrna = anot_mrna,
 		results_dir = RESULTS_DIR
@@ -567,7 +567,7 @@ rule calculateRSEMExpression_SINGLE:
 		prep = f"{anot_mrna}.seq",
 		bam = f"{RESULTS_DIR}FILTER/STAR/{{run}}.STAR_singleend.bamAligned.toTranscriptome.out.bam"
 	output: f"{RESULTS_DIR}FILTER/rsem_outdir/{{run}}.isoforms.results"
-	threads: config_dict["Threads"]["calculateRSEMExpression"]
+	threads: config_dict["Threads"]["calculateRSEMExpression_SINGLE"]
 	params:
 		mrna = anot_mrna,
 		results_dir = RESULTS_DIR
@@ -820,8 +820,13 @@ rule lncRNA_pred:
 		'''
 
 rule busco:
+	# The rule was allocated 4 cpus and used one of them: no `threads:` and no -c,
+	# so BUSCO defaulted to a single worker and a run took 52 min to 1 h 54 m
+	# (Dca_ODB 18:00 -> 19:23). Declaring threads and passing -c spends the cpus
+	# the scheduler was already reserving; the allocation itself is unchanged.
 	input: rules.makeCDSPep.output.pep
 	output: f"{RESULTS_DIR}FILTER/busco_{config_dict['Input']['busco_lin']}/run_{config_dict['Input']['busco_lin']}/full_table.tsv"
+	threads: config_dict["Threads"]["busco"]
 	params:
 		busco_lin = config_dict["Input"]["busco_lin"],
 		results_dir = RESULTS_DIR
@@ -831,6 +836,7 @@ rule busco:
 		-l {params.busco_lin} \
 		-o {params.results_dir}FILTER/busco_{params.busco_lin} \
 		-m protein \
+		-c {threads} \
 		-f
 		"""
 
