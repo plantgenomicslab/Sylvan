@@ -868,7 +868,13 @@ rule mergeTransfrag:
 		f"{RESULTS_DIR}GETA/transcript/transfrag.gtf",
 		f"{RESULTS_DIR}GETA/transcript/intron.txt",
 		temp(f"{RESULTS_DIR}GETA/transcript/base_depth.txt"),
-		f"{RESULTS_DIR}GETA/transcript/transfrag.strand.fasta"
+		f"{RESULTS_DIR}GETA/transcript/transfrag.strand.fasta",
+		# transfragDump also writes the unstranded half. It was produced but
+		# never declared, so the DAG could not see it and no rule consumed it --
+		# 24,045 of Ath_ODB's 33,755 transfrags (71.2%) were dropped on the floor.
+		# They are the single-exon models: transfrag infers strand from splice
+		# junctions, so a transcript without one is emitted with strand '.'.
+		f"{RESULTS_DIR}GETA/transcript/transfrag.noStrand.fasta"
 	params:
 		results_dir = RESULTS_DIR
 	run:
@@ -912,13 +918,15 @@ rule transDecoder_LongOrfs:
 		results_dir = RESULTS_DIR
 	shell:"""
 		micromamba activate genepred
-		if [ -d {params.results_dir}GETA/transcript.__checkpoints_longorfs ]; then
-		  if [ -z "$(ls -A {params.results_dir}GETA/transcript.__checkpoints_longorfs)" ]; then
-		    echo "No checkpoints...continuing"
-		  else
-		    rm {params.results_dir}GETA/transcript.__checkpoints_longorfs/*
-		  fi
-		fi
+		# TransDecoder keeps its resume markers in
+		#   <output_dir>/<basename>.transdecoder_dir/__checkpoints_longorfs
+		# not in <output_dir>.__checkpoints_longorfs. The old path never existed,
+		# so a stale TD.longorfs.ok from an earlier run made LongOrfs skip the
+		# search and reuse an obsolete longest_orfs.cds. Observed on Ath_ODB:
+		# transfrag.strand.fasta (9710 seqs, 2026-07-25) produced only 125 ORFs
+		# because the checkpoint was dated 2026-07-16. Reset the whole
+		# transdecoder_dir so LongOrfs always sees the current input.
+		rm -rf {params.results_dir}GETA/transcript/transfrag.strand.fasta.transdecoder_dir
 
 		TransDecoder.LongOrfs {params.args} \
 		  -t {input} -S \
@@ -941,13 +949,11 @@ rule transDecoder_Predict:
 	shell:
 		"""
 		micromamba activate genepred
-		if [ -d {params.results_dir}GETA/transcript.__checkpoints ]; then
-		  if [ -z "$(ls -A {params.results_dir}GETA/transcript.__checkpoints)" ]; then
-		    echo "No checkpoints...continuing";
-		  else
-		    rm {params.results_dir}GETA/transcript.__checkpoints/*;
-		  fi
-		fi
+		# Same stale-checkpoint problem as transDecoder_LongOrfs: Predict's
+		# markers live in transfrag.strand.fasta.transdecoder_dir/__checkpoints_TDpredict.
+		# Only that subdirectory is cleared here -- the parent holds
+		# longest_orfs.cds, which Predict needs as input.
+		rm -rf {params.results_dir}GETA/transcript/transfrag.strand.fasta.transdecoder_dir/__checkpoints_TDpredict
 
 		TransDecoder.Predict {params.args} \
 		  -t {params.results_dir}GETA/transcript/transfrag.strand.fasta \
@@ -970,7 +976,106 @@ rule transDecoder_Predict:
 		fi
 		"""
 
-#TODO: Add "nostrand"?
+# ---- Unstranded (single-exon) transfrag branch ----
+# transfragDump splits its output by strand. Everything above consumes only
+# transfrag.strand.fasta; these rules bring the unstranded half in.
+#
+# Verified on Ath_ODB before wiring this up: transdecoder2ORF accepts entries
+# whose transfrag.gtf strand is '.' and fills in +/- from the ORF direction it
+# picked, so no corrected GTF is needed. 24,045 input sequences yielded 10,972
+# ORF models (5,450 +/5,522 -, zero '.') and 9,597 genes after GFF3Clear.
+# IDs cannot collide with the stranded half: --gene_prefix is transfragNS here
+# and transfrag there.
+#
+# Set Internal.use_unstranded_transfrag to false to fall back to stranded-only.
+USE_UNSTRANDED_TRANSFRAG = bool(
+	config_dict.get("Internal", {}).get("use_unstranded_transfrag", True)
+)
+
+rule transDecoder_LongOrfs_unstranded:
+	input: f"{RESULTS_DIR}GETA/transcript/transfrag.noStrand.fasta"
+	output: f"{RESULTS_DIR}GETA/transcript/nostrand_td/longest_orfs.cds"
+	params: args = config_dict["Internal"]["TransDecoder.LongOrfs"],
+		results_dir = RESULTS_DIR
+	shell:"""
+		micromamba activate genepred
+		# Same stale-checkpoint trap as the stranded rule: reset the whole
+		# transdecoder_dir so LongOrfs always sees the current input.
+		rm -rf {params.results_dir}GETA/transcript/nostrand_td
+
+		# No -S here. These transcripts have no strand, so TransDecoder must
+		# search both frames and choose; -S would force the forward strand and
+		# silently halve the usable models.
+		TransDecoder.LongOrfs {params.args} \
+		  -t {input} \
+		  --output_dir {params.results_dir}GETA/transcript/nostrand_td
+
+		TD_DIR={params.results_dir}GETA/transcript/nostrand_td/transfrag.noStrand.fasta.transdecoder_dir
+		OUT_DIR={params.results_dir}GETA/transcript/nostrand_td
+		if [ ! -f ${{OUT_DIR}}/longest_orfs.cds ] && [ -f ${{TD_DIR}}/longest_orfs.cds ]; then
+		  cp ${{TD_DIR}}/longest_orfs.cds ${{OUT_DIR}}/longest_orfs.cds
+		  cp ${{TD_DIR}}/longest_orfs.gff3 ${{OUT_DIR}}/longest_orfs.gff3 2>/dev/null || true
+		  cp ${{TD_DIR}}/longest_orfs.pep ${{OUT_DIR}}/longest_orfs.pep 2>/dev/null || true
+		fi
+		test -s {output}
+		"""
+
+rule transDecoder_Predict_unstranded:
+	input: f"{RESULTS_DIR}GETA/transcript/nostrand_td/longest_orfs.cds"
+	output: f"{RESULTS_DIR}GETA/transcript/transfrag.nostrand.transdecoder.gff3"
+	params: args = config_dict["Internal"]["TransDecoder.Predict"],
+		results_dir = RESULTS_DIR
+	shell:
+		"""
+		micromamba activate genepred
+		TD_DIR={params.results_dir}GETA/transcript/nostrand_td/transfrag.noStrand.fasta.transdecoder_dir
+		rm -rf ${{TD_DIR}}/__checkpoints_TDpredict
+
+		cd {params.results_dir}GETA/transcript/nostrand_td
+		TransDecoder.Predict {params.args} \
+		  -t {params.results_dir}GETA/transcript/transfrag.noStrand.fasta \
+		  --output_dir {params.results_dir}GETA/transcript/nostrand_td
+
+		OUT={output}
+		if [ -f transfrag.noStrand.fasta.transdecoder.gff3 ]; then
+		  mv transfrag.noStrand.fasta.transdecoder.gff3 ${{OUT}}
+		elif [ -f ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3.revised_starts.gff3 ]; then
+		  cp ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3.revised_starts.gff3 ${{OUT}}
+		elif [ -f ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3 ]; then
+		  cp ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3 ${{OUT}}
+		else
+		  echo "ERROR: unstranded TransDecoder.Predict produced no usable .gff3" >&2
+		  exit 1
+		fi
+		test -s ${{OUT}}
+		"""
+
+rule transdecoder2ORF_unstranded:
+	input:
+		gff = f"{RESULTS_DIR}GETA/transcript/transfrag.nostrand.transdecoder.gff3",
+		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
+	output: f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.gff3"
+	params: results_dir = RESULTS_DIR
+	shell:
+		"""
+		micromamba activate base
+		transdecoder2ORF \
+			--out_protein {params.results_dir}GETA/transcript/proteins.nostrand.fasta \
+			{params.results_dir}GETA/transcript/transfrag.gtf \
+			{input.gff} {input.genome_fasta} > {output}.part
+
+		# Guard the one thing that could silently poison the merge: a model that
+		# still carries strand '.' would be meaningless downstream. Measured
+		# expectation is zero.
+		dots=$(awk -F'\t' '$0!~/^#/ && $3=="gene" && $7=="." {{n++}} END{{print n+0}}' {output}.part)
+		genes=$(awk -F'\t' '$0!~/^#/ && $3=="gene" {{n++}} END{{print n+0}}' {output}.part)
+		echo "transdecoder2ORF_unstranded: genes=$genes dot_strand=$dots" >&2
+		if [ "$genes" -eq 0 ] || [ "$dots" -ne 0 ]; then
+		  echo "ERROR: unstranded ORF output invalid (genes=$genes dot_strand=$dots)" >&2
+		  exit 1
+		fi
+		mv {output}.part {output}
+		"""
 
 rule transdecoder2ORF:
 	input:
@@ -987,19 +1092,63 @@ rule transdecoder2ORF:
 			{input.gff} {input.genome_fasta} > {params.results_dir}GETA/transcript/transdecoder2ORF.gff3
 		"""
 
+rule filter_unstranded_transfrag:
+	input:
+		gff = f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.gff3"
+	output: f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.filtered.gff3"
+	params:
+		min_aa = config_dict.get("Internal", {}).get("unstranded_min_aa", 150),
+		min_fc = config_dict.get("Internal", {}).get("unstranded_min_fragment_count", 50),
+		results_dir = RESULTS_DIR
+	shell:
+		"""
+		micromamba activate base
+		mkdir -p {params.results_dir}logs
+		# Single-exon transfrags carry more noise than the spliced half --
+		# intronic fragments, intergenic transcription, unspliced pre-mRNA. Keep
+		# the ones that look like genes. Measured on Ath_ODB: 9,597 models in,
+		# 3,583 out at these defaults (2,896 not complete, 2,927 CDS too short,
+		# 191 too little read support). Reference is never consulted; for scale,
+		# Ath has 6,669 strictly single-exon genes.
+		python3 $(pwd)/bin/filter_unstranded_transfrag.py \
+			--min-aa {params.min_aa} \
+			--min-fragment-count {params.min_fc} \
+			{input.gff} > {output}.part 2> {params.results_dir}logs/filter_unstranded_transfrag.err
+		cat {params.results_dir}logs/filter_unstranded_transfrag.err >&2
+		mv {output}.part {output}
+		"""
+
+def _transfrag_orf_inputs(wildcards):
+	gffs = [f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.gff3"]
+	if USE_UNSTRANDED_TRANSFRAG:
+		gffs.append(f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.filtered.gff3")
+	return gffs
+
 rule GFF3Clear:
 	input:
-		gff = f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.gff3",
+		gff = _transfrag_orf_inputs,
 		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
 	output: f"{RESULTS_DIR}GETA/transcript/transfrag.genome.gff3"
 	shell:
 		"""
 		micromamba activate base
+		# The stranded file is listed first on purpose: GFF3Clear resolves
+		# overlaps in favour of whichever input comes first, so spliced models
+		# always win over single-exon ones covering the same locus. (Getting this
+		# order backwards is what cost pickBetterModels 3,134 correct chains.)
 		GFF3Clear \
 			--GFF3_source GETA \
 			--genome {input.genome_fasta} \
 			--gene_prefix transfrag \
-			--no_attr_add {input.gff} > {output}
+			--no_attr_add {input.gff} > {output}.part
+
+		genes=$(awk -F'\t' '$0!~/^#/ && $3=="gene" {{n++}} END{{print n+0}}' {output}.part)
+		echo "GFF3Clear: transfrag.genome.gff3 genes=$genes" >&2
+		if [ "$genes" -eq 0 ]; then
+		  echo "ERROR: transfrag.genome.gff3 has no genes" >&2
+		  exit 1
+		fi
+		mv {output}.part {output}
 		"""
 
 # These next three rules are not currently run during the workflow...
@@ -1007,13 +1156,17 @@ rule transfragComplete:
 	input: f"{RESULTS_DIR}GETA/transcript/transfrag.genome.gff3"
 	output: f"{RESULTS_DIR}GETA/transcript/transfrag.genome.complete.gff3"
 	run:
-		# TODO: Check that this perl translation works
-		with open(input, "r") as infile:
-			with open(output, "w") as outfile:
-				for line in infile:
-					if re.search(r"\tgene\t", line):
-						if re.search(r"Form=one_transcript_get_1_gene_model.*Integrity=complete"):
-							outfile.write(line)
+		# Two defects fixed here. re.search() was called with only a pattern and
+		# no subject string, which raises TypeError the moment a gene line is
+		# seen; and open() was handed Snakemake's InputFiles/OutputFiles objects
+		# rather than paths. The rule is not wired into the DAG today (see the
+		# comment above), so neither ever fired -- but it must not stay broken.
+		with open(str(input), "r") as infile, open(str(output), "w") as outfile:
+			for line in infile:
+				if "\tgene\t" not in line:
+					continue
+				if re.search(r"Form=one_transcript_get_1_gene_model.*Integrity=complete", line):
+					outfile.write(line)
 
 rule ORF2bestGeneModels:
 	input: f"{RESULTS_DIR}GETA/transcript/transfrag.genome.complete.gff3"
@@ -1295,7 +1448,10 @@ checkpoint prepCombineGeneModels:
 				elif fields[6] not in transfrag[fields[0]]:
 					transfrag[fields[0]][fields[6]] = line
 				else:
-					transfrag[fields[0]][fields[6]] += "\n" + line
+					# `line` already ends in a newline, so the old `"\n" + line`
+					# inserted a blank line between every record. step6's copy of
+					# this loop (prepCombineGeneModels_step6) uses `+= line`.
+					transfrag[fields[0]][fields[6]] += line
 
 		genewise = {}
 		with open(input.genewise, 'r') as IN:
@@ -1309,7 +1465,10 @@ checkpoint prepCombineGeneModels:
 				elif fields[6] not in genewise[fields[0]]:
 					genewise[fields[0]][fields[6]] = line
 				else:
-					genewise[fields[0]][fields[6]] += "\n" + line
+					# `line` already ends in a newline, so the old `"\n" + line`
+					# inserted a blank line between every record. step6's copy of
+					# this loop (prepCombineGeneModels_step6) uses `+= line`.
+					genewise[fields[0]][fields[6]] += line
 
 		tmp = f"{RESULTS_DIR}GETA/Augustus/training/combineGeneModels_tmp"
 		if not os.path.exists(tmp):
@@ -2298,10 +2457,20 @@ rule pickBetterModels:
 		{input.a} \
 		{output.c} > {params.results_dir}GETA/CombineGeneModels/picked_evidence_geneModels.gff3
 
+		# GFF3Clear resolves overlaps in favour of whichever file is listed
+		# FIRST. picked_evidence_geneModels.gff3 used to come first, so the
+		# lower-quality evidence-picked models displaced the combined models in
+		# geneModels.a. Measured on Ath_ODB (CDS intron-chain, 25851 ref chains):
+		#   a (input)          Sn 57.44 Pr 75.53 F1 65.25
+		#   picked_evidence    Sn 44.56 Pr 73.38 F1 55.45
+		#   d, picked first    Sn 45.68 Pr 65.45 F1 53.81
+		#   d, a first         Sn 57.81 Pr 73.12 F1 64.57
+		# The old order dropped 3038 of a's correct chains (14848 -> 11810);
+		# listing a first recovers 3134 (11810 -> 14944), F1 +10.76.
 		GFF3Clear \
 		--genome {input.genome_fasta} \
-		--no_attr_add {params.results_dir}GETA/CombineGeneModels/picked_evidence_geneModels.gff3 \
-		{input.a} > {output.d}
+		--no_attr_add {input.a} \
+		{params.results_dir}GETA/CombineGeneModels/picked_evidence_geneModels.gff3 > {output.d}
 
 		perl -p -i -e 's/Integrity=[^;]+;?//g' {output.d}
 
@@ -3455,6 +3624,26 @@ rule pasaPost:
 			-c {params.results_dir}config/alignAssembly.config \
 			-g genome.fasta \
 			-P {params.pasa_dir}/EVM.all.pasa_input.gff3
+
+			# PASA 2.5.3 ships an index that its SQLite schema drops. The MySQL
+			# schema declares both `UNIQUE KEY svs_idx (cdna_acc,sv_id)` and
+			# `KEY sv_idx (sv_id)`; the SQLite schema keeps only the composite as
+			# `PRIMARY KEY (cdna_acc,sv_id) WITHOUT ROWID`. Since cdna_acc leads,
+			# no index serves the `WHERE sv_id = ?` lookups that
+			# classify_alt_splice_as_UTR_or_protein.dbi (lines 352/363/463/485) and
+			# alt_splice_AAT_alignment_generator.dbi:192 issue, so every one of them
+			# scans the whole table. Measured on Ath_ODB's 1.4 GB db:
+			# 22.47 ms/lookup against 0.03-0.09 ms for the indexed tables -- a
+			# 500-700x penalty, on 154k rows for Ath and far more for Ahy
+			# (650k transcripts, 7.5 GB db, pasaPost wall time 4 days).
+			# Creating the index changes query plans only, never results.
+			DB={params.pasa_dir}/pasa.sqlite
+			if [ -f "$DB" ]; then
+			  sqlite3 "$DB" \
+			    'CREATE INDEX IF NOT EXISTS svs_sv_id_idx ON splice_variation_support (sv_id);' \
+			    && echo "pasaPost: ensured index svs_sv_id_idx on splice_variation_support(sv_id)" >&2 \
+			    || echo "pasaPost: index creation skipped (non-fatal)" >&2
+			fi
 
 			{params.pasa_home}/Launch_PASA_pipeline.pl \
 			-c {params.results_dir}config/annotCompare.config \
