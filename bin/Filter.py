@@ -200,6 +200,9 @@ def filter_genes(gff_path, tpm_cutoff, cov_cutoff, augustus_cutoff, helixer_cuto
 	# --- Single-exon genes ---
 	singleExons = TidyGFF.singleExonGenes(TidyGFF.loadGFF(gff_path))
 	singleExons["singleExon"] = True
+	# Intentionally leave unmatched `data` rows blank: blank/NaN means multi-exon
+	# and is part of the RF encoding, not a missing value to clean up (issue #25).
+	# Filling it with False changed 48,380 genes to 47,419 (-961) in the measured run.
 	data = data.merge(singleExons, on="transcript_id", how="left")
 	filter_df = filter_df.merge(singleExons, on="transcript_id", how="left")
 
@@ -510,6 +513,9 @@ def prepare_features(df, feature_cols):
 	"""
 	features = df.loc[:, feature_cols].copy()
 	for col in feature_cols:
+		# In particular, blank `singleExon` means multi-exon and deliberately becomes
+		# `singleExon_missing == 1`; filling it with False changed the issue #25
+		# measured gene count from 48,380 to 47,419 (-961).
 		features[f"{col}_missing"] = features[col].isna().astype(int)
 		features[col] = pd.to_numeric(features[col], errors="coerce").fillna(0)
 	return features
