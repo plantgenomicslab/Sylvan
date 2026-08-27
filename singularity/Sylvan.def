@@ -200,8 +200,10 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - omark
-  - omamer
+  # #23: OMArk 0.3.1 cannot read current OMAmer databases; floor the
+  # versions so a rebuild is guaranteed to read the downloaded DBs.
+  - omark >=0.4
+  - omamer >=2
 YAMLEOF
 
 	cat > /tmp/envs/lncdc.yaml << 'YAMLEOF'
