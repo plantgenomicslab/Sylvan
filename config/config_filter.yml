@@ -32,14 +32,14 @@ Input:
 ###############################################################################################
 #
 # Benchmark — GFF3 files to evaluate with BUSCO + OMArk (run via bin/Snakefile_benchmark)
-# omark_db: path to OMAmer database (e.g., LUCA.h5). Leave empty to skip OMArk.
-# Download: wget https://omabrowser.org/All/LUCA.h5 -O path/to/LUCA.h5
+# omark_db: path to an OMAmer database. Empty by default to explicitly skip OMArk;
+# set it to an existing database file to opt in (Viridiplantae is sufficient for plants).
 # gff3_files: label → GFF3 path mapping
 #
 ###############################################################################################
 
 Benchmark:
-  omark_db: "LUCA.h5"                     # [path] OMAmer database (leave empty to skip OMArk)
+  omark_db: ""                            # [path] Empty explicitly disables OMArk
   gff3_files:
     tair10_chr4: toydata/gff3/ath4.gff3
     augustus: results/GETA/Augustus/augustus.gff3
