@@ -38,6 +38,7 @@ import shlex
 import subprocess
 import tempfile
 import sys
+import re
 from collections import Counter, defaultdict
 
 
@@ -45,10 +46,11 @@ class Alignment:
     """One genomic hit: every segment sharing an ID."""
 
     __slots__ = ("aln_id", "seqid", "strand", "segments", "introns",
-                 "identity_w", "aligned_aa", "score_total", "rank")
+                 "identity_w", "aligned_aa", "score_total", "rank",
+                 "family")
 
     def __init__(self, aln_id, seqid, strand, segments, introns, identity_w,
-                 aligned_aa, score_total, rank):
+                 aligned_aa, score_total, rank, family=None):
         self.aln_id = aln_id
         self.seqid = seqid
         self.strand = strand
@@ -58,6 +60,7 @@ class Alignment:
         self.aligned_aa = aligned_aa
         self.score_total = score_total
         self.rank = rank
+        self.family = family
 
     def priority(self):
         """Ordering key -- lower sorts first (i.e. is admitted first).
@@ -98,6 +101,24 @@ def _target_span(attrs):
     except ValueError:
         return None
     return (t_start, t_end) if t_start <= t_end else (t_end, t_start)
+
+
+def family_key(target, aln_id):
+    """Conservatively group obvious isoforms of one Target protein gene.
+
+    OrthoDB-derived Targets such as ``AL1006U10010.t1`` encode the isoform in
+    a terminal ``.tN`` suffix.  We also recognize the equally explicit
+    ``.pN`` and ``-R[A-Z]+`` conventions.  Anything else is not safely
+    interpretable as a family identifier, so it receives a singleton key
+    based on the alignment ID.  Thus enabling the cap cannot accidentally
+    merge unrelated proteins merely because they share a broad text prefix.
+    """
+    if target:
+        base = re.sub(r"(?:\.(?:t|p)\d+|-R[A-Z]+)$", "", target,
+                      flags=re.IGNORECASE)
+        if base != target and base:
+            return "isoform:" + base
+    return "singleton:" + aln_id
 
 
 def _parse(line, lineno=None):
@@ -198,6 +219,7 @@ def _build_alignment(aln_id, meta, rows):
         aligned_aa=aligned,
         score_total=sum(sc for _, _, _, sc, _ in rows),
         rank=rank,
+        family=family_key(query, aln_id),
     )
 
 
@@ -257,7 +279,7 @@ def _components(alignments):
         yield comp
 
 
-def _admit_component(comp, k_base, k_intron, intron_used):
+def _admit_component(comp, k_base, k_intron, intron_used, family_cap=None):
     """Greedy admission: best quality first, whole alignment or nothing.
 
     Deciding per alignment (rather than evicting per crowded window) keeps the
@@ -271,7 +293,11 @@ def _admit_component(comp, k_base, k_intron, intron_used):
     depth = [0] * max(len(bounds), 1)
 
     accepted, reasons, conflict, rescuable = set(), {}, {}, {}
+    family_used = Counter()
     for aln in sorted(comp, key=Alignment.priority):
+        if family_cap is not None and family_used[aln.family] >= family_cap:
+            reasons[aln.aln_id] = "family_cap"
+            continue
         # Count the alignment's own contribution: its segments may overlap each
         # other, and checking only the current depth would let a single ID push
         # a base past the cap by itself.
@@ -308,6 +334,7 @@ def _admit_component(comp, k_base, k_intron, intron_used):
         for key, n in want.items():
             intron_used[key] += n
         accepted.add(aln.aln_id)
+        family_used[aln.family] += 1
     return accepted, reasons, conflict, rescuable
 
 
@@ -347,11 +374,14 @@ class SelectionReport:
         self.rescuable_new_coverage_bases = rescuable_new_coverage_bases
 
 
-def _run_selection(alignments, k_base, k_intron, min_identity):
+def _run_selection(alignments, k_base, k_intron, min_identity,
+                   family_cap=None):
     """Shared admission pass -> (accepted ids, reason per rejected id)."""
     if k_base < 1 or k_intron < 1:
         raise ValueError(
             f"caps must be >= 1 (got k_base={k_base}, k_intron={k_intron})")
+    if family_cap is not None and family_cap < 1:
+        raise ValueError(f"family_cap must be >= 1 (got {family_cap})")
     groups = defaultdict(list)
     reasons, conflict = {}, {}
     rescuable_by_key, rescuable_bp = defaultdict(list), [0]
@@ -366,7 +396,7 @@ def _run_selection(alignments, k_base, k_intron, min_identity):
         intron_used = defaultdict(int)
         for comp in _components(group):
             ok, why, conf, resc = _admit_component(
-                comp, k_base, k_intron, intron_used)
+                comp, k_base, k_intron, intron_used, family_cap)
             accepted |= ok
             reasons.update(why)
             conflict.update(conf)
@@ -377,18 +407,20 @@ def _run_selection(alignments, k_base, k_intron, min_identity):
     return accepted, reasons, conflict, rescuable_by_key, rescuable_bp[0]
 
 
-def select_alignments(alignments, k_base, k_intron, min_identity=0.0):
+def select_alignments(alignments, k_base, k_intron, min_identity=0.0,
+                      family_cap=None):
     """Return the set of alignment IDs that fit under both caps."""
     accepted = _run_selection(
-        alignments, k_base, k_intron, min_identity)[0]
+        alignments, k_base, k_intron, min_identity, family_cap)[0]
     return accepted
 
 
-def audit_selection(alignments, k_base, k_intron, min_identity=0.0):
+def audit_selection(alignments, k_base, k_intron, min_identity=0.0,
+                    family_cap=None):
     """Run selection and attribute the coverage it gave up."""
     (accepted, reasons, conflict, rescuable_by_key,
      rescuable_bp) = _run_selection(
-        alignments, k_base, k_intron, min_identity)
+        alignments, k_base, k_intron, min_identity, family_cap)
 
     kept_by_key = defaultdict(list)
     lost_by_key = defaultdict(list)
@@ -420,11 +452,13 @@ def audit_selection(alignments, k_base, k_intron, min_identity=0.0):
                            rescuable_new)
 
 
-def cap_miniprot_lines(lines, k_base, k_intron, min_identity=0.0):
+def cap_miniprot_lines(lines, k_base, k_intron, min_identity=0.0,
+                       family_cap=None):
     """Filter GFF lines down to the alignments that fit under both caps."""
     lines = list(lines)
     accepted = select_alignments(
-        summarize_alignments(lines), k_base, k_intron, min_identity)
+        summarize_alignments(lines), k_base, k_intron, min_identity,
+        family_cap)
 
     kept = []
     for line in lines:
@@ -481,7 +515,7 @@ def _summarize_stream(path, tmpdir):
 
 
 def cap_miniprot_file(infile, outfile, k_base, k_intron, min_identity=0.0,
-                      tmpdir=None):
+                      tmpdir=None, family_cap=None):
     """Cap a GFF on disk. Returns the SelectionReport.
 
     Three passes: fold segments into alignments over an ID-sorted stream,
@@ -491,7 +525,8 @@ def cap_miniprot_file(infile, outfile, k_base, k_intron, min_identity=0.0,
     """
     tmpdir = tmpdir or os.path.dirname(os.path.abspath(outfile)) or "."
     alignments = list(_summarize_stream(infile, tmpdir))
-    report = audit_selection(alignments, k_base, k_intron, min_identity)
+    report = audit_selection(alignments, k_base, k_intron, min_identity,
+                             family_cap)
 
     fd, tmp = tempfile.mkstemp(dir=tmpdir, suffix=".capped.tmp")
     try:
@@ -522,10 +557,14 @@ def main(argv=None):
     ap.add_argument("--tmpdir", default=None,
                     help="scratch for external sort (GPFS, not compute /tmp "
                          "which is tmpfs and eats node RAM)")
+    ap.add_argument("--family-cap", type=int, default=None, metavar="N",
+                    help="opt in: admit at most N alignments from an obvious "
+                         "Target isoform family per overlap component")
     args = ap.parse_args(argv)
 
     report = cap_miniprot_file(args.infile, args.outfile, args.k_base,
-                               args.k_intron, args.min_identity, args.tmpdir)
+                               args.k_intron, args.min_identity, args.tmpdir,
+                               args.family_cap)
 
     by_reason = Counter(report.reasons.values())
     lost = report.raw_covered_bases - report.covered_bases
