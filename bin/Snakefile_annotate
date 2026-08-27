@@ -874,7 +874,9 @@ rule mergeTransfrag:
 		# 24,045 of Ath_ODB's 33,755 transfrags (71.2%) were dropped on the floor.
 		# They are the single-exon models: transfrag infers strand from splice
 		# junctions, so a transcript without one is emitted with strand '.'.
-		f"{RESULTS_DIR}GETA/transcript/transfrag.noStrand.fasta"
+		f"{RESULTS_DIR}GETA/transcript/transfrag.noStrand.fasta",
+		f"{RESULTS_DIR}GETA/transcript/transfrag.gff3",
+		f"{RESULTS_DIR}GETA/transcript/transfrag.alignment.gff3"
 	params:
 		results_dir = RESULTS_DIR
 	run:
@@ -988,9 +990,13 @@ rule transDecoder_Predict:
 # and transfrag there.
 #
 # Set Internal.use_unstranded_transfrag to false to fall back to stranded-only.
-USE_UNSTRANDED_TRANSFRAG = bool(
-	config_dict.get("Internal", {}).get("use_unstranded_transfrag", True)
+_use_unstranded_value = config_dict.get("Internal", {}).get(
+	"use_unstranded_transfrag", True
 )
+if isinstance(_use_unstranded_value, str):
+	USE_UNSTRANDED_TRANSFRAG = _use_unstranded_value.strip().lower() == "true"
+else:
+	USE_UNSTRANDED_TRANSFRAG = bool(_use_unstranded_value)
 
 rule transDecoder_LongOrfs_unstranded:
 	input: f"{RESULTS_DIR}GETA/transcript/transfrag.noStrand.fasta"
@@ -998,83 +1004,107 @@ rule transDecoder_LongOrfs_unstranded:
 	params: args = config_dict["Internal"]["TransDecoder.LongOrfs"],
 		results_dir = RESULTS_DIR
 	shell:"""
-		micromamba activate genepred
+		micromamba activate genepred || exit 1
 		# Same stale-checkpoint trap as the stranded rule: reset the whole
 		# transdecoder_dir so LongOrfs always sees the current input.
-		rm -rf {params.results_dir}GETA/transcript/nostrand_td
+		rm -rf {params.results_dir}GETA/transcript/nostrand_td || exit 1
+		mkdir -p {params.results_dir}GETA/transcript/nostrand_td || exit 1
+
+		if ! grep -q '^>' {input}; then
+		  echo "transDecoder_LongOrfs_unstranded: expected empty noStrand FASTA; creating empty sentinel output" >&2
+		  : > {output} || exit 1
+		  exit 0
+		fi
 
 		# No -S here. These transcripts have no strand, so TransDecoder must
 		# search both frames and choose; -S would force the forward strand and
 		# silently halve the usable models.
 		TransDecoder.LongOrfs {params.args} \
 		  -t {input} \
-		  --output_dir {params.results_dir}GETA/transcript/nostrand_td
+		  --output_dir {params.results_dir}GETA/transcript/nostrand_td || exit 1
 
 		TD_DIR={params.results_dir}GETA/transcript/nostrand_td/transfrag.noStrand.fasta.transdecoder_dir
 		OUT_DIR={params.results_dir}GETA/transcript/nostrand_td
 		if [ ! -f ${{OUT_DIR}}/longest_orfs.cds ] && [ -f ${{TD_DIR}}/longest_orfs.cds ]; then
-		  cp ${{TD_DIR}}/longest_orfs.cds ${{OUT_DIR}}/longest_orfs.cds
+		  cp ${{TD_DIR}}/longest_orfs.cds ${{OUT_DIR}}/longest_orfs.cds || exit 1
 		  cp ${{TD_DIR}}/longest_orfs.gff3 ${{OUT_DIR}}/longest_orfs.gff3 2>/dev/null || true
 		  cp ${{TD_DIR}}/longest_orfs.pep ${{OUT_DIR}}/longest_orfs.pep 2>/dev/null || true
 		fi
-		test -s {output}
+		test -s {output} || exit 1
 		"""
 
 rule transDecoder_Predict_unstranded:
-	input: f"{RESULTS_DIR}GETA/transcript/nostrand_td/longest_orfs.cds"
+	input:
+		cds = f"{RESULTS_DIR}GETA/transcript/nostrand_td/longest_orfs.cds",
+		fasta = f"{RESULTS_DIR}GETA/transcript/transfrag.noStrand.fasta"
 	output: f"{RESULTS_DIR}GETA/transcript/transfrag.nostrand.transdecoder.gff3"
 	params: args = config_dict["Internal"]["TransDecoder.Predict"],
 		results_dir = RESULTS_DIR
 	shell:
 		"""
-		micromamba activate genepred
+		micromamba activate genepred || exit 1
+		if ! grep -q '^>' {input.fasta}; then
+		  echo "transDecoder_Predict_unstranded: expected empty noStrand FASTA; creating empty sentinel output" >&2
+		  : > {output} || exit 1
+		  exit 0
+		fi
 		TD_DIR={params.results_dir}GETA/transcript/nostrand_td/transfrag.noStrand.fasta.transdecoder_dir
-		rm -rf ${{TD_DIR}}/__checkpoints_TDpredict
+		rm -rf ${{TD_DIR}}/__checkpoints_TDpredict || exit 1
 
-		cd {params.results_dir}GETA/transcript/nostrand_td
+		cd {params.results_dir}GETA/transcript/nostrand_td || exit 1
 		TransDecoder.Predict {params.args} \
-		  -t {params.results_dir}GETA/transcript/transfrag.noStrand.fasta \
-		  --output_dir {params.results_dir}GETA/transcript/nostrand_td
+		  -t {input.fasta} \
+		  --output_dir {params.results_dir}GETA/transcript/nostrand_td || exit 1
 
 		OUT={output}
 		if [ -f transfrag.noStrand.fasta.transdecoder.gff3 ]; then
-		  mv transfrag.noStrand.fasta.transdecoder.gff3 ${{OUT}}
+		  mv transfrag.noStrand.fasta.transdecoder.gff3 ${{OUT}} || exit 1
 		elif [ -f ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3.revised_starts.gff3 ]; then
-		  cp ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3.revised_starts.gff3 ${{OUT}}
+		  cp ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3.revised_starts.gff3 ${{OUT}} || exit 1
 		elif [ -f ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3 ]; then
-		  cp ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3 ${{OUT}}
+		  cp ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3 ${{OUT}} || exit 1
 		else
 		  echo "ERROR: unstranded TransDecoder.Predict produced no usable .gff3" >&2
 		  exit 1
 		fi
-		test -s ${{OUT}}
+		test -s ${{OUT}} || exit 1
 		"""
 
 rule transdecoder2ORF_unstranded:
 	input:
 		gff = f"{RESULTS_DIR}GETA/transcript/transfrag.nostrand.transdecoder.gff3",
+		gtf = f"{RESULTS_DIR}GETA/transcript/transfrag.gtf",
 		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
-	output: f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.gff3"
+	output:
+		gff = f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.gff3",
+		protein = f"{RESULTS_DIR}GETA/transcript/proteins.nostrand.fasta"
 	params: results_dir = RESULTS_DIR
 	shell:
 		"""
-		micromamba activate base
+		micromamba activate base || exit 1
+		if [ ! -s {input.gff} ]; then
+		  echo "transdecoder2ORF_unstranded: expected empty noStrand prediction; creating empty sentinel outputs" >&2
+		  : > {output.gff} || exit 1
+		  : > {output.protein} || exit 1
+		  exit 0
+		fi
 		transdecoder2ORF \
-			--out_protein {params.results_dir}GETA/transcript/proteins.nostrand.fasta \
-			{params.results_dir}GETA/transcript/transfrag.gtf \
-			{input.gff} {input.genome_fasta} > {output}.part
+			--out_protein {output.protein}.part \
+			{input.gtf} \
+			{input.gff} {input.genome_fasta} > {output.gff}.part || exit 1
 
 		# Guard the one thing that could silently poison the merge: a model that
 		# still carries strand '.' would be meaningless downstream. Measured
 		# expectation is zero.
-		dots=$(awk -F'\t' '$0!~/^#/ && $3=="gene" && $7=="." {{n++}} END{{print n+0}}' {output}.part)
-		genes=$(awk -F'\t' '$0!~/^#/ && $3=="gene" {{n++}} END{{print n+0}}' {output}.part)
+		dots=$(awk -F'\t' '$0!~/^#/ && $3=="gene" && $7=="." {{n++}} END{{print n+0}}' {output.gff}.part) || exit 1
+		genes=$(awk -F'\t' '$0!~/^#/ && $3=="gene" {{n++}} END{{print n+0}}' {output.gff}.part) || exit 1
 		echo "transdecoder2ORF_unstranded: genes=$genes dot_strand=$dots" >&2
 		if [ "$genes" -eq 0 ] || [ "$dots" -ne 0 ]; then
 		  echo "ERROR: unstranded ORF output invalid (genes=$genes dot_strand=$dots)" >&2
 		  exit 1
 		fi
-		mv {output}.part {output}
+		mv {output.gff}.part {output.gff} || exit 1
+		mv {output.protein}.part {output.protein} || exit 1
 		"""
 
 rule transdecoder2ORF:
@@ -1096,14 +1126,15 @@ rule filter_unstranded_transfrag:
 	input:
 		gff = f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.gff3"
 	output: f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.filtered.gff3"
+	log: f"{RESULTS_DIR}logs/filter_unstranded_transfrag.err"
 	params:
 		min_aa = config_dict.get("Internal", {}).get("unstranded_min_aa", 150),
 		min_fc = config_dict.get("Internal", {}).get("unstranded_min_fragment_count", 50),
 		results_dir = RESULTS_DIR
 	shell:
 		"""
-		micromamba activate base
-		mkdir -p {params.results_dir}logs
+		micromamba activate base || exit 1
+		mkdir -p {params.results_dir}logs || exit 1
 		# Single-exon transfrags carry more noise than the spliced half --
 		# intronic fragments, intergenic transcription, unspliced pre-mRNA. Keep
 		# the ones that look like genes. Measured on Ath_ODB: 9,597 models in,
@@ -1113,9 +1144,9 @@ rule filter_unstranded_transfrag:
 		python3 $(pwd)/bin/filter_unstranded_transfrag.py \
 			--min-aa {params.min_aa} \
 			--min-fragment-count {params.min_fc} \
-			{input.gff} > {output}.part 2> {params.results_dir}logs/filter_unstranded_transfrag.err
-		cat {params.results_dir}logs/filter_unstranded_transfrag.err >&2
-		mv {output}.part {output}
+			{input.gff} > {output}.part 2> {log} || exit 1
+		cat {log} >&2 || exit 1
+		mv {output}.part {output} || exit 1
 		"""
 
 def _transfrag_orf_inputs(wildcards):
