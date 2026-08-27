@@ -716,10 +716,17 @@ rule combineBlast:
 	input: expand(f"{RESULTS_DIR}FILTER/splitPep/" + pep_string + ".part_{number}.blast.tmp", number=num)
 	output: f"{RESULTS_DIR}FILTER/BLASTP.OUT.TMP"
 	params:
-		results_dir = RESULTS_DIR
+		results_dir = RESULTS_DIR,
+		warning_log = f"{RESULTS_DIR}FILTER/blastp_self_hit_warning.log"
 	# cat the declared {input} shards, not a `part_*.blast.tmp` glob (issue #19.12):
 	# the glob absorbed stale shards left by a prior attempt with a different split count.
-	shell: "cat {input} > {output}"
+	# The diagnostic is warning-only. Keep it outside the data-producing pipeline and
+	# guard it explicitly so malformed/unreadable diagnostics can never fail this rule.
+	shell: """
+		cat {input} > {output}
+		/opt/envs/base/bin/python3 bin/warn_blastp_self_hits.py \
+			{output} --log {params.warning_log} || true
+		"""
 		#| awk '{{if ($13 > " + str(config_dict["Cutoff"]["blast"]) + "){{print $0}}}}' > {output}"
 
 rule blastRex:
