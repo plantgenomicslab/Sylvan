@@ -188,8 +188,11 @@ convertToEvmFormat:
   ncpus: 1
   memory: 4g
 combineEVMInputs:
-  ncpus: 1
-  memory: 4g
+  ncpus: 4
+  memory: 32g              # was 4g: the global miniprot depth cap holds per-alignment
+  time: "12:00:00"         #   summaries (~6-8M objects) plus a 7 GB external sort
+  miniprot_k_base: 16      # retained coding segments per base; 0 disables the cap
+  miniprot_k_intron: 16    # supporting alignments per exact intron
 partitionEVM:
   ncpus: 12
   memory: 48g
@@ -198,8 +201,8 @@ writeEVMCommands:
   memory: 16g
 runEVM:
   ncpus: 1
-  memory: 4g
-  # was 8g: sacct MaxRSS peak 0.45g over 630 jobs
+  memory: 32g              # was 4g: Liftoff-as-ABINITIO widens the trellis; 4/124
+  time: "1-00:00:00"       #   Ath_ODB partitions died under 6h/16G, 24h/32G ran 124/124
 recombineEVM:
   ncpus: 4
   memory: 16g

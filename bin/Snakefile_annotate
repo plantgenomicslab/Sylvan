@@ -3395,20 +3395,34 @@ rule combineEVMInputs:
 		augustus_gff3 = f"{RESULTS_DIR}GETA/Augustus/augustus.gff3",
 		geta_gff3 = f"{RESULTS_DIR}GETA/geta.geneModels.gff3",
 		helixer_gff3 = f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3",
-	params: results_dir = RESULTS_DIR
+	params:
+		results_dir = RESULTS_DIR,
+		# miniprot depth cap: EVM accumulates weight per covering alignment with
+		# no normalisation (evidence_modeler.pl add_match_coverage/add_introns),
+		# so OrthoDB redundancy becomes vote count -- 297x mean depth over
+		# covered bases on an Ath_ODB partition. K=16 fixed by sweep
+		# (12: -0.91, 20: -0.04, 24: -0.22, 32: -0.42 IC F1). 0 disables.
+		k_base = config_dict.get("combineEVMInputs", {}).get("miniprot_k_base", 16),
+		k_intron = config_dict.get("combineEVMInputs", {}).get("miniprot_k_intron", 16)
 	output:
 		f"{RESULTS_DIR}EVM/gene_predictions_checkCoords.gff3",
 		f"{RESULTS_DIR}EVM/transcript_alignments_checkCoords.gff3",
 		f"{RESULTS_DIR}EVM/protein_alignments_checkCoords.gff3"
-	# Other sources of evidence 
+	# Other sources of evidence
 	shell: """
 		micromamba activate annotation
+		# Liftoff rides in gene_predictions as ABINITIO_PREDICTION (the weights
+		# file declares that class): evidence_modeler.pl:2601 lets only PROTEIN
+		# and ABINITIO evidence add match coverage, so as OTHER/TRANSCRIPT the
+		# most accurate track (chain F1 66.13 vs AUGUSTUS 64.03) contributed
+		# nothing to coding scores. Moving it is worth +1.0 IC F1 on its own.
 		cat {input.helixer_gff3} \
 			{input.augustus_gff3} \
 			{input.geta_gff3} \
 			{input.genewise_other} \
+			{input.liftoff} \
 			> {params.results_dir}EVM/gene_predictions.gff3
-	
+
 		bin/gff_to_evm.py {params.results_dir}EVM/gene_predictions.gff3 \
 		--check-coords \
 		--feature \\* > {params.results_dir}EVM/gene_predictions_checkCoords.gff3
@@ -3416,7 +3430,6 @@ rule combineEVMInputs:
 		# Transcript evidence
 		cat {input.gmapExon} \
 			{input.pasa} \
-			{input.liftoff} \
 			{input.st_star} \
 			{input.pc_star} \
 			> {params.results_dir}EVM/transcript_alignments.gff3
@@ -3429,10 +3442,33 @@ rule combineEVMInputs:
 		cat {input.genewise_prot} \
 			{input.miniprot} \
 			> {params.results_dir}EVM/protein_alignments.gff3
-		
+
 		bin/gff_to_evm.py {params.results_dir}EVM/protein_alignments.gff3 \
 			--check-coords \
 			--feature \\* > {params.results_dir}EVM/protein_alignments_checkCoords.gff3
+
+		# Cap miniprot depth before partitioning, so the 20 kb overlap regions
+		# see one consistent retained set. GeneWise rows are exempt: different
+		# scale (~1k rows vs ~60M) and provenance. There is no errexit in these
+		# blocks (shell.prefix only sets -u), so every step guards itself -- a
+		# silent failure here would hand EVM the uncapped file.
+		if [ "{params.k_base}" -gt 0 ] && [ "{params.k_intron}" -gt 0 ]; then
+			awk -F'\t' '$2=="miniprot"' {params.results_dir}EVM/protein_alignments_checkCoords.gff3 \
+				> {params.results_dir}EVM/protein_alignments_miniprot.gff3 || exit 1
+			awk -F'\t' '$2!="miniprot"' {params.results_dir}EVM/protein_alignments_checkCoords.gff3 \
+				> {params.results_dir}EVM/protein_alignments_other.gff3 || exit 1
+			python bin/cap_miniprot_depth.py \
+				{params.results_dir}EVM/protein_alignments_miniprot.gff3 \
+				{params.results_dir}EVM/protein_alignments_miniprot.capped.gff3 \
+				--k-base {params.k_base} --k-intron {params.k_intron} \
+				--tmpdir {params.results_dir}TMP || exit 1
+			cat {params.results_dir}EVM/protein_alignments_other.gff3 \
+				{params.results_dir}EVM/protein_alignments_miniprot.capped.gff3 \
+				> {params.results_dir}EVM/protein_alignments_checkCoords.gff3 || exit 1
+			rm -f {params.results_dir}EVM/protein_alignments_miniprot.gff3 \
+				{params.results_dir}EVM/protein_alignments_other.gff3 \
+				{params.results_dir}EVM/protein_alignments_miniprot.capped.gff3
+		fi
 			"""
 
 partitionEVM_Output = [f"{RESULTS_DIR}EVM/commands.{evm_num}.list" for evm_num in range(num_evm_files)]
@@ -3556,19 +3592,34 @@ rule recombineEVM:
 			# genome.fasta was created by partitionEVM rule
 			GENOME_FILE="{params.results_dir_abs}/genome.fasta"
 
-			recombine_EVM_partial_outputs.pl \
-			--partitions {params.results_dir_abs}/partitions_list.out \
-			--output_file_name evm.out
+			# Convert each partition's raw evm.out to GFF3 in partition-local
+			# coordinates, then merge at whole-mRNA granularity. Stock
+			# recombine_EVM_partial_outputs.pl assigns every gene/mRNA/CDS ROW
+			# to a partition by row midpoint, so models straddling a boundary
+			# are torn apart: of 87 reference multi-exon models crossing an
+			# Ath_ODB boundary, 10 survived intact (chain Sn 11.5%) and 68
+			# present in some partition vanished from the merge.
+			# merge_evm_partitions.py gives each mRNA (with its gene row and
+			# children) one owner partition instead, preferring the more
+			# complete copy where the 20 kb overlap holds two versions.
+			# No errexit in shell blocks (shell.prefix only sets -u), so each
+			# step guards itself.
+			# EVM_to_GFF3.pl needs URI::Escape (via PerlLib/Gene_obj.pm), which
+			# only the genepred perl carries -- the container's base perl dies at
+			# compile, the same trap as gtf_to_alignment_gff3.pl. Pin it.
+			EVM_TO_GFF3="$(command -v EVM_to_GFF3.pl)" || exit 1
+			while IFS="$(printf '\\t')" read -r chrom base flag part; do
+				if [ "$flag" = "Y" ]; then d="$part"; else d="$base"; fi
+				if [ -s "$d/evm.out" ]; then
+					/opt/envs/genepred/bin/perl "$EVM_TO_GFF3" "$d/evm.out" "$chrom" > "$d/evm.partition.gff3" || exit 1
+				else
+					: > "$d/evm.partition.gff3"
+				fi
+			done < {params.results_dir_abs}/partitions_list.out
 
-			convert_EVM_outputs_to_GFF3.pl \
-			--partitions {params.results_dir_abs}/partitions_list.out \
-			--output evm.out \
-			--genome $GENOME_FILE
-
-			# Scope the search to the EVM partition dir (issue #19.2). `find .` ran from
-			# the run root and would concatenate stray evm.out.gff3 from backups/TMP/old
-			# experiments into the merged output.
-			find {params.results_dir_abs} -regex '.*\\/evm.out.gff3' -exec cat {{}} \\; > {output}.raw
+			python bin/merge_evm_partitions.py \
+				{params.results_dir_abs}/partitions_list.out \
+				{output}.raw || exit 1
 
 			# Remove phantom genes with coordinates beyond chromosome boundaries
 			# (safety net for EVM partition merge issues)
