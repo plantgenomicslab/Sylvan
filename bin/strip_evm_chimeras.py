@@ -88,6 +88,12 @@ Sly `PREFILTER` 실측: 제거한 57 개가 전부 되돌아왔고 EVM 원본과
 제거는 filter 단계에서 일어난다. 임계값을 낮춰 더 많이 잡아도 주석은 안 바뀐다 —
 바꾸려면 `agat_clean_final` 이 필터본을 읽게 해야 한다.
 
+**2026-08-26 업데이트: 그 수정이 반영됐다.** `agat_clean_final` 은 이제
+`TRANSCRIPT/PASA/EVM.all.pasa_input.gff3`(이 가드의 출력)를 병합 입력으로
+읽고, 가드 이전에 pasaPost 가 끝난 런(파일 부재)에서만 raw `EVM.all.gff3` 로
+fallback 한다. 따라서 위 문단의 "전부 구조된다"는 fallback 경로에만 남은
+서술이다. (fleet Sly/Spe_A 계열이 먼저 적용해 검증한 변경의 역포팅.)
+
 ## 사용법
 
     strip_evm_chimeras.py <in.gff3> <out.gff3> [--max-exon 110] [--max-aa 20000]

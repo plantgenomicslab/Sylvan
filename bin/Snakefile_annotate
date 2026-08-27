@@ -3278,7 +3278,13 @@ rule psiClass_bin:
 	input:  f"{RESULTS_DIR}TRANSCRIPT/PsiClass/splitBam/bin_{{binid}}.bam"
 	output: f"{RESULTS_DIR}TRANSCRIPT/PsiClass/bins/{{binid}}/psi_vote.gtf"
 	threads: config_dict["psiClass_bin"]["threads"]
-	params: results_dir = RESULTS_DIR
+	params:
+		results_dir = RESULTS_DIR,
+		# Override to point at a patched build. The B/C fleet runs use the #41
+		# trust-splice patched PsiCLASS (one-line j<siteCnt guard; byte-identical
+		# output on non-crashing bins) via this knob instead of a run-local
+		# Snakefile edit. Default: the container's psiclass on PATH.
+		psiclass_bin = config_dict.get("psiClass_bin", {}).get("binary", "psiclass")
 	shell: """
 		micromamba activate alignment
 		bindir={params.results_dir}TRANSCRIPT/PsiClass/bins/{wildcards.binid}
@@ -3295,7 +3301,7 @@ rule psiClass_bin:
 		# stringtie / transfrag / miniprot / liftoff / ab-initio tracks feeding
 		# EVM. failed_bins.txt is the audit trail -- report it in methods.
 		if [ "$(samtools view -c $bindir/filtered.bam)" -gt 0 ]; then
-			psiclass -b $bindir/filtered.bam -o $bindir/psi -p {threads} -c 0.05 && rc=0 || rc=$?
+			{params.psiclass_bin} -b $bindir/filtered.bam -o $bindir/psi -p {threads} -c 0.05 && rc=0 || rc=$?
 			if [ "$rc" -ne 0 ]; then
 				echo "psiClass_bin: psiclass failed on {wildcards.binid} (exit $rc) -- emitting empty vote" >&2
 				printf '%s\\texit=%s\\n' "{wildcards.binid}" "$rc" \
@@ -3720,7 +3726,18 @@ rule agat_clean_final:
 		results_dir = RESULTS_DIR,
 		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA",
 		swissprot = config_dict["Input"].get("swissprot", ""),
-		splice = f"{RESULTS_DIR}TRANSCRIPT/PsiClass/splice/psiclass.STAR_bam.trusted_splice"
+		splice = f"{RESULTS_DIR}TRANSCRIPT/PsiClass/splice/psiclass.STAR_bam.trusted_splice",
+		# The chimera-filtered copy pasaPost writes, not the raw EVM output.
+		# Merging the raw file undoes the guard: merge_pasa_evm.py rescues EVM
+		# genes PASA did not cover, and a model withheld from PASA is uncovered
+		# by construction, so every withheld chimera came back into PREFILTER
+		# (Sly: all 57, matched 57/57 by coordinate; 4 survived the filter at up
+		# to 549 exons / 34,623 aa because a chimera spanning several real
+		# proteins scores blast_qcovs 99.0). A params entry, not an input:
+		# pasaPost writes the file itself, and the five pre-guard runs
+		# (Ath/Dca/Mtr/Osa/Ptr) do not have it until their pasaPost reruns, so
+		# declaring it as input would fail their DAG (backported fleet note).
+		evm_pasa = f"{RESULTS_DIR}TRANSCRIPT/PASA/EVM.all.pasa_input.gff3"
 	shell: """
 		micromamba activate annotation
 		mkdir -p {params.results_dir}PREFILTER
@@ -3756,8 +3773,15 @@ rule agat_clean_final:
 		fi
 		echo "Using PASA GFF3: ${{pasa_gff3}}"
 
-		# Merge PASA-updated genes with EVM genes that PASA dropped
-		merge_args=("${{pasa_gff3}}" {input.evm} {params.results_dir}PREFILTER/Sylvan_merged.gff3)
+		# Merge PASA-updated genes with EVM genes that PASA dropped. Prefer the
+		# chimera-guard's filtered copy (see params.evm_pasa); fall back to the
+		# raw EVM output only when a pre-guard pasaPost never wrote it.
+		EVM_FOR_MERGE="{params.evm_pasa}"
+		if [ ! -f "$EVM_FOR_MERGE" ]; then
+			echo "agat_clean_final: {params.evm_pasa} missing (pasaPost predates the chimera guard) -- merging raw {input.evm}" >&2
+			EVM_FOR_MERGE="{input.evm}"
+		fi
+		merge_args=("${{pasa_gff3}}" "$EVM_FOR_MERGE" {params.results_dir}PREFILTER/Sylvan_merged.gff3)
 		if [ -n "{params.swissprot}" ] && [ -f "{params.swissprot}" ]; then
 			echo "Using SwissProt DB for PASA/EVM comparison: {params.swissprot}"
 			merge_args+=({input.genome} {params.swissprot})
