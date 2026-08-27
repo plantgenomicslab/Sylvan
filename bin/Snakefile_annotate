@@ -3402,14 +3402,7 @@ rule combineEVMInputs:
 		geta_gff3 = f"{RESULTS_DIR}GETA/geta.geneModels.gff3",
 		helixer_gff3 = f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3",
 	params:
-		results_dir = RESULTS_DIR,
-		# miniprot depth cap: EVM accumulates weight per covering alignment with
-		# no normalisation (evidence_modeler.pl add_match_coverage/add_introns),
-		# so OrthoDB redundancy becomes vote count -- 297x mean depth over
-		# covered bases on an Ath_ODB partition. K=16 fixed by sweep
-		# (12: -0.91, 20: -0.04, 24: -0.22, 32: -0.42 IC F1). 0 disables.
-		k_base = config_dict.get("combineEVMInputs", {}).get("miniprot_k_base", 16),
-		k_intron = config_dict.get("combineEVMInputs", {}).get("miniprot_k_intron", 16)
+		results_dir = RESULTS_DIR
 	output:
 		f"{RESULTS_DIR}EVM/gene_predictions_checkCoords.gff3",
 		f"{RESULTS_DIR}EVM/transcript_alignments_checkCoords.gff3",
@@ -3452,29 +3445,6 @@ rule combineEVMInputs:
 		bin/gff_to_evm.py {params.results_dir}EVM/protein_alignments.gff3 \
 			--check-coords \
 			--feature \\* > {params.results_dir}EVM/protein_alignments_checkCoords.gff3
-
-		# Cap miniprot depth before partitioning, so the 20 kb overlap regions
-		# see one consistent retained set. GeneWise rows are exempt: different
-		# scale (~1k rows vs ~60M) and provenance. There is no errexit in these
-		# blocks (shell.prefix only sets -u), so every step guards itself -- a
-		# silent failure here would hand EVM the uncapped file.
-		if [ "{params.k_base}" -gt 0 ] && [ "{params.k_intron}" -gt 0 ]; then
-			awk -F'\t' '$2=="miniprot"' {params.results_dir}EVM/protein_alignments_checkCoords.gff3 \
-				> {params.results_dir}EVM/protein_alignments_miniprot.gff3 || exit 1
-			awk -F'\t' '$2!="miniprot"' {params.results_dir}EVM/protein_alignments_checkCoords.gff3 \
-				> {params.results_dir}EVM/protein_alignments_other.gff3 || exit 1
-			python bin/cap_miniprot_depth.py \
-				{params.results_dir}EVM/protein_alignments_miniprot.gff3 \
-				{params.results_dir}EVM/protein_alignments_miniprot.capped.gff3 \
-				--k-base {params.k_base} --k-intron {params.k_intron} \
-				--tmpdir {params.results_dir}TMP || exit 1
-			cat {params.results_dir}EVM/protein_alignments_other.gff3 \
-				{params.results_dir}EVM/protein_alignments_miniprot.capped.gff3 \
-				> {params.results_dir}EVM/protein_alignments_checkCoords.gff3 || exit 1
-			rm -f {params.results_dir}EVM/protein_alignments_miniprot.gff3 \
-				{params.results_dir}EVM/protein_alignments_other.gff3 \
-				{params.results_dir}EVM/protein_alignments_miniprot.capped.gff3
-		fi
 			"""
 
 partitionEVM_Output = [f"{RESULTS_DIR}EVM/commands.{evm_num}.list" for evm_num in range(num_evm_files)]
@@ -3564,12 +3534,43 @@ rule runEVM:
 	resources:
 		mem_mb = lambda wildcards, attempt: parse_memory_to_mb(config_dict["runEVM"]["memory"]) + (attempt - 1) * 40960
 	params:
-		results_dir_abs = EVM_DIR_ABS
+		results_dir_abs = EVM_DIR_ABS,
+		# miniprot depth cap: EVM accumulates weight per covering alignment with
+		# no normalisation, so OrthoDB redundancy becomes vote count (297x mean
+		# depth over covered bases). K=16 fixed by sweep (12: -0.91, 20: -0.04,
+		# 24: -0.22, 32: -0.42 IC F1). 0 disables. The cap runs PER PARTITION:
+		# the whole-genome variant held every alignment summary in memory and
+		# was OOM-killed past 50 GB on Ath_ODB (job 6104935) -- the smallest
+		# fleet genome -- while the partition-local topology is what the 73.54
+		# validation actually measured, needs only a few GB, and parallelises.
+		k_base = config_dict.get("runEVM", {}).get("miniprot_k_base", 16),
+		k_intron = config_dict.get("runEVM", {}).get("miniprot_k_intron", 16)
 	shell: """
 		micromamba activate annotation
 		cd {params.results_dir_abs}
 
 		CMD_FILE="commands.{wildcards.evm_num}.list"
+
+		# Cap each partition's miniprot rows before EVM reads them. Idempotent
+		# via marker, so retries (and a partition shared by two command lists)
+		# never double-process. No errexit in shell blocks -- every step guards
+		# itself, or EVM would silently consume the uncapped file.
+		if [ "{params.k_base}" -gt 0 ] && [ "{params.k_intron}" -gt 0 ] && [ -s "$CMD_FILE" ]; then
+			for d in $(sed -n 's/.*--exec_dir \\([^ ]*\\).*/\\1/p' "$CMD_FILE" | sort -u); do
+				PA="$d/protein_alignments_checkCoords.gff3"
+				[ -f "$PA" ] || continue
+				[ -f "$d/.miniprot_cap.done" ] && continue
+				awk -F'\t' '$2=="miniprot"' "$PA" > "$d/pa.miniprot.gff3" || exit 1
+				awk -F'\t' '$2!="miniprot"' "$PA" > "$d/pa.other.gff3" || exit 1
+				python {workflow.basedir}/cap_miniprot_depth.py \
+					"$d/pa.miniprot.gff3" "$d/pa.miniprot.capped.gff3" \
+					--k-base {params.k_base} --k-intron {params.k_intron} \
+					--tmpdir "$d" || exit 1
+				cat "$d/pa.other.gff3" "$d/pa.miniprot.capped.gff3" > "$PA" || exit 1
+				rm -f "$d/pa.miniprot.gff3" "$d/pa.other.gff3" "$d/pa.miniprot.capped.gff3"
+				touch "$d/.miniprot_cap.done"
+			done
+		fi
 
 		if [ -s "$CMD_FILE" ]; then
 			# `bash -e`: a child bash does NOT inherit the parent's errexit, so without
