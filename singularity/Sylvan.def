@@ -512,6 +512,13 @@ YAMLEOF
 	cd $EVM_HOME
 	make -j 2
 
+	# Make representative isoform selection deterministic in gene mode.
+	EVM_GFF3_UTILS="$EVM_HOME/PerlLib/GFF3_utils.pm"
+	test "$(grep -Fxc '            foreach my $transcript_id (keys %$transcripts_href) {' "$EVM_GFF3_UTILS")" -eq 1 || exit 1
+	perl -i -pe 's/^            foreach my \$transcript_id \(keys %\$transcripts_href\) \{$/            foreach my \$transcript_id (sort keys %\$transcripts_href) {/' "$EVM_GFF3_UTILS"
+	test "$(grep -Fxc '            foreach my $transcript_id (sort keys %$transcripts_href) {' "$EVM_GFF3_UTILS")" -eq 1 || exit 1
+	echo 'EVM_ISOFORM_PATCH=applied' >> /opt/BUILD_PROVENANCE
+
 	# Navigate back to the previous directory
 	cd -
 
