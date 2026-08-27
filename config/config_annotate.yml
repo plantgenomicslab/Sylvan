@@ -189,8 +189,10 @@ convertToEvmFormat:
   memory: 4g
 combineEVMInputs:
   ncpus: 4
-  memory: 32g              # was 4g: the global miniprot depth cap holds per-alignment
-  time: "12:00:00"         #   summaries (~6-8M objects) plus a 7 GB external sort
+  memory: 64g              # was 4g. Measured: the global miniprot depth cap peaked at
+  time: "12:00:00"         #   ~50 GB RSS on Ath_ODB's 7.1 GB miniprot track (sstat
+                           #   6104935); the peak scales with the track, so
+                           #   Ahy-class genomes may need more.
   miniprot_k_base: 16      # retained coding segments per base; 0 disables the cap
   miniprot_k_intron: 16    # supporting alignments per exact intron
 partitionEVM:
