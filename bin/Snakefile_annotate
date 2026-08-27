@@ -3466,6 +3466,11 @@ rule partitionEVM:
 			rm {params.results_dir}EVM/*.ok || echo 'No partition.ok files to remove...continuing'
 			rm {params.results_dir}EVM/*/*/*.ok || echo 'No chunk.ok files to remove...continuing'
 			rm {params.results_dir}EVM/*/*checkCoords.gff3 || echo 'No old evidence files to remove ...continuing'
+			# Repartitioning rewrites every partition's evidence uncapped. A stale
+			# .miniprot_cap.done from the previous round would make runEVM skip the
+			# cap and feed EVM the uncapped file silently -- clear the markers with
+			# the other per-round state (found in review before first deployment).
+			rm {params.results_dir}EVM/*/.miniprot_cap.done {params.results_dir}EVM/*/*/.miniprot_cap.done 2>/dev/null || echo 'No cap markers to remove...continuing'
 
 			export TMPDIR={RESULTS_DIR_ABS}/TMP
 			export SLURM_TMPDIR={RESULTS_DIR_ABS}/TMP
