@@ -224,7 +224,7 @@ def emit(kept, out_path):
         for model in kept:
             tag = model["part"]
 
-            def write(row):
+            def write(row, tag=tag):
                 fields = list(row)
                 fields[8] = _prefix_ids(fields[8], tag)
                 out.write("\t".join(fields) + "\n")
@@ -239,7 +239,7 @@ def emit(kept, out_path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     ap.add_argument("partitions_list")
     ap.add_argument("outfile")
     args = ap.parse_args(argv)
