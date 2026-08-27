@@ -184,11 +184,12 @@ def total_cds_length(cds_intervals):
 # Splice junction loading
 # ---------------------------------------------------------------------------
 
-def load_splice_junctions(splice_path, tolerance=5):
+def load_splice_junctions(splice_path, tolerance=0):
     """Load trusted splice junctions into lookup structure.
 
-    Returns dict[(chrom, strand)] -> list of (start, end) sorted by start.
-    Also returns a set for exact matching with tolerance.
+    Returns dict[(chrom, strand)] -> set of exact (start, end) coordinates.
+    ``tolerance`` is retained for API compatibility; matching tolerance belongs
+    at query time and the IC-preserving default there is zero.
     """
     junctions = defaultdict(set)
     if not splice_path:
@@ -257,7 +258,7 @@ def find_overlapping(gene, spatial_idx, models, min_overlap_frac=0.3):
 # Scoring functions (independent evidence only)
 # ---------------------------------------------------------------------------
 
-def score_splice_support(model, junctions, tolerance=5):
+def score_splice_support(model, junctions, tolerance=0):
     """Score: fraction of model's introns supported by splice junctions."""
     # Use exon intervals if available, else CDS
     intervals = model["exon_intervals"] if model["exon_intervals"] else model["cds_intervals"]
@@ -271,18 +272,23 @@ def score_splice_support(model, junctions, tolerance=5):
 
     supported = 0
     for intron_start, intron_end in introns:
-        found = False
-        for ds in range(-tolerance, tolerance + 1):
-            for de in range(-tolerance, tolerance + 1):
-                if (intron_start + ds, intron_end + de) in jset:
-                    found = True
-                    break
-            if found:
-                break
+        if tolerance == 0:
+            found = (intron_start, intron_end) in jset
+        else:
+            found = any(
+                (intron_start + ds, intron_end + de) in jset
+                for ds in range(-tolerance, tolerance + 1)
+                for de in range(-tolerance, tolerance + 1)
+            )
         if found:
             supported += 1
 
     return supported / len(introns)
+
+
+def cds_intron_chain(model):
+    """Return the exact CDS intron chain used by IC evaluation."""
+    return tuple(get_introns(model["cds_intervals"]))
 
 
 def score_miniprot_coverage(model, miniprot_idx, miniprot_models):
@@ -555,8 +561,13 @@ def main():
 
     # Load splice junctions
     junctions = load_splice_junctions(args.splice)
-    n_junctions = sum(len(v) for v in junctions.values())
-    print(f"Loaded splice junctions: {n_junctions // 11} unique (with tolerance)", file=sys.stderr)
+    unique_junctions = {
+        (chrom, start, end)
+        for (chrom, _strand), coords in junctions.items()
+        for start, end in coords
+    }
+    print(f"Loaded splice junctions: {len(unique_junctions)} unique exact coordinates",
+          file=sys.stderr)
 
     # Build spatial indices
     sylvan_idx = build_spatial_index(sylvan_genes)
@@ -610,6 +621,16 @@ def main():
             if not alt["cds_intervals"]:
                 continue
             if total_cds_length(alt["cds_intervals"]) <= total_cds_length(gene["cds_intervals"]):
+                continue
+
+            # This is boundary refinement, not a second consensus caller.  The
+            # old code replaced the complete model with a longer Helixer or
+            # Augustus structure, so a nominal terminal-boundary repair could
+            # discard every EVM splice coordinate.  Only permit terminal CDS /
+            # UTR changes that retain the exact EVM CDS intron chain.  This also
+            # prevents near-miss junctions accepted by the former +/-5 scoring
+            # tolerance from corrupting intron-coordinate accuracy.
+            if cds_intron_chain(alt) != cds_intron_chain(gene):
                 continue
 
             # Score
