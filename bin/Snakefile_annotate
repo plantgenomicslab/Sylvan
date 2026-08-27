@@ -1021,7 +1021,11 @@ rule transDecoder_LongOrfs_unstranded:
 		"""
 
 rule transDecoder_Predict_unstranded:
-	input: f"{RESULTS_DIR}GETA/transcript/nostrand_td/longest_orfs.cds"
+	input:
+		orfs = f"{RESULTS_DIR}GETA/transcript/nostrand_td/longest_orfs.cds",
+		# Ordering only: the stranded Predict must have finished so its
+		# top_500_longest training set exists (see --train below).
+		stranded = f"{RESULTS_DIR}GETA/transcript/transfrag.transdecoder.gff3"
 	output: f"{RESULTS_DIR}GETA/transcript/transfrag.nostrand.transdecoder.gff3"
 	params: args = config_dict["Internal"]["TransDecoder.Predict"],
 		results_dir = RESULTS_DIR
@@ -1031,8 +1035,22 @@ rule transDecoder_Predict_unstranded:
 		TD_DIR={params.results_dir}GETA/transcript/nostrand_td/transfrag.noStrand.fasta.transdecoder_dir
 		rm -rf ${{TD_DIR}}/__checkpoints_TDpredict
 
+		# Train the Markov model on the STRANDED ORFs (upstream Transfrag2ORF
+		# does exactly this: TransDecoder.Predict --train <stranded>/longest_
+		# orfs.cds.top_500_longest, commit bea06f2b). The noStrand half is the
+		# single-exon transcripts -- a small, biased set whose self-training
+		# yields a weak coding model. Fall back to self-training only when the
+		# stranded training set is unexpectedly missing.
+		TRAIN={params.results_dir}GETA/transcript/transfrag.strand.fasta.transdecoder_dir/longest_orfs.cds.top_500_longest
+		TRAIN_ARG=""
+		if [ -s "$TRAIN" ]; then
+			TRAIN_ARG="--train $TRAIN"
+		else
+			echo "transDecoder_Predict_unstranded: $TRAIN missing -- falling back to self-training" >&2
+		fi
+
 		cd {params.results_dir}GETA/transcript/nostrand_td
-		TransDecoder.Predict {params.args} \
+		TransDecoder.Predict {params.args} $TRAIN_ARG \
 		  -t {params.results_dir}GETA/transcript/transfrag.noStrand.fasta \
 		  --output_dir {params.results_dir}GETA/transcript/nostrand_td
 
