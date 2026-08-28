@@ -1651,8 +1651,12 @@ rule clearCombined:
 	shell:
 		"""
 		micromamba activate base
+		# issue #59: GFF3Clear only writes Source= when --gene_prefix is given,
+		# so geneModels2AugusutsTrainingInput's "delete genewise first" dedup
+		# rule never fired (Ahy_A: 16.7% of ati.filter1 was GeneWise). Tag the
+		# gene rows here by ID instead of renaming everything with a prefix.
 		GFF3Clear --genome {input.genome_fasta} \
-		{input.gff} > {output}
+		{input.gff} | awk -F'\t' 'BEGIN{{OFS="\t"}} $3=="gene" && $9 ~ /ID=genewise/ && $9 !~ /Source=/ {{$9=$9 ($9 ~ /;$/ ? "" : ";") "Source=genewise;"}} {{print}}' > {output}
 		"""
 
 #TODO: remove all spots where geta makes '.ok files'
@@ -1837,7 +1841,17 @@ rule BGM2AT:
 			f"cp -rf {opt_snapshot}/. {params.results_dir}GETA/Augustus/config/species/{params.a_species}/ ; fi && "
 			f"cd {params.results_dir}GETA/Augustus && "
 			f"export AUGUSTUS_CONFIG_PATH=$(readlink -f ./config) && "
-			f"BGM2AT "
+			# issue #57: BGM2AT's stop-codon frequency substitutions leave the
+			# capture group's leading '/' out of the replacement, corrupting the
+			# /Constant/{{amber,ochre,opal}}prob keys so AUGUSTUS silently falls
+			# back to template defaults. Patch a run-local copy until the geta
+			# pin advances past the fix; the grep -c 5 gate (3 fixed + 2 gc_range
+			# lines already in the correct form) fails the rule if the container
+			# ships a different BGM2AT than this sed expects.
+			f"cp /usr/local/bin/geta/bin/BGM2AT ./BGM2AT.issue57 && "
+			f"sed -i 's|s#/(Constant/|s#(/Constant/|' ./BGM2AT.issue57 && "
+			f"test \"$(grep -c 's#(/Constant/' ./BGM2AT.issue57)\" -eq 5 && "
+			f"perl ./BGM2AT.issue57 "
 			f"{params.args} "
 			f"--flanking_length {flanking_length} "
 			f"--CPU {threads} "
@@ -2054,7 +2068,9 @@ rule augustusWithHints:
 			segSize = line[0]
 			seqLength = line[1]
 
-		intron_len = mil if seqLength > segSize else 30
+		# issue #58: these are strings read from a file -- lexicographic
+		# comparison mis-picked 30 on 44% of Ahy_A/Mtr segments.
+		intron_len = mil if int(seqLength) > int(segSize) else 30
 		run_in_container(
 			f"mkdir -p {params.results_dir}GETA/Augustus/config/species && "
 			f"export AUGUSTUS_CONFIG_PATH=$(readlink -f {params.results_dir}GETA/Augustus/config) && "
