@@ -50,3 +50,4 @@ jobs:
       run: |
         python bin/test_feature_importance.py
         python bin/test_filter_gff.py
+        python bin/test_gff3clear_order.py
