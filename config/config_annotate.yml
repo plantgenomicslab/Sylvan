@@ -130,17 +130,21 @@ pasa:
                         # Ptr 7h31m, Sly 8h38m, Mtr 9h46m) but Ahy_A has been running 50h --
                         # allotetraploid, ~5x the peers. The rule clears PASA checkpoints on
                         # entry, so a TIMEOUT restarts the assembly from scratch.
-addXS:
-  ncpus: 12
-  memory: 48g
-psiClass_HiSat:
-  ncpus: 16
-  threads: 16
-  memory: 64g
-stringtie_HiSat:          # NOTE: no matching rule in current Snakefile_annotate (dead key); right-sized for parity
-  ncpus: 32
-  threads: 32
-  memory: 48g            # #18: was 128g (4.91Gb template); stringtie est. <20g. Refine from sacct MaxRSS.
+prepAugustusWithHints:
+  ncpus: 1
+  memory: 4g
+prepCombineGeneModels:
+  ncpus: 1
+  memory: 4g
+prepCombineGeneModels_step6:
+  ncpus: 1
+  memory: 4g
+prepPsiClass_STAR:
+  ncpus: 1
+  memory: 4g
+prepare_liftoff:
+  ncpus: 1
+  memory: 4g
 psiClass_STAR:            # aggregation: cat per-bin votes + gtf_to_alignment (light)
   ncpus: 2
   memory: 16g
@@ -157,10 +161,6 @@ stringtie_STAR:
   ncpus: 32
   threads: 32
   memory: 48g            # #18: was 128g (4.91Gb template); stringtie est. <20g. Refine from sacct MaxRSS.
-bamToFastq:
-  ncpus:  12
-  threads: 12
-  memory: 48g
 STAR_generate:
   ncpus:  12
   threads: 12
@@ -189,7 +189,9 @@ convertToEvmFormat:
   memory: 4g
 combineEVMInputs:
   ncpus: 1
-  memory: 4g
+  memory: 8g               # streams 7 GB cats + gff_to_evm; the miniprot depth cap
+                           # moved to runEVM (per partition) after the global variant
+                           # was OOM-killed past 50 GB (job 6104935)
 partitionEVM:
   ncpus: 12
   memory: 48g
@@ -198,8 +200,12 @@ writeEVMCommands:
   memory: 16g
 runEVM:
   ncpus: 1
-  memory: 4g
-  # was 8g: sacct MaxRSS peak 0.45g over 630 jobs
+  memory: 8g               # right-sized 32g->8g 2026-08-27: 686/686 runEVM COMPLETED,
+                           #   MaxRSS max 459M across Ath..Spe_A (flat vs genome size).
+                           #   The 4/124 Ath_ODB deaths were walltime (6h), not memory.
+  time: "1-00:00:00"       # 24h: required (6h killed 4/124 Ath_ODB partitions)
+  miniprot_k_base: 16      # per-partition miniprot depth cap; 0 disables
+  miniprot_k_intron: 16
 recombineEVM:
   ncpus: 4
   memory: 16g
@@ -246,27 +252,6 @@ fastp_SINGLE:
   ncpus: 8
   threads: 8
   memory: 32g
-HiSat2_split:             # NOTE: no matching rule in current Snakefile_annotate (dead key); right-sized for parity
-  ncpus: 48
-  threads: 48
-  memory: 64g            # #18: was 192g (4.91Gb template); HiSat2 est. <30g. Refine from sacct MaxRSS.
-HiSat2_build:
-  ncpus: 4
-  memory: 16g
-HiSat2_PAIRED:
-  ncpus: 16
-  threads: 16
-  memory: 64g
-HiSat2_SINGLE:
-  ncpus: 16
-  threads: 16
-  memory: 64g
-mergeHiSat:
-  ncpus: 48
-  threads: 48
-  memory: 192g
-  sortthreads: 8
-  sortmem: 16G
 Sam2Transfrag:
   ncpus: 4
   memory: 8g
@@ -283,6 +268,18 @@ transDecoder_Predict:
 transdecoder2ORF:
   ncpus: 4
   memory: 16g
+transDecoder_LongOrfs_unstranded:
+  ncpus: 4
+  memory: 16g
+transDecoder_Predict_unstranded:
+  ncpus: 4
+  memory: 16g
+transdecoder2ORF_unstranded:
+  ncpus: 4
+  memory: 16g
+filter_unstranded_transfrag:
+  ncpus: 1
+  memory: 4g
 GFF3Clear:
   ncpus: 4
   memory: 16g
@@ -296,14 +293,7 @@ bestGeneModels2lowIdentity:
   ncpus: 4
   threads: 4
   memory: 16g
-genomeSplitJoin:
-  ncpus: 2
-  memory: 8g
 mergeProteins:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-splitProteins:
   ncpus: 4
   threads: 4
   memory: 16g
@@ -381,24 +371,6 @@ pickBetterModels:
 fillingEndsOfGeneModels_ef:
   ncpus: 4
   memory: 16g
-AS_gb:
-  ncpus: 4
-  memory: 16g
-aggregateAS_gb:
-  ncpus: 4
-  memory: 16g
-AS_ge:
-  ncpus: 4
-  memory: 16g
-aggregateAS_ge:
-  ncpus: 4
-  memory: 16g
-AS_gf:
-  ncpus: 4
-  memory: 16g
-aggregateAS_gf:
-  ncpus: 4
-  memory: 16g
 extractTranscriptsForFilter:
   ncpus: 4
   memory: 16g
@@ -433,40 +405,6 @@ fillingEndsOfGeneModels_final:
 GETA_output:
   ncpus: 4
   memory: 16g
-portcullis:
-  ncpus: 12
-  threads: 12
-  memory: 48g
-mikadoConfigure:
-  ncpus: 1
-  memory: 4g
-mikadoPrepare:
-  ncpus: 1
-  memory: 4g
-mikadoMakeDB:
-  ncpus: 1
-  memory: 4g
-mikadoBlastX:
-  ncpus: 16
-  threads: 16
-  memory: 64g
-mikadoTransdecoder_LongOrfs:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-mikadoTransdecoder_Predict:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-mikadoSerialise:
-  ncpus: 4
-  memory: 16g
-mikadoPick:
-  ncpus: 4
-  memory: 16g
-EvidentialCombine:
-  ncpus: 16
-  memory: 64g
 
 ###############################################################################################
 #

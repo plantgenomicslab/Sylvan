@@ -58,14 +58,31 @@ def parse_genes(gff3_path):
     return genes
 
 
-def count_cds(lines):
-    """Count CDS features in a gene's GFF3 lines."""
-    count = 0
+def primary_cds_intervals(lines):
+    """Return the first transcript's CDS intervals as a coordinate tuple.
+
+    PASA can move splice sites without changing the number of CDS rows.  CDS
+    counts therefore cannot distinguish a UTR-only update from replacement of
+    the EVM intron chain.  Keep the first-isoform convention used downstream by
+    refine_boundaries.py, and compare the actual structure instead.
+    """
+    first_mrna = None
+    intervals = []
     for line in lines:
-        parts = line.strip().split("\t")
-        if len(parts) >= 3 and parts[2] == "CDS":
-            count += 1
-    return count
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) < 9:
+            continue
+        if parts[2] in ("mRNA", "transcript"):
+            match = re.search(r"(?:^|;)ID=([^;\s]+)", parts[8])
+            if first_mrna is None and match:
+                first_mrna = match.group(1)
+        elif parts[2] == "CDS":
+            parent = re.search(r"(?:^|;)Parent=([^;\s]+)", parts[8])
+            parents = parent.group(1).split(",") if parent else []
+            if first_mrna and parents and first_mrna not in parents:
+                continue
+            intervals.append((int(parts[3]), int(parts[4])))
+    return tuple(sorted(set(intervals)))
 
 
 def get_mrna_ids(lines):
@@ -398,9 +415,15 @@ def main():
         ps, pe, pgid, plines, pidx = best_pasa
         pasa_len = pe - ps + 1
         is_chimeric = pasa_len > 2 * evm_len
-        evm_cds = count_cds(lines)
-        pasa_cds = count_cds(plines)
-        cds_changed = evm_cds > 0 and abs(pasa_cds - evm_cds) > max(1, evm_cds * 0.3)
+        evm_cds = primary_cds_intervals(lines)
+        pasa_cds = primary_cds_intervals(plines)
+        # A row-count threshold missed shifted donor/acceptor coordinates and
+        # terminal CDS changes whenever PASA retained roughly the same number
+        # of segments.  Those models bypassed evidence-based selection and
+        # silently replaced the improved EVM chain.  Any coordinate change is
+        # structural; DIAMOND still resolves it, with PASA preferred on ties as
+        # required by issue #17.
+        cds_changed = bool(evm_cds) and evm_cds != pasa_cds
 
         if is_chimeric or cds_changed:
             conflicts.append((ei, (chrom, start, end, strand, gid, lines),

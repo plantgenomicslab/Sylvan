@@ -868,7 +868,15 @@ rule mergeTransfrag:
 		f"{RESULTS_DIR}GETA/transcript/transfrag.gtf",
 		f"{RESULTS_DIR}GETA/transcript/intron.txt",
 		temp(f"{RESULTS_DIR}GETA/transcript/base_depth.txt"),
-		f"{RESULTS_DIR}GETA/transcript/transfrag.strand.fasta"
+		f"{RESULTS_DIR}GETA/transcript/transfrag.strand.fasta",
+		# transfragDump also writes the unstranded half. It was produced but
+		# never declared, so the DAG could not see it and no rule consumed it --
+		# 24,045 of Ath_ODB's 33,755 transfrags (71.2%) were dropped on the floor.
+		# They are the single-exon models: transfrag infers strand from splice
+		# junctions, so a transcript without one is emitted with strand '.'.
+		f"{RESULTS_DIR}GETA/transcript/transfrag.noStrand.fasta",
+		f"{RESULTS_DIR}GETA/transcript/transfrag.gff3",
+		f"{RESULTS_DIR}GETA/transcript/transfrag.alignment.gff3"
 	params:
 		results_dir = RESULTS_DIR
 	run:
@@ -912,13 +920,15 @@ rule transDecoder_LongOrfs:
 		results_dir = RESULTS_DIR
 	shell:"""
 		micromamba activate genepred
-		if [ -d {params.results_dir}GETA/transcript.__checkpoints_longorfs ]; then
-		  if [ -z "$(ls -A {params.results_dir}GETA/transcript.__checkpoints_longorfs)" ]; then
-		    echo "No checkpoints...continuing"
-		  else
-		    rm {params.results_dir}GETA/transcript.__checkpoints_longorfs/*
-		  fi
-		fi
+		# TransDecoder keeps its resume markers in
+		#   <output_dir>/<basename>.transdecoder_dir/__checkpoints_longorfs
+		# not in <output_dir>.__checkpoints_longorfs. The old path never existed,
+		# so a stale TD.longorfs.ok from an earlier run made LongOrfs skip the
+		# search and reuse an obsolete longest_orfs.cds. Observed on Ath_ODB:
+		# transfrag.strand.fasta (9710 seqs, 2026-07-25) produced only 125 ORFs
+		# because the checkpoint was dated 2026-07-16. Reset the whole
+		# transdecoder_dir so LongOrfs always sees the current input.
+		rm -rf {params.results_dir}GETA/transcript/transfrag.strand.fasta.transdecoder_dir
 
 		TransDecoder.LongOrfs {params.args} \
 		  -t {input} -S \
@@ -941,13 +951,11 @@ rule transDecoder_Predict:
 	shell:
 		"""
 		micromamba activate genepred
-		if [ -d {params.results_dir}GETA/transcript.__checkpoints ]; then
-		  if [ -z "$(ls -A {params.results_dir}GETA/transcript.__checkpoints)" ]; then
-		    echo "No checkpoints...continuing";
-		  else
-		    rm {params.results_dir}GETA/transcript.__checkpoints/*;
-		  fi
-		fi
+		# Same stale-checkpoint problem as transDecoder_LongOrfs: Predict's
+		# markers live in transfrag.strand.fasta.transdecoder_dir/__checkpoints_TDpredict.
+		# Only that subdirectory is cleared here -- the parent holds
+		# longest_orfs.cds, which Predict needs as input.
+		rm -rf {params.results_dir}GETA/transcript/transfrag.strand.fasta.transdecoder_dir/__checkpoints_TDpredict
 
 		TransDecoder.Predict {params.args} \
 		  -t {params.results_dir}GETA/transcript/transfrag.strand.fasta \
@@ -970,7 +978,134 @@ rule transDecoder_Predict:
 		fi
 		"""
 
-#TODO: Add "nostrand"?
+# ---- Unstranded (single-exon) transfrag branch ----
+# transfragDump splits its output by strand. Everything above consumes only
+# transfrag.strand.fasta; these rules bring the unstranded half in.
+#
+# Verified on Ath_ODB before wiring this up: transdecoder2ORF accepts entries
+# whose transfrag.gtf strand is '.' and fills in +/- from the ORF direction it
+# picked, so no corrected GTF is needed. 24,045 input sequences yielded 10,972
+# ORF models (5,450 +/5,522 -, zero '.') and 9,597 genes after GFF3Clear.
+# IDs cannot collide with the stranded half: --gene_prefix is transfragNS here
+# and transfrag there.
+#
+# Set Internal.use_unstranded_transfrag to false to fall back to stranded-only.
+_use_unstranded_value = config_dict.get("Internal", {}).get(
+	"use_unstranded_transfrag", True
+)
+if isinstance(_use_unstranded_value, str):
+	USE_UNSTRANDED_TRANSFRAG = _use_unstranded_value.strip().lower() == "true"
+else:
+	USE_UNSTRANDED_TRANSFRAG = bool(_use_unstranded_value)
+
+rule transDecoder_LongOrfs_unstranded:
+	input: f"{RESULTS_DIR}GETA/transcript/transfrag.noStrand.fasta"
+	output: f"{RESULTS_DIR}GETA/transcript/nostrand_td/longest_orfs.cds"
+	params: args = config_dict["Internal"]["TransDecoder.LongOrfs"],
+		results_dir = RESULTS_DIR
+	shell:"""
+		micromamba activate genepred || exit 1
+		# Same stale-checkpoint trap as the stranded rule: reset the whole
+		# transdecoder_dir so LongOrfs always sees the current input.
+		rm -rf {params.results_dir}GETA/transcript/nostrand_td || exit 1
+		mkdir -p {params.results_dir}GETA/transcript/nostrand_td || exit 1
+
+		if ! grep -q '^>' {input}; then
+		  echo "transDecoder_LongOrfs_unstranded: expected empty noStrand FASTA; creating empty sentinel output" >&2
+		  : > {output} || exit 1
+		  exit 0
+		fi
+
+		# No -S here. These transcripts have no strand, so TransDecoder must
+		# search both frames and choose; -S would force the forward strand and
+		# silently halve the usable models.
+		TransDecoder.LongOrfs {params.args} \
+		  -t {input} \
+		  --output_dir {params.results_dir}GETA/transcript/nostrand_td || exit 1
+
+		TD_DIR={params.results_dir}GETA/transcript/nostrand_td/transfrag.noStrand.fasta.transdecoder_dir
+		OUT_DIR={params.results_dir}GETA/transcript/nostrand_td
+		if [ ! -f ${{OUT_DIR}}/longest_orfs.cds ] && [ -f ${{TD_DIR}}/longest_orfs.cds ]; then
+		  cp ${{TD_DIR}}/longest_orfs.cds ${{OUT_DIR}}/longest_orfs.cds || exit 1
+		  cp ${{TD_DIR}}/longest_orfs.gff3 ${{OUT_DIR}}/longest_orfs.gff3 2>/dev/null || true
+		  cp ${{TD_DIR}}/longest_orfs.pep ${{OUT_DIR}}/longest_orfs.pep 2>/dev/null || true
+		fi
+		test -s {output} || exit 1
+		"""
+
+rule transDecoder_Predict_unstranded:
+	input:
+		cds = f"{RESULTS_DIR}GETA/transcript/nostrand_td/longest_orfs.cds",
+		fasta = f"{RESULTS_DIR}GETA/transcript/transfrag.noStrand.fasta"
+	output: f"{RESULTS_DIR}GETA/transcript/transfrag.nostrand.transdecoder.gff3"
+	params: args = config_dict["Internal"]["TransDecoder.Predict"],
+		results_dir = RESULTS_DIR
+	shell:
+		"""
+		micromamba activate genepred || exit 1
+		if ! grep -q '^>' {input.fasta}; then
+		  echo "transDecoder_Predict_unstranded: expected empty noStrand FASTA; creating empty sentinel output" >&2
+		  : > {output} || exit 1
+		  exit 0
+		fi
+		TD_DIR={params.results_dir}GETA/transcript/nostrand_td/transfrag.noStrand.fasta.transdecoder_dir
+		rm -rf ${{TD_DIR}}/__checkpoints_TDpredict || exit 1
+
+		cd {params.results_dir}GETA/transcript/nostrand_td || exit 1
+		TransDecoder.Predict {params.args} \
+		  -t {input.fasta} \
+		  --output_dir {params.results_dir}GETA/transcript/nostrand_td || exit 1
+
+		OUT={output}
+		if [ -f transfrag.noStrand.fasta.transdecoder.gff3 ]; then
+		  mv transfrag.noStrand.fasta.transdecoder.gff3 ${{OUT}} || exit 1
+		elif [ -f ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3.revised_starts.gff3 ]; then
+		  cp ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3.revised_starts.gff3 ${{OUT}} || exit 1
+		elif [ -f ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3 ]; then
+		  cp ${{TD_DIR}}/longest_orfs.cds.best_candidates.gff3 ${{OUT}} || exit 1
+		else
+		  echo "ERROR: unstranded TransDecoder.Predict produced no usable .gff3" >&2
+		  exit 1
+		fi
+		test -s ${{OUT}} || exit 1
+		"""
+
+rule transdecoder2ORF_unstranded:
+	input:
+		gff = f"{RESULTS_DIR}GETA/transcript/transfrag.nostrand.transdecoder.gff3",
+		gtf = f"{RESULTS_DIR}GETA/transcript/transfrag.gtf",
+		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
+	output:
+		gff = f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.gff3",
+		protein = f"{RESULTS_DIR}GETA/transcript/proteins.nostrand.fasta"
+	params: results_dir = RESULTS_DIR
+	shell:
+		"""
+		micromamba activate base || exit 1
+		if [ ! -s {input.gff} ]; then
+		  echo "transdecoder2ORF_unstranded: expected empty noStrand prediction; creating empty sentinel outputs" >&2
+		  : > {output.gff} || exit 1
+		  : > {output.protein} || exit 1
+		  exit 0
+		fi
+		transdecoder2ORF \
+			--out_protein {output.protein}.part \
+			{input.gtf} \
+			{input.gff} {input.genome_fasta} > {output.gff}.part || exit 1
+
+		# Guard the one thing that could silently poison the merge: a model that
+		# still carries strand '.' would be meaningless downstream. Measured
+		# expectation is zero.
+		dots=$(awk -F'\t' '$0!~/^#/ && $3=="gene" && $7=="." {{n++}} END{{print n+0}}' {output.gff}.part) || exit 1
+		genes=$(awk -F'\t' '$0!~/^#/ && $3=="gene" {{n++}} END{{print n+0}}' {output.gff}.part) || exit 1
+		echo "transdecoder2ORF_unstranded: genes=$genes dot_strand=$dots" >&2
+		if [ "$genes" -eq 0 ] || [ "$dots" -ne 0 ]; then
+		  echo "ERROR: unstranded ORF output invalid (genes=$genes dot_strand=$dots)" >&2
+		  exit 1
+		fi
+		mv {output.gff}.part {output.gff} || exit 1
+		mv {output.protein}.part {output.protein} || exit 1
+		"""
 
 rule transdecoder2ORF:
 	input:
@@ -987,19 +1122,64 @@ rule transdecoder2ORF:
 			{input.gff} {input.genome_fasta} > {params.results_dir}GETA/transcript/transdecoder2ORF.gff3
 		"""
 
+rule filter_unstranded_transfrag:
+	input:
+		gff = f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.gff3"
+	output: f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.filtered.gff3"
+	log: f"{RESULTS_DIR}logs/filter_unstranded_transfrag.err"
+	params:
+		min_aa = config_dict.get("Internal", {}).get("unstranded_min_aa", 150),
+		min_fc = config_dict.get("Internal", {}).get("unstranded_min_fragment_count", 50),
+		results_dir = RESULTS_DIR
+	shell:
+		"""
+		micromamba activate base || exit 1
+		mkdir -p {params.results_dir}logs || exit 1
+		# Single-exon transfrags carry more noise than the spliced half --
+		# intronic fragments, intergenic transcription, unspliced pre-mRNA. Keep
+		# the ones that look like genes. Measured on Ath_ODB: 9,597 models in,
+		# 3,583 out at these defaults (2,896 not complete, 2,927 CDS too short,
+		# 191 too little read support). Reference is never consulted; for scale,
+		# Ath has 6,669 strictly single-exon genes.
+		python3 $(pwd)/bin/filter_unstranded_transfrag.py \
+			--min-aa {params.min_aa} \
+			--min-fragment-count {params.min_fc} \
+			{input.gff} > {output}.part 2> {log} || exit 1
+		cat {log} >&2 || exit 1
+		mv {output}.part {output} || exit 1
+		"""
+
+def _transfrag_orf_inputs(wildcards):
+	gffs = [f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.gff3"]
+	if USE_UNSTRANDED_TRANSFRAG:
+		gffs.append(f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.nostrand.filtered.gff3")
+	return gffs
+
 rule GFF3Clear:
 	input:
-		gff = f"{RESULTS_DIR}GETA/transcript/transdecoder2ORF.gff3",
+		gff = _transfrag_orf_inputs,
 		genome_fasta = f"{RESULTS_DIR}GETA/genome.fasta"
 	output: f"{RESULTS_DIR}GETA/transcript/transfrag.genome.gff3"
 	shell:
 		"""
 		micromamba activate base
+		# The stranded file is listed first on purpose: GFF3Clear resolves
+		# overlaps in favour of whichever input comes first, so spliced models
+		# always win over single-exon ones covering the same locus. (Getting this
+		# order backwards is what cost pickBetterModels 3,134 correct chains.)
 		GFF3Clear \
 			--GFF3_source GETA \
 			--genome {input.genome_fasta} \
 			--gene_prefix transfrag \
-			--no_attr_add {input.gff} > {output}
+			--no_attr_add {input.gff} > {output}.part
+
+		genes=$(awk -F'\t' '$0!~/^#/ && $3=="gene" {{n++}} END{{print n+0}}' {output}.part)
+		echo "GFF3Clear: transfrag.genome.gff3 genes=$genes" >&2
+		if [ "$genes" -eq 0 ]; then
+		  echo "ERROR: transfrag.genome.gff3 has no genes" >&2
+		  exit 1
+		fi
+		mv {output}.part {output}
 		"""
 
 # These next three rules are not currently run during the workflow...
@@ -1007,13 +1187,17 @@ rule transfragComplete:
 	input: f"{RESULTS_DIR}GETA/transcript/transfrag.genome.gff3"
 	output: f"{RESULTS_DIR}GETA/transcript/transfrag.genome.complete.gff3"
 	run:
-		# TODO: Check that this perl translation works
-		with open(input, "r") as infile:
-			with open(output, "w") as outfile:
-				for line in infile:
-					if re.search(r"\tgene\t", line):
-						if re.search(r"Form=one_transcript_get_1_gene_model.*Integrity=complete"):
-							outfile.write(line)
+		# Two defects fixed here. re.search() was called with only a pattern and
+		# no subject string, which raises TypeError the moment a gene line is
+		# seen; and open() was handed Snakemake's InputFiles/OutputFiles objects
+		# rather than paths. The rule is not wired into the DAG today (see the
+		# comment above), so neither ever fired -- but it must not stay broken.
+		with open(str(input), "r") as infile, open(str(output), "w") as outfile:
+			for line in infile:
+				if "\tgene\t" not in line:
+					continue
+				if re.search(r"Form=one_transcript_get_1_gene_model.*Integrity=complete", line):
+					outfile.write(line)
 
 rule ORF2bestGeneModels:
 	input: f"{RESULTS_DIR}GETA/transcript/transfrag.genome.complete.gff3"
@@ -1295,7 +1479,10 @@ checkpoint prepCombineGeneModels:
 				elif fields[6] not in transfrag[fields[0]]:
 					transfrag[fields[0]][fields[6]] = line
 				else:
-					transfrag[fields[0]][fields[6]] += "\n" + line
+					# `line` already ends in a newline, so the old `"\n" + line`
+					# inserted a blank line between every record. step6's copy of
+					# this loop (prepCombineGeneModels_step6) uses `+= line`.
+					transfrag[fields[0]][fields[6]] += line
 
 		genewise = {}
 		with open(input.genewise, 'r') as IN:
@@ -1309,7 +1496,10 @@ checkpoint prepCombineGeneModels:
 				elif fields[6] not in genewise[fields[0]]:
 					genewise[fields[0]][fields[6]] = line
 				else:
-					genewise[fields[0]][fields[6]] += "\n" + line
+					# `line` already ends in a newline, so the old `"\n" + line`
+					# inserted a blank line between every record. step6's copy of
+					# this loop (prepCombineGeneModels_step6) uses `+= line`.
+					genewise[fields[0]][fields[6]] += line
 
 		tmp = f"{RESULTS_DIR}GETA/Augustus/training/combineGeneModels_tmp"
 		if not os.path.exists(tmp):
@@ -2298,10 +2488,20 @@ rule pickBetterModels:
 		{input.a} \
 		{output.c} > {params.results_dir}GETA/CombineGeneModels/picked_evidence_geneModels.gff3
 
+		# GFF3Clear resolves overlaps in favour of whichever file is listed
+		# FIRST. picked_evidence_geneModels.gff3 used to come first, so the
+		# lower-quality evidence-picked models displaced the combined models in
+		# geneModels.a. Measured on Ath_ODB (CDS intron-chain, 25851 ref chains):
+		#   a (input)          Sn 57.44 Pr 75.53 F1 65.25
+		#   picked_evidence    Sn 44.56 Pr 73.38 F1 55.45
+		#   d, picked first    Sn 45.68 Pr 65.45 F1 53.81
+		#   d, a first         Sn 57.81 Pr 73.12 F1 64.57
+		# The old order dropped 3038 of a's correct chains (14848 -> 11810);
+		# listing a first recovers 3134 (11810 -> 14944), F1 +10.76.
 		GFF3Clear \
 		--genome {input.genome_fasta} \
-		--no_attr_add {params.results_dir}GETA/CombineGeneModels/picked_evidence_geneModels.gff3 \
-		{input.a} > {output.d}
+		--no_attr_add {input.a} \
+		{params.results_dir}GETA/CombineGeneModels/picked_evidence_geneModels.gff3 > {output.d}
 
 		perl -p -i -e 's/Integrity=[^;]+;?//g' {output.d}
 
@@ -3109,7 +3309,13 @@ rule psiClass_bin:
 	input:  f"{RESULTS_DIR}TRANSCRIPT/PsiClass/splitBam/bin_{{binid}}.bam"
 	output: f"{RESULTS_DIR}TRANSCRIPT/PsiClass/bins/{{binid}}/psi_vote.gtf"
 	threads: config_dict["psiClass_bin"]["threads"]
-	params: results_dir = RESULTS_DIR
+	params:
+		results_dir = RESULTS_DIR,
+		# Override to point at a patched build. The B/C fleet runs use the #41
+		# trust-splice patched PsiCLASS (one-line j<siteCnt guard; byte-identical
+		# output on non-crashing bins) via this knob instead of a run-local
+		# Snakefile edit. Default: the container's psiclass on PATH.
+		psiclass_bin = config_dict.get("psiClass_bin", {}).get("binary", "psiclass")
 	shell: """
 		micromamba activate alignment
 		bindir={params.results_dir}TRANSCRIPT/PsiClass/bins/{wildcards.binid}
@@ -3126,7 +3332,7 @@ rule psiClass_bin:
 		# stringtie / transfrag / miniprot / liftoff / ab-initio tracks feeding
 		# EVM. failed_bins.txt is the audit trail -- report it in methods.
 		if [ "$(samtools view -c $bindir/filtered.bam)" -gt 0 ]; then
-			psiclass -b $bindir/filtered.bam -o $bindir/psi -p {threads} -c 0.05 && rc=0 || rc=$?
+			{params.psiclass_bin} -b $bindir/filtered.bam -o $bindir/psi -p {threads} -c 0.05 && rc=0 || rc=$?
 			if [ "$rc" -ne 0 ]; then
 				echo "psiClass_bin: psiclass failed on {wildcards.binid} (exit $rc) -- emitting empty vote" >&2
 				printf '%s\\texit=%s\\n' "{wildcards.binid}" "$rc" \
@@ -3226,20 +3432,27 @@ rule combineEVMInputs:
 		augustus_gff3 = f"{RESULTS_DIR}GETA/Augustus/augustus.gff3",
 		geta_gff3 = f"{RESULTS_DIR}GETA/geta.geneModels.gff3",
 		helixer_gff3 = f"{RESULTS_DIR}AB_INITIO/Helixer/helixer.gff3",
-	params: results_dir = RESULTS_DIR
+	params:
+		results_dir = RESULTS_DIR
 	output:
 		f"{RESULTS_DIR}EVM/gene_predictions_checkCoords.gff3",
 		f"{RESULTS_DIR}EVM/transcript_alignments_checkCoords.gff3",
 		f"{RESULTS_DIR}EVM/protein_alignments_checkCoords.gff3"
-	# Other sources of evidence 
+	# Other sources of evidence
 	shell: """
 		micromamba activate annotation
+		# Liftoff rides in gene_predictions as ABINITIO_PREDICTION (the weights
+		# file declares that class): evidence_modeler.pl:2601 lets only PROTEIN
+		# and ABINITIO evidence add match coverage, so as OTHER/TRANSCRIPT the
+		# most accurate track (chain F1 66.13 vs AUGUSTUS 64.03) contributed
+		# nothing to coding scores. Moving it is worth +1.0 IC F1 on its own.
 		cat {input.helixer_gff3} \
 			{input.augustus_gff3} \
 			{input.geta_gff3} \
 			{input.genewise_other} \
+			{input.liftoff} \
 			> {params.results_dir}EVM/gene_predictions.gff3
-	
+
 		bin/gff_to_evm.py {params.results_dir}EVM/gene_predictions.gff3 \
 		--check-coords \
 		--feature \\* > {params.results_dir}EVM/gene_predictions_checkCoords.gff3
@@ -3247,7 +3460,6 @@ rule combineEVMInputs:
 		# Transcript evidence
 		cat {input.gmapExon} \
 			{input.pasa} \
-			{input.liftoff} \
 			{input.st_star} \
 			{input.pc_star} \
 			> {params.results_dir}EVM/transcript_alignments.gff3
@@ -3260,7 +3472,7 @@ rule combineEVMInputs:
 		cat {input.genewise_prot} \
 			{input.miniprot} \
 			> {params.results_dir}EVM/protein_alignments.gff3
-		
+
 		bin/gff_to_evm.py {params.results_dir}EVM/protein_alignments.gff3 \
 			--check-coords \
 			--feature \\* > {params.results_dir}EVM/protein_alignments_checkCoords.gff3
@@ -3285,6 +3497,11 @@ rule partitionEVM:
 			rm {params.results_dir}EVM/*.ok || echo 'No partition.ok files to remove...continuing'
 			rm {params.results_dir}EVM/*/*/*.ok || echo 'No chunk.ok files to remove...continuing'
 			rm {params.results_dir}EVM/*/*checkCoords.gff3 || echo 'No old evidence files to remove ...continuing'
+			# Repartitioning rewrites every partition's evidence uncapped. A stale
+			# .miniprot_cap.done from the previous round would make runEVM skip the
+			# cap and feed EVM the uncapped file silently -- clear the markers with
+			# the other per-round state (found in review before first deployment).
+			rm {params.results_dir}EVM/*/.miniprot_cap.done {params.results_dir}EVM/*/*/.miniprot_cap.done 2>/dev/null || echo 'No cap markers to remove...continuing'
 
 			export TMPDIR={RESULTS_DIR_ABS}/TMP
 			export SLURM_TMPDIR={RESULTS_DIR_ABS}/TMP
@@ -3353,12 +3570,43 @@ rule runEVM:
 	resources:
 		mem_mb = lambda wildcards, attempt: parse_memory_to_mb(config_dict["runEVM"]["memory"]) + (attempt - 1) * 40960
 	params:
-		results_dir_abs = EVM_DIR_ABS
+		results_dir_abs = EVM_DIR_ABS,
+		# miniprot depth cap: EVM accumulates weight per covering alignment with
+		# no normalisation, so OrthoDB redundancy becomes vote count (297x mean
+		# depth over covered bases). K=16 fixed by sweep (12: -0.91, 20: -0.04,
+		# 24: -0.22, 32: -0.42 IC F1). 0 disables. The cap runs PER PARTITION:
+		# the whole-genome variant held every alignment summary in memory and
+		# was OOM-killed past 50 GB on Ath_ODB (job 6104935) -- the smallest
+		# fleet genome -- while the partition-local topology is what the 73.54
+		# validation actually measured, needs only a few GB, and parallelises.
+		k_base = config_dict.get("runEVM", {}).get("miniprot_k_base", 16),
+		k_intron = config_dict.get("runEVM", {}).get("miniprot_k_intron", 16)
 	shell: """
 		micromamba activate annotation
 		cd {params.results_dir_abs}
 
 		CMD_FILE="commands.{wildcards.evm_num}.list"
+
+		# Cap each partition's miniprot rows before EVM reads them. Idempotent
+		# via marker, so retries (and a partition shared by two command lists)
+		# never double-process. No errexit in shell blocks -- every step guards
+		# itself, or EVM would silently consume the uncapped file.
+		if [ "{params.k_base}" -gt 0 ] && [ "{params.k_intron}" -gt 0 ] && [ -s "$CMD_FILE" ]; then
+			for d in $(sed -n 's/.*--exec_dir \\([^ ]*\\).*/\\1/p' "$CMD_FILE" | sort -u); do
+				PA="$d/protein_alignments_checkCoords.gff3"
+				[ -f "$PA" ] || continue
+				[ -f "$d/.miniprot_cap.done" ] && continue
+				awk -F'\t' '$2=="miniprot"' "$PA" > "$d/pa.miniprot.gff3" || exit 1
+				awk -F'\t' '$2!="miniprot"' "$PA" > "$d/pa.other.gff3" || exit 1
+				python {workflow.basedir}/cap_miniprot_depth.py \
+					"$d/pa.miniprot.gff3" "$d/pa.miniprot.capped.gff3" \
+					--k-base {params.k_base} --k-intron {params.k_intron} \
+					--tmpdir "$d" || exit 1
+				cat "$d/pa.other.gff3" "$d/pa.miniprot.capped.gff3" > "$PA" || exit 1
+				rm -f "$d/pa.miniprot.gff3" "$d/pa.other.gff3" "$d/pa.miniprot.capped.gff3"
+				touch "$d/.miniprot_cap.done"
+			done
+		fi
 
 		if [ -s "$CMD_FILE" ]; then
 			# `bash -e`: a child bash does NOT inherit the parent's errexit, so without
@@ -3387,19 +3635,34 @@ rule recombineEVM:
 			# genome.fasta was created by partitionEVM rule
 			GENOME_FILE="{params.results_dir_abs}/genome.fasta"
 
-			recombine_EVM_partial_outputs.pl \
-			--partitions {params.results_dir_abs}/partitions_list.out \
-			--output_file_name evm.out
+			# Convert each partition's raw evm.out to GFF3 in partition-local
+			# coordinates, then merge at whole-mRNA granularity. Stock
+			# recombine_EVM_partial_outputs.pl assigns every gene/mRNA/CDS ROW
+			# to a partition by row midpoint, so models straddling a boundary
+			# are torn apart: of 87 reference multi-exon models crossing an
+			# Ath_ODB boundary, 10 survived intact (chain Sn 11.5%) and 68
+			# present in some partition vanished from the merge.
+			# merge_evm_partitions.py gives each mRNA (with its gene row and
+			# children) one owner partition instead, preferring the more
+			# complete copy where the 20 kb overlap holds two versions.
+			# No errexit in shell blocks (shell.prefix only sets -u), so each
+			# step guards itself.
+			# EVM_to_GFF3.pl needs URI::Escape (via PerlLib/Gene_obj.pm), which
+			# only the genepred perl carries -- the container's base perl dies at
+			# compile, the same trap as gtf_to_alignment_gff3.pl. Pin it.
+			EVM_TO_GFF3="$(command -v EVM_to_GFF3.pl)" || exit 1
+			while IFS="$(printf '\\t')" read -r chrom base flag part; do
+				if [ "$flag" = "Y" ]; then d="$part"; else d="$base"; fi
+				if [ -s "$d/evm.out" ]; then
+					/opt/envs/genepred/bin/perl "$EVM_TO_GFF3" "$d/evm.out" "$chrom" > "$d/evm.partition.gff3" || exit 1
+				else
+					: > "$d/evm.partition.gff3"
+				fi
+			done < {params.results_dir_abs}/partitions_list.out
 
-			convert_EVM_outputs_to_GFF3.pl \
-			--partitions {params.results_dir_abs}/partitions_list.out \
-			--output evm.out \
-			--genome $GENOME_FILE
-
-			# Scope the search to the EVM partition dir (issue #19.2). `find .` ran from
-			# the run root and would concatenate stray evm.out.gff3 from backups/TMP/old
-			# experiments into the merged output.
-			find {params.results_dir_abs} -regex '.*\\/evm.out.gff3' -exec cat {{}} \\; > {output}.raw
+			python bin/merge_evm_partitions.py \
+				{params.results_dir_abs}/partitions_list.out \
+				{output}.raw || exit 1
 
 			# Remove phantom genes with coordinates beyond chromosome boundaries
 			# (safety net for EVM partition merge issues)
@@ -3456,6 +3719,26 @@ rule pasaPost:
 			-g genome.fasta \
 			-P {params.pasa_dir}/EVM.all.pasa_input.gff3
 
+			# PASA 2.5.3 ships an index that its SQLite schema drops. The MySQL
+			# schema declares both `UNIQUE KEY svs_idx (cdna_acc,sv_id)` and
+			# `KEY sv_idx (sv_id)`; the SQLite schema keeps only the composite as
+			# `PRIMARY KEY (cdna_acc,sv_id) WITHOUT ROWID`. Since cdna_acc leads,
+			# no index serves the `WHERE sv_id = ?` lookups that
+			# classify_alt_splice_as_UTR_or_protein.dbi (lines 352/363/463/485) and
+			# alt_splice_AAT_alignment_generator.dbi:192 issue, so every one of them
+			# scans the whole table. Measured on Ath_ODB's 1.4 GB db:
+			# 22.47 ms/lookup against 0.03-0.09 ms for the indexed tables -- a
+			# 500-700x penalty, on 154k rows for Ath and far more for Ahy
+			# (650k transcripts, 7.5 GB db, pasaPost wall time 4 days).
+			# Creating the index changes query plans only, never results.
+			DB={params.pasa_dir}/pasa.sqlite
+			if [ -f "$DB" ]; then
+			  sqlite3 "$DB" \
+			    'CREATE INDEX IF NOT EXISTS svs_sv_id_idx ON splice_variation_support (sv_id);' \
+			    && echo "pasaPost: ensured index svs_sv_id_idx on splice_variation_support(sv_id)" >&2 \
+			    || echo "pasaPost: index creation skipped (non-fatal)" >&2
+			fi
+
 			{params.pasa_home}/Launch_PASA_pipeline.pl \
 			-c {params.results_dir}config/annotCompare.config \
 			--CPU {threads} \
@@ -3480,7 +3763,18 @@ rule agat_clean_final:
 		results_dir = RESULTS_DIR,
 		pasa_dir = f"{RESULTS_DIR}TRANSCRIPT/PASA",
 		swissprot = config_dict["Input"].get("swissprot", ""),
-		splice = f"{RESULTS_DIR}TRANSCRIPT/PsiClass/splice/psiclass.STAR_bam.trusted_splice"
+		splice = f"{RESULTS_DIR}TRANSCRIPT/PsiClass/splice/psiclass.STAR_bam.trusted_splice",
+		# The chimera-filtered copy pasaPost writes, not the raw EVM output.
+		# Merging the raw file undoes the guard: merge_pasa_evm.py rescues EVM
+		# genes PASA did not cover, and a model withheld from PASA is uncovered
+		# by construction, so every withheld chimera came back into PREFILTER
+		# (Sly: all 57, matched 57/57 by coordinate; 4 survived the filter at up
+		# to 549 exons / 34,623 aa because a chimera spanning several real
+		# proteins scores blast_qcovs 99.0). A params entry, not an input:
+		# pasaPost writes the file itself, and the five pre-guard runs
+		# (Ath/Dca/Mtr/Osa/Ptr) do not have it until their pasaPost reruns, so
+		# declaring it as input would fail their DAG (backported fleet note).
+		evm_pasa = f"{RESULTS_DIR}TRANSCRIPT/PASA/EVM.all.pasa_input.gff3"
 	shell: """
 		micromamba activate annotation
 		mkdir -p {params.results_dir}PREFILTER
@@ -3516,8 +3810,15 @@ rule agat_clean_final:
 		fi
 		echo "Using PASA GFF3: ${{pasa_gff3}}"
 
-		# Merge PASA-updated genes with EVM genes that PASA dropped
-		merge_args=("${{pasa_gff3}}" {input.evm} {params.results_dir}PREFILTER/Sylvan_merged.gff3)
+		# Merge PASA-updated genes with EVM genes that PASA dropped. Prefer the
+		# chimera-guard's filtered copy (see params.evm_pasa); fall back to the
+		# raw EVM output only when a pre-guard pasaPost never wrote it.
+		EVM_FOR_MERGE="{params.evm_pasa}"
+		if [ ! -f "$EVM_FOR_MERGE" ]; then
+			echo "agat_clean_final: {params.evm_pasa} missing (pasaPost predates the chimera guard) -- merging raw {input.evm}" >&2
+			EVM_FOR_MERGE="{input.evm}"
+		fi
+		merge_args=("${{pasa_gff3}}" "$EVM_FOR_MERGE" {params.results_dir}PREFILTER/Sylvan_merged.gff3)
 		if [ -n "{params.swissprot}" ] && [ -f "{params.swissprot}" ]; then
 			echo "Using SwissProt DB for PASA/EVM comparison: {params.swissprot}"
 			merge_args+=({input.genome} {params.swissprot})

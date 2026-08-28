@@ -27,6 +27,12 @@ busco_lin = config_dict["Input"]["busco_lin"]
 omark_db = config_dict.get("Benchmark", {}).get("omark_db", "")
 gff3_files = config_dict.get("Benchmark", {}).get("gff3_files", {})
 
+# With an explicit opt-out the OMArk rules are omitted from the default DAG, so
+# report the skip while loading the workflow as well as inside the rules (which
+# may still be invoked directly).
+if not omark_db:
+	print("[Sylvan] OMArk skipped: Benchmark.omark_db is empty (explicit opt-out).", file=sys.stderr)
+
 # Validate
 if not gff3_files:
 	sys.exit("No GFF3 files specified in Benchmark.gff3_files config section")
@@ -150,9 +156,16 @@ rule omamer_search:
 		db = omark_db
 	shell:"""
 		micromamba activate omark
-		if [ -s {input} ] && [ -n "{params.db}" ] && [ -f "{params.db}" ]; then
-			omamer search --db {params.db} --query {input} --out {output}
+		if [ -z "{params.db}" ]; then
+			echo "[Sylvan] OMArk skipped: Benchmark.omark_db is empty (explicit opt-out)." >&2
+			touch {output}
+		elif [ ! -f "{params.db}" ]; then
+			echo "[Sylvan] ERROR: Benchmark.omark_db does not exist or is not a regular file: {params.db}" >&2
+			exit 1
+		elif [ -s {input} ]; then
+			omamer search --db "{params.db}" --query {input} --out {output}
 		else
+			echo "[Sylvan] OMArk skipped for {wildcards.label}: protein input is empty." >&2
 			touch {output}
 		fi
 		"""
@@ -166,10 +179,18 @@ rule omark:
 		out_dir = f"{RESULTS_DIR}BENCHMARK/{{label}}.omark"
 	shell:"""
 		micromamba activate omark
-		if [ -s {input} ] && [ -n "{params.db}" ] && [ -f "{params.db}" ]; then
-			omark -f {input} -d {params.db} -o {params.out_dir}
+		if [ -z "{params.db}" ]; then
+			echo "[Sylvan] OMArk skipped: Benchmark.omark_db is empty (explicit opt-out)." >&2
+			mkdir -p {params.out_dir}
+			echo "# OMArk skipped: Benchmark.omark_db is empty" > {output}
+		elif [ ! -f "{params.db}" ]; then
+			echo "[Sylvan] ERROR: Benchmark.omark_db does not exist or is not a regular file: {params.db}" >&2
+			exit 1
+		elif [ -s {input} ]; then
+			omark -f {input} -d "{params.db}" -o {params.out_dir}
 		else
 			mkdir -p {params.out_dir}
+			echo "[Sylvan] OMArk skipped for {wildcards.label}: OMAmer input is empty." >&2
 			echo "# Empty input - no OMArk results" > {output}
 		fi
 		"""

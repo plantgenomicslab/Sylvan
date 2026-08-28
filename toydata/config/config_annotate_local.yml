@@ -84,26 +84,26 @@ pasa:
   ncpus: 12
   threads: 12
   memory: 48g
-addXS:
-  ncpus: 8
-  memory: 32g
-psiClass_HiSat:
-  ncpus: 8
-  threads: 8
-  memory: 32g
-stringtie_HiSat:
-  ncpus: 8
-  threads: 8
-  memory: 32g
+prepAugustusWithHints:
+  ncpus: 1
+  memory: 4g
+prepCombineGeneModels:
+  ncpus: 1
+  memory: 4g
+prepCombineGeneModels_step6:
+  ncpus: 1
+  memory: 4g
+prepPsiClass_STAR:
+  ncpus: 1
+  memory: 4g
+prepare_liftoff:
+  ncpus: 1
+  memory: 4g
 psiClass_STAR:
   ncpus: 12
   threads: 12
   memory: 48g
 stringtie_STAR:
-  ncpus: 8
-  threads: 8
-  memory: 32g
-bamToFastq:
   ncpus: 8
   threads: 8
   memory: 32g
@@ -178,27 +178,6 @@ fastp_SINGLE:
   ncpus: 4
   threads: 4
   memory: 16g
-HiSat2_split:
-  ncpus: 12
-  threads: 12
-  memory: 48g
-HiSat2_build:
-  ncpus: 4
-  memory: 16g
-HiSat2_PAIRED:
-  ncpus: 8
-  threads: 8
-  memory: 32g
-HiSat2_SINGLE:
-  ncpus: 8
-  threads: 8
-  memory: 32g
-mergeHiSat:
-  ncpus: 12
-  threads: 12
-  memory: 48g
-  sortthreads: 4
-  sortmem: 8G
 Sam2Transfrag:
   ncpus: 4
   memory: 16g
@@ -214,6 +193,18 @@ transDecoder_Predict:
 transdecoder2ORF:
   ncpus: 4
   memory: 16g
+transDecoder_LongOrfs_unstranded:
+  ncpus: 4
+  memory: 16g
+transDecoder_Predict_unstranded:
+  ncpus: 4
+  memory: 16g
+transdecoder2ORF_unstranded:
+  ncpus: 4
+  memory: 16g
+filter_unstranded_transfrag:
+  ncpus: 1
+  memory: 4g
 GFF3Clear:
   ncpus: 4
   memory: 16g
@@ -227,14 +218,7 @@ bestGeneModels2lowIdentity:
   ncpus: 4
   threads: 4
   memory: 16g
-genomeSplitJoin:
-  ncpus: 2
-  memory: 8g
 mergeProteins:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-splitProteins:
   ncpus: 4
   threads: 4
   memory: 16g
@@ -298,24 +282,6 @@ pickBetterModels:
 fillingEndsOfGeneModels_ef:
   ncpus: 4
   memory: 16g
-AS_gb:
-  ncpus: 4
-  memory: 16g
-aggregateAS_gb:
-  ncpus: 4
-  memory: 16g
-AS_ge:
-  ncpus: 4
-  memory: 16g
-aggregateAS_ge:
-  ncpus: 4
-  memory: 16g
-AS_gf:
-  ncpus: 4
-  memory: 16g
-aggregateAS_gf:
-  ncpus: 4
-  memory: 16g
 extractTranscriptsForFilter:
   ncpus: 4
   memory: 16g
@@ -349,40 +315,6 @@ fillingEndsOfGeneModels_final:
 GETA_output:
   ncpus: 4
   memory: 16g
-portcullis:
-  ncpus: 8
-  threads: 8
-  memory: 32g
-mikadoConfigure:
-  ncpus: 1
-  memory: 4g
-mikadoPrepare:
-  ncpus: 1
-  memory: 4g
-mikadoMakeDB:
-  ncpus: 1
-  memory: 4g
-mikadoBlastX:
-  ncpus: 8
-  threads: 8
-  memory: 32g
-mikadoTransdecoder_LongOrfs:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-mikadoTransdecoder_Predict:
-  ncpus: 4
-  threads: 4
-  memory: 16g
-mikadoSerialise:
-  ncpus: 4
-  memory: 16g
-mikadoPick:
-  ncpus: 4
-  memory: 16g
-EvidentialCombine:
-  ncpus: 8
-  memory: 32g
 
 ###############################################################################################
 #

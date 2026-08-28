@@ -200,8 +200,10 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - omark
-  - omamer
+  # #23: OMArk 0.3.1 cannot read current OMAmer databases; floor the
+  # versions so a rebuild is guaranteed to read the downloaded DBs.
+  - omark >=0.4
+  - omamer >=2
 YAMLEOF
 
 	cat > /tmp/envs/lncdc.yaml << 'YAMLEOF'
@@ -352,8 +354,10 @@ YAMLEOF
 	# Navigate to the /usr/local/bin directory where executables are commonly stored
 	cd /usr/local/bin
 
-	# Clone the GETA repository from GitHub
+	# Pin GETA for reproducible builds (2026-08-26; avoid mutable branch HEAD).
 	git clone https://github.com/plantgenomicslab/geta
+	git -C /usr/local/bin/geta checkout 037e67bd6f84e6c0c1452c3a246060adadf7ac8f
+	echo 'GETA_SHA=037e67bd6f84e6c0c1452c3a246060adadf7ac8f' >> /opt/BUILD_PROVENANCE
 
 
 	# ---- Install LncDC ---- #
@@ -510,6 +514,13 @@ YAMLEOF
 	cd $EVM_HOME
 	make -j 2
 
+	# Make representative isoform selection deterministic in gene mode.
+	EVM_GFF3_UTILS="$EVM_HOME/PerlLib/GFF3_utils.pm"
+	test "$(grep -Fxc '            foreach my $transcript_id (keys %$transcripts_href) {' "$EVM_GFF3_UTILS")" -eq 1 || exit 1
+	perl -i -pe 's/^            foreach my \$transcript_id \(keys %\$transcripts_href\) \{$/            foreach my \$transcript_id (sort keys %\$transcripts_href) {/' "$EVM_GFF3_UTILS"
+	test "$(grep -Fxc '            foreach my $transcript_id (sort keys %$transcripts_href) {' "$EVM_GFF3_UTILS")" -eq 1 || exit 1
+	echo 'EVM_ISOFORM_PATCH=applied' >> /opt/BUILD_PROVENANCE
+
 	# Navigate back to the previous directory
 	cd -
 
@@ -545,8 +556,13 @@ YAMLEOF
 	# ---- GETA shebang fix: scripts use #!/opt/miniconda3/bin/perl which ---- #
 	# this build no longer provides. Rewrite to env-relative perl.
 	if [ -d /usr/local/bin/geta ]; then
-		grep -rIl '^#!/opt/miniconda3/bin/perl' /usr/local/bin/geta 2>/dev/null | \
-			xargs -r sed -i '1c#!/usr/bin/env perl'
+		geta_shebang_files=$(grep -rIl '^#!/opt/miniconda3/bin/perl' /usr/local/bin/geta 2>/dev/null)
+		printf '%s\n' "$geta_shebang_files" | xargs -r sed -i '1c#!/usr/bin/env perl'
+		if [ -z "$geta_shebang_files" ] || \
+			printf '%s\n' "$geta_shebang_files" | xargs -r grep -L '^#!/usr/bin/env perl$' | grep -q .; then
+			echo 'ERROR: GETA shebang patch did not apply to any matching file' >&2
+			exit 1
+		fi
 	fi
 
 	# ---- TransDecoder symlink fix: package moved scripts to util/ ---- #
