@@ -200,8 +200,10 @@ writeEVMCommands:
   memory: 16g
 runEVM:
   ncpus: 1
-  memory: 32g              # was 4g: Liftoff-as-ABINITIO widens the trellis; 4/124
-  time: "1-00:00:00"       #   Ath_ODB partitions died under 6h/16G, 24h/32G ran 124/124
+  memory: 8g               # right-sized 32g->8g 2026-08-27: 686/686 runEVM COMPLETED,
+                           #   MaxRSS max 459M across Ath..Spe_A (flat vs genome size).
+                           #   The 4/124 Ath_ODB deaths were walltime (6h), not memory.
+  time: "1-00:00:00"       # 24h: required (6h killed 4/124 Ath_ODB partitions)
   miniprot_k_base: 16      # per-partition miniprot depth cap; 0 disables
   miniprot_k_intron: 16
 recombineEVM:
