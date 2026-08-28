@@ -942,6 +942,19 @@ rule transDecoder_LongOrfs:
 		  cp ${{TD_DIR}}/longest_orfs.gff3 ${{OUT_DIR}}/longest_orfs.gff3 2>/dev/null || true
 		  cp ${{TD_DIR}}/longest_orfs.pep ${{OUT_DIR}}/longest_orfs.pep 2>/dev/null || true
 		fi
+
+		# issue #39 invariant: a healthy LongOrfs pass finds ORFs in a large
+		# share of transcripts (fleet norm is roughly one-per-transcript or
+		# more). The checkpoint bug produced 125 ORFs from 9,710 seqs (1.3%),
+		# and nothing downstream noticed. Fail here if ORFs < 10% of input
+		# sequences so a silent skip can never propagate again.
+		seqs=$(grep -c '^>' {input} || true)
+		orfs=$(grep -c '^>' {output} || true)
+		echo "LongOrfs invariant: input_seqs=$seqs orfs=$orfs" >&2
+		if [ "$((orfs * 10))" -lt "$seqs" ]; then
+		  echo "ERROR: issue #39 invariant violated -- $orfs ORFs from $seqs input seqs (<10%). Stale checkpoint or aborted search suspected." >&2
+		  exit 1
+		fi
 		"""
 rule transDecoder_Predict:
 	input: f"{RESULTS_DIR}GETA/transcript/longest_orfs.cds"
@@ -1177,6 +1190,14 @@ rule GFF3Clear:
 		echo "GFF3Clear: transfrag.genome.gff3 genes=$genes" >&2
 		if [ "$genes" -eq 0 ]; then
 		  echo "ERROR: transfrag.genome.gff3 has no genes" >&2
+		  exit 1
+		fi
+		# issue #39 invariant: the checkpoint bug collapsed 9,710 transcripts
+		# to 93 genes (~1%) and the zero-check above let it through. Healthy
+		# fleet runs keep 25-80%+ of transcripts as genes; fail below 5%.
+		seqs=$(grep -c '^>' "$(dirname {output})/transfrag.strand.fasta" || true)
+		if [ "$seqs" -gt 0 ] && [ "$((genes * 20))" -lt "$seqs" ]; then
+		  echo "ERROR: issue #39 invariant violated -- $genes genes from $seqs transcripts (<5%). Upstream TransDecoder output is suspect." >&2
 		  exit 1
 		fi
 		mv {output}.part {output}
