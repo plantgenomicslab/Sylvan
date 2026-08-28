@@ -354,10 +354,10 @@ YAMLEOF
 	# Navigate to the /usr/local/bin directory where executables are commonly stored
 	cd /usr/local/bin
 
-	# Pin GETA for reproducible builds (2026-08-26; avoid mutable branch HEAD).
+	# Pin GETA for reproducible builds (2026-08-28; includes the #57 stop-codon fix de4ffdd).
 	git clone https://github.com/plantgenomicslab/geta
-	git -C /usr/local/bin/geta checkout 037e67bd6f84e6c0c1452c3a246060adadf7ac8f
-	echo 'GETA_SHA=037e67bd6f84e6c0c1452c3a246060adadf7ac8f' >> /opt/BUILD_PROVENANCE
+	git -C /usr/local/bin/geta checkout de4ffdd01ffb8d10fd386c0b59e1c820d3a1183a
+	echo 'GETA_SHA=de4ffdd01ffb8d10fd386c0b59e1c820d3a1183a' >> /opt/BUILD_PROVENANCE
 
 
 	# ---- Install LncDC ---- #
