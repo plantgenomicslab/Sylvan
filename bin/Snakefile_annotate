@@ -951,6 +951,10 @@ rule transDecoder_LongOrfs:
 		seqs=$(grep -c '^>' {input} || true)
 		orfs=$(grep -c '^>' {output} || true)
 		echo "LongOrfs invariant: input_seqs=$seqs orfs=$orfs" >&2
+		if [ "$seqs" -eq 0 ]; then
+		  echo "ERROR: issue #39 invariant -- transfrag.strand.fasta has no sequences; the ratio gate below would pass 0/0." >&2
+		  exit 1
+		fi
 		if [ "$((orfs * 10))" -lt "$seqs" ]; then
 		  echo "ERROR: issue #39 invariant violated -- $orfs ORFs from $seqs input seqs (<10%). Stale checkpoint or aborted search suspected." >&2
 		  exit 1
@@ -1656,7 +1660,7 @@ rule clearCombined:
 		# rule never fired (Ahy_A: 16.7% of ati.filter1 was GeneWise). Tag the
 		# gene rows here by ID instead of renaming everything with a prefix.
 		GFF3Clear --genome {input.genome_fasta} \
-		{input.gff} | awk -F'\t' 'BEGIN{{OFS="\t"}} $3=="gene" && $9 ~ /ID=genewise/ && $9 !~ /Source=/ {{$9=$9 ($9 ~ /;$/ ? "" : ";") "Source=genewise;"}} {{print}}' > {output}
+		{input.gff} | awk -F'\t' 'BEGIN{{OFS="\t"}} $3=="gene" && $9 ~ /(^|;)ID=genewise[^;]*(;|$)/ && $9 !~ /(^|;)Source=/ {{$9=$9 ($9 ~ /;$/ ? "" : ";") "Source=genewise;"}} {{print}}' > {output}
 		"""
 
 #TODO: remove all spots where geta makes '.ok files'
@@ -1850,7 +1854,10 @@ rule BGM2AT:
 			# ships a different BGM2AT than this sed expects.
 			f"cp /usr/local/bin/geta/bin/BGM2AT ./BGM2AT.issue57 && "
 			f"sed -i 's|s#/(Constant/|s#(/Constant/|' ./BGM2AT.issue57 && "
-			f"test \"$(grep -c 's#(/Constant/' ./BGM2AT.issue57)\" -eq 5 && "
+			f"test \"$(grep -c 's#(/Constant/amberprob' ./BGM2AT.issue57)\" -eq 1 && "
+			f"test \"$(grep -c 's#(/Constant/ochreprob' ./BGM2AT.issue57)\" -eq 1 && "
+			f"test \"$(grep -c 's#(/Constant/opalprob' ./BGM2AT.issue57)\" -eq 1 && "
+			f"test \"$(grep -c 's#/(Constant/' ./BGM2AT.issue57)\" -eq 0 && "
 			f"perl ./BGM2AT.issue57 "
 			f"{params.args} "
 			f"--flanking_length {flanking_length} "
