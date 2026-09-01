@@ -3867,6 +3867,14 @@ rule agat_clean_final:
 			echo "Using SwissProt DB for PASA/EVM comparison: {params.swissprot}"
 			merge_args+=({input.genome} {params.swissprot})
 		fi
+		# Exact junction chains arbitrate PASA/EVM structural conflicts before
+		# DIAMOND. Without this ~80% of conflicts were protein-tie -> PASA
+		# (Osa: 7,212/8,979), the source of the EVM->PREFILTER intron-chain
+		# precision loss measured at -10.6 to -13.3 pt on the 2026-09 fleet.
+		if [ -s "{params.splice}" ]; then
+			echo "Using trusted splice junctions for PASA/EVM chain arbitration: {params.splice}"
+			merge_args+=(--splice {params.splice})
+		fi
 		python3 {workflow.basedir}/merge_pasa_evm.py "${{merge_args[@]}}"
 
 		# Refine gene boundaries using independent evidence

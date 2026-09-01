@@ -7,16 +7,32 @@ the PASA output with the original EVM genes, keeping PASA-updated versions
 where available and adding back EVM genes that PASA missed.
 
 When PASA has structurally altered an EVM gene (chimeric merge or significant
-CDS change), both proteins are compared via DIAMOND against SwissProt (reviewed).
-Best hit is determined by lowest E-value, with alignment length as tie-breaker.
+CDS change), the conflict is arbitrated in two stages:
+
+1. **Exact RNA junction chains** (when ``--splice`` is given): each side's
+   primary CDS intron chain is scored against the trusted splice set. A side
+   wins outright when its supported-intron fraction beats the other by at
+   least ``--junction-delta`` (default 0.25). Splice coordinates are the one
+   evidence that speaks directly to intron-chain accuracy; a protein hit can
+   be excellent while every donor/acceptor is wrong. Measured on the 2026-09
+   rebuild fleet, the DIAMOND-only policy left ~80% of conflicts as ties
+   (Osa: 7,212 of 8,979) and every tie kept PASA, which is where the
+   EVM->PREFILTER intron-chain precision loss (-10.6 to -13.3 pt) came from.
+2. **DIAMOND vs SwissProt** for junction-indeterminate conflicts (both
+   single-exon, no splice file, or support fractions within the delta).
+   Best hit is lowest E-value, alignment length as tie-breaker.
 
 - If PASA wins or ties: keep PASA gene (preserves isoforms/UTRs)
 - If EVM wins: use EVM as the gene, graft PASA isoforms that fall within
-  EVM gene boundaries as additional mRNA isoforms
+  EVM gene boundaries as additional mRNA isoforms. When a splice set is
+  loaded, a multi-exon PASA isoform is grafted only if every intron it adds
+  is junction-supported — an unsupported grafted chain is a precision hit at
+  intron-chain level, the exact currency this arbitration is buying back.
 - If no overlap with PASA: add EVM gene as-is (rescued)
 
 Usage:
     merge_pasa_evm.py pasa.gff3 evm.gff3 output.gff3 [genome.fa swissprot.fa]
+        [--splice trusted_splice] [--junction-delta 0.25]
 """
 import os
 import re
@@ -24,6 +40,8 @@ import subprocess
 import sys
 import tempfile
 from collections import defaultdict
+
+from refine_boundaries import get_introns, load_splice_junctions
 
 
 def parse_genes(gff3_path):
@@ -329,7 +347,76 @@ def compare_diamond(evm_hit, pasa_hit):
     return "tie"
 
 
-def build_evm_gene_with_pasa_isoforms(evm_lines, pasa_lines, evm_start, evm_end, evm_gene_id):
+def junction_support(cds_intervals, chrom, strand, junctions):
+    """Score a primary CDS chain against the trusted splice set.
+
+    Returns (supported, total) over the chain's introns, or None when the
+    chain has no intron (single-exon chains carry no intron-chain signal).
+    """
+    introns = get_introns(sorted(cds_intervals))
+    if not introns:
+        return None
+    pool = junctions.get((chrom, strand), set()) | junctions.get((chrom, "."), set())
+    supported = sum(1 for i in introns if i in pool)
+    return supported, len(introns)
+
+
+def arbitrate_by_junctions(evm_cds, pasa_cds, chrom, strand, junctions, delta):
+    """Return 'evm', 'pasa', or None (indeterminate) from exact junction support.
+
+    Primary criterion: the side carrying FEWER junction-orphan introns wins.
+    A count comparison beats a fraction-delta because one wrong intron in a
+    long chain barely moves the fraction (1/6 = 0.17 slips under a 0.25
+    delta) while it is exactly what breaks the intron chain. Measured on Osa
+    against the reference: of 1,328 conflicts where the EVM chain was correct
+    and PASA's was not, 927 (70%) separate by unsupported count and only 3
+    more by fraction. Fraction (with ``delta``) stays as the tie-break when
+    both sides carry the same number of orphans but different chain lengths.
+
+    Only decides when BOTH chains are multi-exon: a single-exon side has no
+    intron chain to score, and pretending absence-of-introns is evidence would
+    let RNA-void regions flip on noise. Indeterminate conflicts fall through
+    to DIAMOND, preserving the pre-existing behavior for them.
+    """
+    evm_sup = junction_support(evm_cds, chrom, strand, junctions)
+    pasa_sup = junction_support(pasa_cds, chrom, strand, junctions)
+    if evm_sup is None or pasa_sup is None:
+        return None
+    evm_orphans = evm_sup[1] - evm_sup[0]
+    pasa_orphans = pasa_sup[1] - pasa_sup[0]
+    if pasa_orphans > evm_orphans:
+        return "evm"
+    if evm_orphans > pasa_orphans:
+        return "pasa"
+    evm_frac = evm_sup[0] / evm_sup[1]
+    pasa_frac = pasa_sup[0] / pasa_sup[1]
+    if pasa_frac >= evm_frac + delta:
+        return "pasa"
+    if evm_frac >= pasa_frac + delta:
+        return "evm"
+    return None
+
+
+def isoform_introns_supported(mrna_lines, chrom, strand, junctions):
+    """True when every intron of one PASA isoform is in the trusted splice set.
+
+    Single-exon isoforms pass: they add no intron chain, so they cannot hurt
+    intron-chain precision.
+    """
+    intervals = []
+    for line in mrna_lines:
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) >= 9 and parts[2] == "CDS":
+            intervals.append((int(parts[3]), int(parts[4])))
+    introns = get_introns(sorted(set(intervals)))
+    if not introns:
+        return True
+    pool = junctions.get((chrom, strand), set()) | junctions.get((chrom, "."), set())
+    return all(i in pool for i in introns)
+
+
+def build_evm_gene_with_pasa_isoforms(evm_lines, pasa_lines, evm_start, evm_end, evm_gene_id,
+                                      chrom=None, strand=None, junctions=None):
     """Build a gene using EVM as base, adding PASA isoforms within EVM boundaries.
 
     Returns GFF3 lines for the merged gene.
@@ -343,9 +430,14 @@ def build_evm_gene_with_pasa_isoforms(evm_lines, pasa_lines, evm_start, evm_end,
     # Find PASA mRNAs that fall within EVM gene boundaries
     pasa_mrnas = get_mrna_spans(pasa_lines)
     grafted = 0
+    graft_rejected = 0
     for mrna_start, mrna_end, mrna_id, mrna_lines in pasa_mrnas:
         # Check if this PASA isoform is contained within EVM gene range
         if mrna_start >= evm_start and mrna_end <= evm_end:
+            if junctions is not None and not isoform_introns_supported(
+                    mrna_lines, chrom, strand, junctions):
+                graft_rejected += 1
+                continue
             grafted += 1
             for line in mrna_lines:
                 parts = line.strip().split("\t")
@@ -364,20 +456,55 @@ def build_evm_gene_with_pasa_isoforms(evm_lines, pasa_lines, evm_start, evm_end,
                         parts[8] = re.sub(r"Parent=([^;]+)", rf"Parent=\1_pasa_iso", parts[8])
                     output_lines.append("\t".join(parts) + "\n")
 
-    return output_lines, grafted
+    return output_lines, grafted, graft_rejected
+
+
+def parse_args(argv):
+    """Split optional flags from the positional arguments.
+
+    Flags may appear anywhere; positional order is unchanged from the
+    pre-flag interface so existing callers keep working.
+    """
+    splice_path = None
+    junction_delta = 0.25
+    positional = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--splice" and i + 1 < len(argv):
+            splice_path = argv[i + 1]
+            i += 2
+        elif argv[i] == "--junction-delta" and i + 1 < len(argv):
+            junction_delta = float(argv[i + 1])
+            i += 2
+        else:
+            positional.append(argv[i])
+            i += 1
+    return positional, splice_path, junction_delta
 
 
 def main():
-    if len(sys.argv) < 4:
-        print(f"Usage: {sys.argv[0]} pasa.gff3 evm.gff3 output.gff3 [genome.fa swissprot.fa]",
+    positional, splice_path, junction_delta = parse_args(sys.argv[1:])
+    if len(positional) < 3:
+        print(f"Usage: {sys.argv[0]} pasa.gff3 evm.gff3 output.gff3 [genome.fa swissprot.fa]"
+              " [--splice trusted_splice] [--junction-delta 0.25]",
               file=sys.stderr)
         sys.exit(1)
 
-    pasa_gff, evm_gff, out_gff = sys.argv[1], sys.argv[2], sys.argv[3]
-    genome_fa = sys.argv[4] if len(sys.argv) > 4 else None
-    swissprot_fa = sys.argv[5] if len(sys.argv) > 5 else None
+    pasa_gff, evm_gff, out_gff = positional[0], positional[1], positional[2]
+    genome_fa = positional[3] if len(positional) > 3 else None
+    swissprot_fa = positional[4] if len(positional) > 4 else None
 
     use_diamond = genome_fa and swissprot_fa
+
+    junctions = None
+    if splice_path and os.path.exists(splice_path):
+        junctions = load_splice_junctions(splice_path)
+        n_junc = sum(len(v) for k, v in junctions.items() if k[1] != ".")
+        print(f"Loaded {n_junc} trusted splice junctions for chain arbitration",
+              file=sys.stderr)
+    elif splice_path:
+        print(f"WARNING: splice file '{splice_path}' missing — junction arbitration off,"
+              " falling back to DIAMOND-only conflict resolution", file=sys.stderr)
 
     pasa_genes = parse_genes(pasa_gff)
     evm_genes = parse_genes(evm_gff)
@@ -427,20 +554,51 @@ def main():
 
         if is_chimeric or cds_changed:
             conflicts.append((ei, (chrom, start, end, strand, gid, lines),
-                              pidx, (ps, pe, pgid, plines)))
+                              pidx, (ps, pe, pgid, plines), evm_cds, pasa_cds))
 
     print(f"Found {rescued_count} EVM genes without PASA coverage (rescued)",
           file=sys.stderr)
     print(f"Found {len(conflicts)} structural conflicts to resolve", file=sys.stderr)
 
-    # Second pass: resolve conflicts via DIAMOND
+    # Second pass: resolve conflicts — exact junction chains first, DIAMOND for
+    # the indeterminate remainder.
     # pasa_replaced[pidx] = [evm_block, ...]  — a single PASA gene may be replaced
     # by MULTIPLE EVM genes when a chimeric PASA merge spanned several EVM genes
     # (issue #17 defect 1: a plain dict overwrote all but the last, losing genes).
     pasa_replaced = defaultdict(list)
-    stats = {"evm_wins": 0, "pasa_wins": 0, "tie": 0, "grafted_isoforms": 0}
+    stats = {"evm_wins": 0, "pasa_wins": 0, "tie": 0, "grafted_isoforms": 0,
+             "junction_evm": 0, "junction_pasa": 0, "graft_rejected": 0}
 
-    if conflicts and use_diamond:
+    def apply_evm_win(evm_info, pidx, pasa_info):
+        chrom, start, end, strand, gid, lines = evm_info
+        merged_lines, n_grafted, n_rejected = build_evm_gene_with_pasa_isoforms(
+            lines, pasa_info[3], start, end, gid,
+            chrom=chrom, strand=strand, junctions=junctions)
+        pasa_replaced[pidx].append(merged_lines)
+        stats["grafted_isoforms"] += n_grafted
+        stats["graft_rejected"] += n_rejected
+
+    undecided = conflicts
+    if conflicts and junctions is not None:
+        undecided = []
+        for conflict in conflicts:
+            ei, evm_info, pidx, pasa_info, evm_cds, pasa_cds = conflict
+            chrom, _, _, strand, _, _ = evm_info
+            verdict = arbitrate_by_junctions(evm_cds, pasa_cds, chrom, strand,
+                                             junctions, junction_delta)
+            if verdict == "evm":
+                stats["junction_evm"] += 1
+                apply_evm_win(evm_info, pidx, pasa_info)
+            elif verdict == "pasa":
+                stats["junction_pasa"] += 1     # keep PASA
+            else:
+                undecided.append(conflict)
+        print(f"Junction arbitration: {stats['junction_evm']} EVM, "
+              f"{stats['junction_pasa']} PASA, {len(undecided)} indeterminate "
+              f"of {len(conflicts)} conflicts (delta={junction_delta})",
+              file=sys.stderr)
+
+    if undecided and use_diamond:
         with tempfile.TemporaryDirectory() as tmpdir:
             diamond_db = make_diamond_db(swissprot_fa, tmpdir)
             if not diamond_db:
@@ -448,13 +606,13 @@ def main():
                 use_diamond = False
 
             if use_diamond:
-                print(f"DIAMOND DB built, comparing {len(conflicts)} conflicts...",
+                print(f"DIAMOND DB built, comparing {len(undecided)} conflicts...",
                       file=sys.stderr)
 
                 # Batch extract proteins
                 evm_gene_map = {}
                 pasa_gene_map = {}
-                for ci, (ei, evm_info, pidx, pasa_info) in enumerate(conflicts):
+                for ci, (ei, evm_info, pidx, pasa_info, _, _) in enumerate(undecided):
                     evm_gene_map[f"evm_{ci}"] = evm_info[5]
                     pasa_gene_map[f"pasa_{ci}"] = pasa_info[3]
 
@@ -466,17 +624,15 @@ def main():
                 pasa_query = os.path.join(tmpdir, "pasa_queries.fa")
 
                 with open(evm_query, "w") as f:
-                    for ci in range(len(conflicts)):
-                        evm_mrnas = get_mrna_ids(conflicts[ci][1][5])
-                        for mid in evm_mrnas:
+                    for ci, (_, evm_info, _, _, _, _) in enumerate(undecided):
+                        for mid in get_mrna_ids(evm_info[5]):
                             if mid in evm_proteins:
                                 f.write(f">evm_{ci}\n{evm_proteins[mid]}\n")
                                 break
 
                 with open(pasa_query, "w") as f:
-                    for ci in range(len(conflicts)):
-                        pasa_mrnas = get_mrna_ids(conflicts[ci][3][3])
-                        for mid in pasa_mrnas:
+                    for ci, (_, _, _, pasa_info, _, _) in enumerate(undecided):
+                        for mid in get_mrna_ids(pasa_info[3]):
                             if mid in pasa_proteins:
                                 f.write(f">pasa_{ci}\n{pasa_proteins[mid]}\n")
                                 break
@@ -485,8 +641,8 @@ def main():
                 evm_hits = diamond_search(evm_query, diamond_db, tmpdir, "evm")
                 pasa_hits = diamond_search(pasa_query, diamond_db, tmpdir, "pasa")
 
-                # Resolve each conflict
-                for ci, (ei, evm_info, pidx, pasa_info) in enumerate(conflicts):
+                # Resolve each remaining conflict
+                for ci, (ei, evm_info, pidx, pasa_info, _, _) in enumerate(undecided):
                     evm_hit = evm_hits.get(f"evm_{ci}")
                     pasa_hit = pasa_hits.get(f"pasa_{ci}")
                     winner = compare_diamond(evm_hit, pasa_hit)
@@ -495,11 +651,7 @@ def main():
                         # EVM clearly better — use EVM gene (preserves CDS
                         # accuracy), graft PASA isoforms within EVM range.
                         stats["evm_wins"] += 1
-                        chrom, start, end, strand, gid, lines = evm_info
-                        merged_lines, n_grafted = build_evm_gene_with_pasa_isoforms(
-                            lines, pasa_info[3], start, end, gid)
-                        pasa_replaced[pidx].append(merged_lines)
-                        stats["grafted_isoforms"] += n_grafted
+                        apply_evm_win(evm_info, pidx, pasa_info)
                     else:
                         # PASA wins OR tie -> keep PASA, per the module docstring
                         # (issue #17 defect 2). A "tie" includes the common
@@ -510,9 +662,10 @@ def main():
                         else:
                             stats["tie"] += 1
 
-    elif conflicts and not use_diamond:
-        print("No DIAMOND DB — keeping PASA for all conflicts", file=sys.stderr)
-        stats["tie"] = len(conflicts)
+    elif undecided and not use_diamond:
+        print(f"No DIAMOND DB — keeping PASA for {len(undecided)} unresolved conflicts",
+              file=sys.stderr)
+        stats["tie"] += len(undecided)
 
     # Write merged output. Track every ID as it is written so a rescued EVM
     # block that would reuse one is renamed rather than silently duplicated
@@ -562,9 +715,11 @@ def main():
     print(f"  Rescued EVM genes: {rescued_count} "
           f"({renamed_blocks} renamed to avoid an ID collision)", file=sys.stderr)
     print(f"  Total genes: {total_genes}", file=sys.stderr)
-    print(f"  Conflicts: {len(conflicts)} — EVM wins: {stats['evm_wins']}, "
-          f"PASA wins: {stats['pasa_wins']}, tie: {stats['tie']}", file=sys.stderr)
-    print(f"  PASA isoforms grafted into EVM genes: {stats['grafted_isoforms']}",
+    print(f"  Conflicts: {len(conflicts)} — junction EVM: {stats['junction_evm']}, "
+          f"junction PASA: {stats['junction_pasa']}, DIAMOND EVM wins: {stats['evm_wins']}, "
+          f"DIAMOND PASA wins: {stats['pasa_wins']}, tie: {stats['tie']}", file=sys.stderr)
+    print(f"  PASA isoforms grafted into EVM genes: {stats['grafted_isoforms']} "
+          f"({stats['graft_rejected']} rejected: unsupported introns)",
           file=sys.stderr)
 
 

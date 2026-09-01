@@ -204,9 +204,17 @@ def load_splice_junctions(splice_path, tolerance=0):
             start = int(cols[1])
             end = int(cols[2])
             strand = cols[4] if cols[4] in ("+", "-") else "."
-            # Store exact junction (tolerance handled at query time)
-            junctions[(chrom, strand)].add((start, end))
-            junctions[(chrom, ".")].add((start, end))
+            # The trusted_splice file records the FLANKING EXON boundaries of a
+            # junction (last base of the upstream exon, first base of the
+            # downstream exon), not the intron span itself. Every consumer of
+            # this table queries with intron coordinates from get_introns()
+            # (exon_end+1, next_exon_start-1), so convert here — one point of
+            # truth. Measured on Osa (2026-09-01): querying the raw file
+            # coordinates matched 0/2,889 real EVM introns while the (+1,-1)
+            # conversion matched 93.9%; the old exact-store therefore made
+            # score_splice_support() return 0 for every multi-exon model.
+            junctions[(chrom, strand)].add((start + 1, end - 1))
+            junctions[(chrom, ".")].add((start + 1, end - 1))
 
     return junctions
 
