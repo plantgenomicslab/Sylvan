@@ -213,8 +213,14 @@ def load_splice_junctions(splice_path, tolerance=0):
             # coordinates matched 0/2,889 real EVM introns while the (+1,-1)
             # conversion matched 93.9%; the old exact-store therefore made
             # score_splice_support() return 0 for every multi-exon model.
+            #
+            # Bucketing: a stranded junction goes to ITS strand only, an
+            # unstranded one to ".". Consumers query their strand unioned with
+            # ".", so a "+" junction no longer counts as support for a "-"
+            # model. (The old code copied every junction into "." as well,
+            # which made the evidence strand-agnostic — harmless while nothing
+            # matched, but wrong once arbitration started acting on it.)
             junctions[(chrom, strand)].add((start + 1, end - 1))
-            junctions[(chrom, ".")].add((start + 1, end - 1))
 
     return junctions
 

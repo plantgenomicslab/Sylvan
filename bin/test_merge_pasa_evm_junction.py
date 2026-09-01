@@ -143,12 +143,97 @@ def test_end_to_end_junction_restores_evm():
         check("e2e: PASA novel intron gone (6200 CDS)", "\t6200\t6500\t" not in merged)
 
 
+def test_loader_conversion_and_strand():
+    """Loader converts flank-exon boundaries to intron spans, strand-pure."""
+    from merge_pasa_evm import load_splice_junctions
+    with tempfile.TemporaryDirectory() as tmp:
+        sp = os.path.join(tmp, "ts")
+        with open(sp, "w", encoding="utf-8") as f:
+            f.write("chr1 5500 6000 10 + 10 0 0 0\n")
+            f.write("chr1 8800 9200 10 . 10 0 0 0\n")
+        j = load_splice_junctions(sp)
+        check("loader: flank->intron conversion", (5501, 5999) in j[("chr1", "+")])
+        check("loader: stranded row NOT in '.' bucket", (5501, 5999) not in j.get(("chr1", "."), set()))
+        check("loader: unstranded row in '.' bucket", (8801, 9199) in j[("chr1", ".")])
+        check("loader: unstranded row not in '+' bucket", (8801, 9199) not in j.get(("chr1", "+"), set()))
+
+
+def _script():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "merge_pasa_evm.py")
+
+
+def test_empty_splice_falls_back():
+    """A splice file with no usable rows must disable arbitration (keep PASA)."""
+    evm_chain = ((5000, 5500), (6000, 6500))
+    pasa_chain = ((5000, 5500), (6200, 6500))
+    with tempfile.TemporaryDirectory() as tmp:
+        pasa_gff, evm_gff = os.path.join(tmp, "p.gff3"), os.path.join(tmp, "e.gff3")
+        splice, out = os.path.join(tmp, "empty_splice"), os.path.join(tmp, "m.gff3")
+        with open(pasa_gff, "w", encoding="utf-8") as f:
+            f.write(_gene_block("pasa", "gA", pasa_chain))
+        with open(evm_gff, "w", encoding="utf-8") as f:
+            f.write(_gene_block("evm", "gA", evm_chain))
+        open(splice, "w", encoding="utf-8").close()
+        result = subprocess.run([sys.executable, _script(), pasa_gff, evm_gff, out,
+                                 "--splice", splice],
+                                capture_output=True, text=True, timeout=60, check=False)
+        with open(out, encoding="utf-8") as fh:
+            merged = fh.read()
+        check("empty splice: warns and disables", "no usable junctions" in result.stderr,
+              result.stderr[-300:])
+        check("empty splice: PASA kept (legacy tie)", "\t6200\t6500\t" in merged)
+
+
+def test_missing_flag_value_errors():
+    result = subprocess.run([sys.executable, _script(), "a", "b", "c", "--splice"],
+                            capture_output=True, text=True, timeout=30, check=False)
+    check("args: missing --splice value exits 2", result.returncode == 2, str(result.returncode))
+
+
+def test_mixed_verdict_chimera_backfill():
+    """One PASA chimera vs two EVM genes with mixed verdicts keeps BOTH loci.
+
+    gA: junction says EVM (PASA primary chain carries 2 orphans vs 0).
+    gB: orphan counts tie, no DIAMOND -> verdict stays PASA/tie — but gA's win
+    removes the chimera block, so gB's EVM model must be backfilled.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        pasa_gff, evm_gff = os.path.join(tmp, "p.gff3"), os.path.join(tmp, "e.gff3")
+        splice, out = os.path.join(tmp, "ts"), os.path.join(tmp, "m.gff3")
+        # PASA chimera: one gene 5000-19500, primary chain spans both loci
+        chim = ["chr1\tpasa\tgene\t5000\t19500\t.\t+\t.\tID=chimera\n",
+                "chr1\tpasa\tmRNA\t5000\t19500\t.\t+\t.\tID=chimera.m1;Parent=chimera\n"]
+        for i, (s, e) in enumerate(((5000, 5500), (6200, 6500), (17000, 17400)), 1):
+            chim.append(f"chr1\tpasa\tCDS\t{s}\t{e}\t.\t+\t0\tID=chimera.c{i};Parent=chimera.m1\n")
+        with open(pasa_gff, "w", encoding="utf-8") as f:
+            f.write("".join(chim))
+        with open(evm_gff, "w", encoding="utf-8") as f:
+            f.write(_gene_block("evm", "gA", ((5000, 5500), (6000, 6500))))
+            f.write(_gene_block("evm", "gB", ((17000, 17400), (17800, 18200), (18800, 19200))))
+        with open(splice, "w", encoding="utf-8") as f:
+            f.write("chr1 5500 6000 10 + 10 0 0 0\n")   # supports gA's intron only
+        result = subprocess.run([sys.executable, _script(), pasa_gff, evm_gff, out,
+                                 "--splice", splice],
+                                capture_output=True, text=True, timeout=60, check=False)
+        with open(out, encoding="utf-8") as fh:
+            merged = fh.read()
+        check("chimera: exits cleanly", result.returncode == 0, result.stderr[-300:])
+        check("chimera: gA EVM chain present", "\t6000\t6500\t" in merged)
+        check("chimera: gB locus preserved (backfilled)", "\t17800\t18200\t" in merged)
+        check("chimera: PASA novel intron gone", "\t6200\t6500\t" not in merged)
+        check("chimera: backfill logged", "backfilled" in result.stderr, result.stderr[-400:])
+
+
 def main():
     test_junction_support()
     test_arbitrate()
     test_graft_gate()
     test_parse_args()
+    test_loader_conversion_and_strand()
     test_end_to_end_junction_restores_evm()
+    test_empty_splice_falls_back()
+    test_missing_flag_value_errors()
+    test_mixed_verdict_chimera_backfill()
     if FAILURES:
         print(f"\n{len(FAILURES)} FAILED: {FAILURES}")
         sys.exit(1)

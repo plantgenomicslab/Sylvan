@@ -10,8 +10,9 @@ When PASA has structurally altered an EVM gene (chimeric merge or significant
 CDS change), the conflict is arbitrated in two stages:
 
 1. **Exact RNA junction chains** (when ``--splice`` is given): each side's
-   primary CDS intron chain is scored against the trusted splice set. A side
-   wins outright when its supported-intron fraction beats the other by at
+   primary CDS intron chain is scored against the trusted splice set. The
+   side whose chain carries FEWER junction-orphan introns wins; when the
+   orphan counts tie, the supported fraction decides if it differs by at
    least ``--junction-delta`` (default 0.25). Splice coordinates are the one
    evidence that speaks directly to intron-chain accuracy; a protein hit can
    be excellent while every donor/acceptor is wrong. Measured on the 2026-09
@@ -470,11 +471,14 @@ def parse_args(argv):
     positional = []
     i = 0
     while i < len(argv):
-        if argv[i] == "--splice" and i + 1 < len(argv):
-            splice_path = argv[i + 1]
-            i += 2
-        elif argv[i] == "--junction-delta" and i + 1 < len(argv):
-            junction_delta = float(argv[i + 1])
+        if argv[i] in ("--splice", "--junction-delta"):
+            if i + 1 >= len(argv):
+                print(f"ERROR: {argv[i]} requires a value", file=sys.stderr)
+                sys.exit(2)
+            if argv[i] == "--splice":
+                splice_path = argv[i + 1]
+            else:
+                junction_delta = float(argv[i + 1])
             i += 2
         else:
             positional.append(argv[i])
@@ -499,9 +503,18 @@ def main():
     junctions = None
     if splice_path and os.path.exists(splice_path):
         junctions = load_splice_junctions(splice_path)
-        n_junc = sum(len(v) for k, v in junctions.items() if k[1] != ".")
-        print(f"Loaded {n_junc} trusted splice junctions for chain arbitration",
-              file=sys.stderr)
+        n_junc = sum(len(v) for v in junctions.values())
+        if n_junc == 0:
+            # An empty table is NOT evidence: with it, every intron is an
+            # orphan and the shorter chain would win on nothing. Treat the
+            # same as no splice file at all.
+            print(f"WARNING: splice file '{splice_path}' holds no usable junctions —"
+                  " junction arbitration off, falling back to DIAMOND-only"
+                  " conflict resolution", file=sys.stderr)
+            junctions = None
+        else:
+            print(f"Loaded {n_junc} trusted splice junctions for chain arbitration",
+                  file=sys.stderr)
     elif splice_path:
         print(f"WARNING: splice file '{splice_path}' missing — junction arbitration off,"
               " falling back to DIAMOND-only conflict resolution", file=sys.stderr)
@@ -567,7 +580,8 @@ def main():
     # (issue #17 defect 1: a plain dict overwrote all but the last, losing genes).
     pasa_replaced = defaultdict(list)
     stats = {"evm_wins": 0, "pasa_wins": 0, "tie": 0, "grafted_isoforms": 0,
-             "junction_evm": 0, "junction_pasa": 0, "graft_rejected": 0}
+             "junction_evm": 0, "junction_pasa": 0, "graft_rejected": 0,
+             "evm_backfilled": 0}
 
     def apply_evm_win(evm_info, pidx, pasa_info):
         chrom, start, end, strand, gid, lines = evm_info
@@ -578,27 +592,35 @@ def main():
         stats["grafted_isoforms"] += n_grafted
         stats["graft_rejected"] += n_rejected
 
-    undecided = conflicts
+    # Verdicts are COLLECTED first and applied per PASA gene afterwards:
+    # emitting an EVM winner drops its whole PASA block, and one chimeric PASA
+    # gene can hold several conflicts with different verdicts. Applying
+    # verdicts one by one lost the loci whose own verdict kept PASA while a
+    # sibling conflict removed their PASA representative (HIGH finding,
+    # review 2026-09-01).
+    verdicts = [None] * len(conflicts)   # each becomes 'evm' | 'pasa' | 'tie'
+
     if conflicts and junctions is not None:
-        undecided = []
-        for conflict in conflicts:
+        for ci, conflict in enumerate(conflicts):
             ei, evm_info, pidx, pasa_info, evm_cds, pasa_cds = conflict
             chrom, _, _, strand, _, _ = evm_info
             verdict = arbitrate_by_junctions(evm_cds, pasa_cds, chrom, strand,
                                              junctions, junction_delta)
             if verdict == "evm":
                 stats["junction_evm"] += 1
-                apply_evm_win(evm_info, pidx, pasa_info)
+                verdicts[ci] = "evm"
             elif verdict == "pasa":
-                stats["junction_pasa"] += 1     # keep PASA
-            else:
-                undecided.append(conflict)
+                stats["junction_pasa"] += 1
+                verdicts[ci] = "pasa"
+        undecided_ci = [ci for ci in range(len(conflicts)) if verdicts[ci] is None]
         print(f"Junction arbitration: {stats['junction_evm']} EVM, "
-              f"{stats['junction_pasa']} PASA, {len(undecided)} indeterminate "
+              f"{stats['junction_pasa']} PASA, {len(undecided_ci)} indeterminate "
               f"of {len(conflicts)} conflicts (delta={junction_delta})",
               file=sys.stderr)
+    else:
+        undecided_ci = list(range(len(conflicts)))
 
-    if undecided and use_diamond:
+    if undecided_ci and use_diamond:
         with tempfile.TemporaryDirectory() as tmpdir:
             diamond_db = make_diamond_db(swissprot_fa, tmpdir)
             if not diamond_db:
@@ -606,15 +628,15 @@ def main():
                 use_diamond = False
 
             if use_diamond:
-                print(f"DIAMOND DB built, comparing {len(undecided)} conflicts...",
+                print(f"DIAMOND DB built, comparing {len(undecided_ci)} conflicts...",
                       file=sys.stderr)
 
                 # Batch extract proteins
                 evm_gene_map = {}
                 pasa_gene_map = {}
-                for ci, (ei, evm_info, pidx, pasa_info, _, _) in enumerate(undecided):
-                    evm_gene_map[f"evm_{ci}"] = evm_info[5]
-                    pasa_gene_map[f"pasa_{ci}"] = pasa_info[3]
+                for ci in undecided_ci:
+                    evm_gene_map[f"evm_{ci}"] = conflicts[ci][1][5]
+                    pasa_gene_map[f"pasa_{ci}"] = conflicts[ci][3][3]
 
                 evm_proteins = batch_extract_proteins(evm_gene_map, genome_fa, tmpdir, "evm")
                 pasa_proteins = batch_extract_proteins(pasa_gene_map, genome_fa, tmpdir, "pasa")
@@ -624,15 +646,15 @@ def main():
                 pasa_query = os.path.join(tmpdir, "pasa_queries.fa")
 
                 with open(evm_query, "w") as f:
-                    for ci, (_, evm_info, _, _, _, _) in enumerate(undecided):
-                        for mid in get_mrna_ids(evm_info[5]):
+                    for ci in undecided_ci:
+                        for mid in get_mrna_ids(conflicts[ci][1][5]):
                             if mid in evm_proteins:
                                 f.write(f">evm_{ci}\n{evm_proteins[mid]}\n")
                                 break
 
                 with open(pasa_query, "w") as f:
-                    for ci, (_, _, _, pasa_info, _, _) in enumerate(undecided):
-                        for mid in get_mrna_ids(pasa_info[3]):
+                    for ci in undecided_ci:
+                        for mid in get_mrna_ids(conflicts[ci][3][3]):
                             if mid in pasa_proteins:
                                 f.write(f">pasa_{ci}\n{pasa_proteins[mid]}\n")
                                 break
@@ -642,16 +664,12 @@ def main():
                 pasa_hits = diamond_search(pasa_query, diamond_db, tmpdir, "pasa")
 
                 # Resolve each remaining conflict
-                for ci, (ei, evm_info, pidx, pasa_info, _, _) in enumerate(undecided):
-                    evm_hit = evm_hits.get(f"evm_{ci}")
-                    pasa_hit = pasa_hits.get(f"pasa_{ci}")
-                    winner = compare_diamond(evm_hit, pasa_hit)
-
+                for ci in undecided_ci:
+                    winner = compare_diamond(evm_hits.get(f"evm_{ci}"),
+                                             pasa_hits.get(f"pasa_{ci}"))
                     if winner == "evm":
-                        # EVM clearly better — use EVM gene (preserves CDS
-                        # accuracy), graft PASA isoforms within EVM range.
                         stats["evm_wins"] += 1
-                        apply_evm_win(evm_info, pidx, pasa_info)
+                        verdicts[ci] = "evm"
                     else:
                         # PASA wins OR tie -> keep PASA, per the module docstring
                         # (issue #17 defect 2). A "tie" includes the common
@@ -659,13 +677,35 @@ def main():
                         # models being replaced by EVM with zero evidence.
                         if winner == "pasa":
                             stats["pasa_wins"] += 1
+                            verdicts[ci] = "pasa"
                         else:
                             stats["tie"] += 1
+                            verdicts[ci] = "tie"
 
-    elif undecided and not use_diamond:
-        print(f"No DIAMOND DB — keeping PASA for {len(undecided)} unresolved conflicts",
+    if undecided_ci and not use_diamond:
+        print(f"No DIAMOND DB — keeping PASA for {len(undecided_ci)} unresolved conflicts",
               file=sys.stderr)
-        stats["tie"] += len(undecided)
+        for ci in undecided_ci:
+            if verdicts[ci] is None:
+                verdicts[ci] = "tie"
+                stats["tie"] += 1
+
+    # Apply verdicts grouped by PASA gene. Once ANY conflict on a pidx goes to
+    # EVM, that PASA block leaves the output, so EVERY conflicting EVM gene of
+    # the pidx must be emitted — including those whose own verdict kept PASA:
+    # their representative is gone either way, and emitting the EVM model
+    # keeps the locus instead of silently deleting it.
+    by_pidx = defaultdict(list)
+    for ci, conflict in enumerate(conflicts):
+        by_pidx[conflict[2]].append(ci)
+    for pidx, cis in by_pidx.items():
+        if not any(verdicts[ci] == "evm" for ci in cis):
+            continue
+        for ci in cis:
+            _, evm_info, _, pasa_info, _, _ = conflicts[ci]
+            if verdicts[ci] != "evm":
+                stats["evm_backfilled"] += 1
+            apply_evm_win(evm_info, pidx, pasa_info)
 
     # Write merged output. Track every ID as it is written so a rescued EVM
     # block that would reuse one is renamed rather than silently duplicated
@@ -718,6 +758,10 @@ def main():
     print(f"  Conflicts: {len(conflicts)} — junction EVM: {stats['junction_evm']}, "
           f"junction PASA: {stats['junction_pasa']}, DIAMOND EVM wins: {stats['evm_wins']}, "
           f"DIAMOND PASA wins: {stats['pasa_wins']}, tie: {stats['tie']}", file=sys.stderr)
+    if stats["evm_backfilled"]:
+        print(f"  EVM blocks backfilled on chimera pidx with mixed verdicts: "
+              f"{stats['evm_backfilled']} (their PASA representative was replaced "
+              "by a sibling conflict's EVM winner)", file=sys.stderr)
     print(f"  PASA isoforms grafted into EVM genes: {stats['grafted_isoforms']} "
           f"({stats['graft_rejected']} rejected: unsupported introns)",
           file=sys.stderr)
