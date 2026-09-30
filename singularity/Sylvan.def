@@ -185,7 +185,16 @@ channels:
 dependencies:
   - python=3.10
   - h5py
+  # libsqlite >=3.50.1 links conda-forge ICU (78.x needs CXXABI_1.3.15). tensorflow's wheels load the
+  # base image's older system libstdc++ first, so `import sqlite3` (geenuff/sqlalchemy) then fails.
+  - libsqlite<3.50
   - pip:
+    # Helixer v0.3.7 imports yaml, sklearn and scipy but its pip metadata declares none of them;
+    # versions follow Helixer's own requirements.3.10.txt. Kept in the pip list so they resolve
+    # against tensorflow==2.15.0's numpy<2 instead of a conda numpy 2.x.
+    - PyYAML==6.0.1
+    - scikit-learn==1.5.0
+    - scipy==1.12.0
     - tensorflow==2.15.0
     - nvidia-cuda-runtime-cu12
     - nvidia-cudnn-cu12
@@ -242,7 +251,18 @@ YAMLEOF
 	# Install Helixer from GitHub (not on PyPI; HelixerPost binary is built separately below)
 	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
 		/usr/local/bin/micromamba run -r /opt/mamba -p /opt/envs/helixer \
-		pip install git+https://github.com/weberlab-hhu/Helixer.git
+		pip install git+https://github.com/usadellab/Helixer.git@v0.3.7
+	# Build-time guard: fail the build if Helixer cannot start. Importing one module is not enough
+	# (helixer.core.scripts passed while the model modules still lacked sklearn), so load the
+	# prediction model and run the entry point the pipeline calls.
+	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
+		/usr/local/bin/micromamba run -r /opt/mamba -p /opt/envs/helixer \
+		python -c 'import yaml, sklearn, scipy, helixer.core.scripts, helixer.prediction.HybridModel' \
+		|| { echo "ERROR: helixer env cannot import Helixer modules"; exit 1; }
+	env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin MAMBA_ROOT_PREFIX=/opt/mamba \
+		/usr/local/bin/micromamba run -r /opt/mamba -p /opt/envs/helixer \
+		Helixer.py --help > /dev/null \
+		|| { echo "ERROR: Helixer.py --help failed"; exit 1; }
 
 	# Create symlinks so micromamba can find envs by name (for `micromamba activate {name}`)
 	mkdir -p /opt/mamba/envs
